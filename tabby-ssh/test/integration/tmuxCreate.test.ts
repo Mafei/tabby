@@ -3,7 +3,7 @@ import { execFileSync } from 'node:child_process'
 import { test } from 'node:test'
 import { environment, profile, until, collectReleasedNativeHandles } from './fixture'
 import { localhostSSH } from './server'
-import { createCommand, listCommand, parseSessionList, shellQuote, tmuxCommand, sameSession } from '../../src/session/tmux'
+import { listCommand, parseSessionList, tmuxCommand } from '../../src/session/tmux'
 import { TmuxSelectModalComponent } from '../../src/components/tmuxSelectModal.component'
 import { deferred } from './fixture'
 

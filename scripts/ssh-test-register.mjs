@@ -3,7 +3,7 @@
 import * as nodeModule from 'node:module'
 import * as hooks from './ssh-test-hooks.mjs'
 // Define this without augmenting TypeScript's global require signature during lint.
-Object.defineProperty(globalThis, 'require', { value: () => '', configurable: true })
+Reflect.set(globalThis, 'require', () => '')
 if (nodeModule.registerHooks) {
     nodeModule.registerHooks(hooks)
 } else {
