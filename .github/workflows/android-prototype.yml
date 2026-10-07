@@ -14,7 +14,7 @@ concurrency:
   cancel-in-progress: true
 jobs:
   checks:
-    if: github.repository == 'Mafei/tabby' && ((github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == 'Mafei/tabby' && github.event.pull_request.head.ref == 'prototype/android-direct-ssh') || (github.event_name != 'pull_request' && github.ref == 'refs/heads/prototype/android-direct-ssh'))
+    if: github.event.repository.visibility == 'public' && github.repository == 'Mafei/tabby' && ((github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == 'Mafei/tabby' && github.event.pull_request.head.ref == 'prototype/android-direct-ssh') || (github.event_name != 'pull_request' && github.ref == 'refs/heads/prototype/android-direct-ssh'))
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     steps:
@@ -47,6 +47,9 @@ jobs:
       - name: Disposable real SSH fixture self-tests
         if: always() && steps.install.outcome == 'success'
         run: npm run test:fixture --prefix mobile
+      - name: ARM64 delivery binding and rejection tests
+        if: always() && steps.install.outcome == 'success'
+        run: npm run test:delivery --prefix mobile
       - name: Rust safety and real SSH integration
         id: native
         if: always() && steps.install.outcome == 'success'
@@ -60,14 +63,52 @@ jobs:
       - name: JVM host-key, generation and backpressure policies
         if: always() && steps.install.outcome == 'success'
         run: node mobile/scripts/test-jvm-policy.mjs
+  arm64-core:
+    if: github.event.repository.visibility == 'public' && github.repository == 'Mafei/tabby' && ((github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == 'Mafei/tabby' && github.event.pull_request.head.ref == 'prototype/android-direct-ssh') || (github.event_name != 'pull_request' && github.ref == 'refs/heads/prototype/android-direct-ssh'))
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Require actual ARM64 host
+        run: test "$(uname -m)" = aarch64
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - name: Pinned ARM64 Rust toolchain
+        run: rustup toolchain install 1.90.0 --profile minimal && rustup default 1.90.0
+      - name: Install isolated fixture dependencies
+        id: install
+        run: npm ci --ignore-scripts --prefix mobile
+      - name: Execute Rust safety and real SSH on ARM64 Linux
+        id: native
+        run: |
+          cargo test --locked --features jni --manifest-path mobile/android-ssh/Cargo.toml
+          cargo build --locked --features jni --manifest-path mobile/android-ssh/Cargo.toml
+      - name: Execute actual application Kotlin JNI SSH on ARM64 Linux
+        if: always() && steps.native.outcome == 'success' && steps.install.outcome == 'success'
+        run: node mobile/scripts/test-fixture-jni.mjs
   android:
-    if: github.repository == 'Mafei/tabby' && ((github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == 'Mafei/tabby' && github.event.pull_request.head.ref == 'prototype/android-direct-ssh') || (github.event_name != 'pull_request' && github.ref == 'refs/heads/prototype/android-direct-ssh'))
+    if: github.event.repository.visibility == 'public' && github.repository == 'Mafei/tabby' && ((github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == 'Mafei/tabby' && github.event.pull_request.head.ref == 'prototype/android-direct-ssh') || (github.event_name != 'pull_request' && github.ref == 'refs/heads/prototype/android-direct-ssh'))
     runs-on: ubuntu-24.04
     timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        api: [35, 36]
     env:
       # Explicit user approval: 2026-10-07 09:12 UTC, Android SDK agreement.
       # A changed or additional agreement fails closed; no --licenses command.
       TABBY_ANDROID_SDK_LICENSE_APPROVED_SHA256: 1f8729233617b193fd619213792ae16a41b95d2bbbf525dfe66998252ba68b16
+      TABBY_EMULATOR_API: ${{ matrix.api }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -86,7 +127,7 @@ jobs:
           distribution: temurin
           java-version: 21
       - name: Install approved stable Android SDK packages
-        run: python3 mobile/scripts/install-android-ci.py
+        run: python3 mobile/scripts/install-android-ci.py --emulator-api "$TABBY_EMULATOR_API"
       - name: Pinned Rust Android toolchain
         run: |
           rustup toolchain install 1.90.0 --profile minimal
@@ -109,22 +150,22 @@ jobs:
           npm run sync:android --prefix mobile
       - name: Android compilation, unit tests, lint and test APKs
         working-directory: mobile/android
-        run: ./gradlew --no-daemon testDebugUnitTest lintDebug assembleDebug assembleDebugAndroidTest
-      - name: Inspect the actual APK
-        id: inspect
+        run: ./gradlew --no-daemon -PtabbyAbis=arm64-v8a,x86_64 testDebugUnitTest lintDebug assembleDebug assembleDebugAndroidTest
+      - name: Inspect the actual emulator APK
         run: |
           mkdir -p mobile/artifacts
-          cp mobile/android/app/build/outputs/apk/debug/app-debug.apk mobile/artifacts/Tabby-Android-Prototype.apk
-          python3 mobile/scripts/verify-android-apk.py --apk mobile/artifacts/Tabby-Android-Prototype.apk --report mobile/artifacts/android-apk-verification.json
+          cp mobile/android/app/build/outputs/apk/debug/app-debug.apk mobile/artifacts/Tabby-Android-Emulator.apk
+          python3 mobile/scripts/verify-android-apk.py --expected-abis arm64-v8a,x86_64 --apk mobile/artifacts/Tabby-Android-Emulator.apk --report mobile/artifacts/android-emulator-apk-verification.json
       - name: Start disposable AOSP emulator with KVM
         run: |
           test -c /dev/kvm
           tabby_runner_uid="$(id -u)"
           sudo setfacl -m "u:${tabby_runner_uid}:rw" /dev/kvm
           mkdir -p "$ANDROID_USER_HOME" "$ANDROID_AVD_HOME"
-          printf 'no\n' | "$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager" create avd --force --name tabby-prototype-api35 --package 'system-images;android-35;default;x86_64' --device pixel_7
-          test -f "$ANDROID_AVD_HOME/tabby-prototype-api35.avd/config.ini"
-          "$ANDROID_HOME/emulator/emulator" -avd tabby-prototype-api35 -no-window -no-audio -no-snapshot -no-boot-anim -gpu swiftshader -accel on -memory 2048 -cores 2 -port 5554 > "$RUNNER_TEMP/tabby-emulator.log" 2>&1 &
+          tabby_avd_name="tabby-prototype-api${TABBY_EMULATOR_API}"
+          printf 'no\n' | "$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager" create avd --force --name "$tabby_avd_name" --package "system-images;android-${TABBY_EMULATOR_API};default;x86_64" --device pixel_7
+          test -f "$ANDROID_AVD_HOME/$tabby_avd_name.avd/config.ini"
+          "$ANDROID_HOME/emulator/emulator" -avd "$tabby_avd_name" -no-window -no-audio -no-snapshot -no-boot-anim -gpu swiftshader -accel on -memory 2048 -cores 2 -port 5554 > "$RUNNER_TEMP/tabby-emulator.log" 2>&1 &
           "$ANDROID_HOME/platform-tools/adb" start-server
           python3 - <<'PY'
           import os, subprocess, time
@@ -133,7 +174,10 @@ jobs:
           while time.monotonic() < deadline:
               result = subprocess.run([adb, '-s', 'emulator-5554', 'shell', 'getprop', 'sys.boot_completed'], capture_output=True, text=True, timeout=15)
               if result.returncode == 0 and result.stdout.strip() == '1':
-                  print('AOSP API 35 emulator booted with KVM')
+                  api = subprocess.run([adb, '-s', 'emulator-5554', 'shell', 'getprop', 'ro.build.version.sdk'], capture_output=True, text=True, check=True, timeout=15).stdout.strip()
+                  if api != os.environ['TABBY_EMULATOR_API']:
+                      raise SystemExit('Emulator API does not match the requested matrix target')
+                  print('AOSP API ' + os.environ['TABBY_EMULATOR_API'] + ' emulator booted with KVM')
                   break
               time.sleep(5)
           else:
@@ -141,22 +185,35 @@ jobs:
           PY
           "$ANDROID_HOME/platform-tools/adb" -s emulator-5554 shell input keyevent 82
       - name: Actual Android JNI, host keys, lifecycle and WebView SSH tests
-        run: node mobile/scripts/test-android.mjs --serial emulator-5554 --report mobile/artifacts/android-runtime-report.json
+        run: node mobile/scripts/test-android.mjs --serial emulator-5554 --app-apk mobile/artifacts/Tabby-Android-Emulator.apk --report mobile/artifacts/android-runtime-report.json
       - name: Stop only the disposable emulator
         if: always()
         run: |
           if [ -x "$ANDROID_HOME/platform-tools/adb" ]; then
             "$ANDROID_HOME/platform-tools/adb" -s emulator-5554 emu kill || true
           fi
-      - name: Upload verified prototype and public receipts
-        if: always() && steps.inspect.outcome == 'success'
+      - name: Build the ARM64 delivery APK
+        working-directory: mobile/android
+        run: ./gradlew --no-daemon -PtabbyAbis=arm64-v8a assembleDebug
+      - name: Inspect and bind the ARM64 delivery to accepted common payload
+        id: delivery
+        run: |
+          cp mobile/android/app/build/outputs/apk/debug/app-debug.apk mobile/artifacts/Tabby-Android-Prototype-ARM64.apk
+          python3 mobile/scripts/verify-android-apk.py --apk mobile/artifacts/Tabby-Android-Prototype-ARM64.apk --report mobile/artifacts/android-apk-verification.json
+          python3 mobile/scripts/verify-android-delivery.py --apk mobile/artifacts/Tabby-Android-Prototype-ARM64.apk --emulator-apk mobile/artifacts/Tabby-Android-Emulator.apk --apk-report mobile/artifacts/android-apk-verification.json --emulator-report mobile/artifacts/android-emulator-apk-verification.json --runtime-report mobile/artifacts/android-runtime-report.json --report mobile/artifacts/android-delivery-verification.json
+      - name: Upload verified ARM64 prototype and public evidence
+        if: always() && steps.delivery.outcome == 'success'
         uses: actions/upload-artifact@v4
         with:
-          name: Tabby-Android-Prototype-${{ github.event.pull_request.head.sha || github.sha }}
+          name: Tabby-Android-Prototype-ARM64-api${{ matrix.api }}-${{ github.event.pull_request.head.sha || github.sha }}
           path: |
-            mobile/artifacts/Tabby-Android-Prototype.apk
-            mobile/artifacts/Tabby-Android-Prototype.apk.sha256
+            mobile/artifacts/Tabby-Android-Prototype-ARM64.apk
+            mobile/artifacts/Tabby-Android-Prototype-ARM64.apk.sha256
             mobile/artifacts/android-apk-verification.json
+            mobile/artifacts/Tabby-Android-Emulator.apk
+            mobile/artifacts/Tabby-Android-Emulator.apk.sha256
+            mobile/artifacts/android-emulator-apk-verification.json
             mobile/artifacts/android-runtime-report.json
+            mobile/artifacts/android-delivery-verification.json
           if-no-files-found: error
           retention-days: 14

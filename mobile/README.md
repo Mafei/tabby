@@ -23,12 +23,22 @@ Tabby's palette generator is reused from `tabby-terminal/src/generatePalette.ts`
   is an explicit new connection.
 
 The configured minimum is Android 8 / API 26; compile/target SDK is 36. The
-complete application builds with SDK 36 and NDK 27.3 for ARM64 and x86_64. Modern WebView
+default application build targets ARM64. The cloud emulator build explicitly
+includes ARM64 and x86_64. Both use SDK 36 and NDK 27.3. Modern WebView
 compatibility on the oldest supported devices remains an acceptance item.
 This first prototype does not implement mobile tmux recovery, multi-tab
 management, jump hosts, SSH agents, X11, host certificates or background SSH.
 The reserved Rust exec API is not exposed by the Android plugin and successful
 exec is not verified.
+
+The user's target device is **OPPO Find N6 / ARM64**. Its
+[official specifications](https://www.oppo.com/cn/smartphones/series-find-n/find-n6/specs/)
+list ColorOS 16.0 and physical panel resolutions of 2480×2248 (inner) and
+2616×1140 (outer). Layout follows the actual WebView viewport, not these physical
+pixel dimensions. Browser regressions exercise representative narrow/wide
+window transitions and keyboard-height changes while preserving the session
+and updating PTY dimensions; they do not establish a physical fold transition.
+Record the device's installed Android/WebView/IME versions during acceptance.
 
 Credentials are neither logged nor saved to profiles, localStorage or files.
 Public host keys are the only persistent SSH data. Private keys are bounded to
@@ -54,6 +64,7 @@ cargo test --locked --features jni --manifest-path mobile/android-ssh/Cargo.toml
 cargo build --locked --features jni --manifest-path mobile/android-ssh/Cargo.toml
 node mobile/scripts/test-fixture-jni.mjs
 node mobile/scripts/test-jvm-policy.mjs
+npm run test:delivery --prefix mobile
 ```
 
 `JAVA_HOME` selects JDK 21. The JVM runners fetch public Maven compiler/test
@@ -75,18 +86,18 @@ approved the
 on 2026-10-07 at 09:12 UTC. Installation accepted only `android-sdk-license`
 (agreement dated January 16, 2019). Installed tools include SDK/Build Tools 36,
 NDK 27.3.13750724 and a stable emulator with an AOSP API 35 x86_64 image.
+The workflow installs an approved stable AOSP API 35 or 36 image per matrix job;
+both package references use the same already-approved SDK agreement.
 No preview, Google Play, store, billing or personal signing agreement was accepted.
 
 Use official SDK packages, JDK 21 and a license-approved NDK.
 The Rust build script downloads nothing and does not accept licenses:
 
 ```sh
-rustup target add aarch64-linux-android x86_64-linux-android
+rustup target add aarch64-linux-android
 ANDROID_NDK_HOME=/path/to/approved/ndk mobile/android-ssh/build-android.sh arm64-v8a
-ANDROID_NDK_HOME=/path/to/approved/ndk mobile/android-ssh/build-android.sh x86_64
-mkdir -p mobile/android/app/src/main/jniLibs/arm64-v8a mobile/android/app/src/main/jniLibs/x86_64
+mkdir -p mobile/android/app/src/main/jniLibs/arm64-v8a
 cp mobile/android-ssh/target/aarch64-linux-android/release/libtabby_ssh.so mobile/android/app/src/main/jniLibs/arm64-v8a/
-cp mobile/android-ssh/target/x86_64-linux-android/release/libtabby_ssh.so mobile/android/app/src/main/jniLibs/x86_64/
 npm run build --prefix mobile
 npm run sync:android --prefix mobile
 cd mobile/android
@@ -102,6 +113,10 @@ The build pins Build Tools 36 and NDK 27.3 for application and Capacitor modules
 implicit SDK downloads are disabled. No publishing, release signing, store
 account or paid device service is part of this work.
 
+`tabbyAbis` defaults to `arm64-v8a` and rejects empty, repeated or unsupported
+ABI names. To build the emulator test application, also compile/copy the
+`x86_64` Rust library and pass `-PtabbyAbis=arm64-v8a,x86_64` to Gradle.
+
 From a clean, committed checkout, verify the actual APK before delivery:
 
 ```sh
@@ -112,11 +127,28 @@ ANDROID_HOME=/path/to/approved/sdk python3 mobile/scripts/verify-android-apk.py 
 
 The receipt records source commit/tree, APK and public test certificate hashes,
 packaged permissions, native ABIs, JNI exports and 16 KiB ZIP/ELF alignment.
+APK inspection expects only ARM64 by default. The emulator APK requires the
+explicit verifier option `--expected-abis arm64-v8a,x86_64`; an APK with the wrong
+or repeated native entries fails inspection.
 `--allow-dirty` is only for preliminary inspection and marks the receipt dirty.
 Debug keystores and disposable fixture credentials must never be uploaded.
 
 The dedicated fork-guarded Android workflow builds the exact requested head,
-keeps `contents: read`, and uploads only the verified APK and public receipts.
+keeps `contents: read`, and uses standard free runners for this public fork.
+It runs Rust and application Kotlin/JNI SSH tests on an actual ARM64 Linux
+host, separately from Android runtime acceptance. API 35 and 36 Android jobs
+run the complete native and WebView suites on disposable x86_64 emulators.
+After runtime acceptance, each job builds the ARM64 delivery APK and checks
+that its common packaged payload and ARM64 library bytes exactly match the
+accepted emulator build. The binding receipt explicitly records
+`deliveredABIExecuted: false`: an ARM64 Linux test or x86_64 Android run does
+not establish ARM64 Android operation.
+
+Each successful artifact contains the ARM64 APK/checksum, emulator APK/checksum,
+both package receipts, the Android runtime report and the delivery-binding
+report. Upload requires the complete runtime and binding checks to pass; the
+main APK contains no fixture, test harness or keystore. Only the ARM64 APK is
+the user installation deliverable.
 Its fresh SDK installer checks the already-approved agreement text and package
 license references; additional or changed agreements stop installation.
 Android runtime tests use a disposable AOSP emulator, generated loopback SSH
@@ -125,6 +157,7 @@ WebView harness. Run them with:
 
 ```sh
 node mobile/scripts/test-android.mjs --serial emulator-5554 \
+  --app-apk /path/to/verified/emulator.apk \
   --report mobile/artifacts/android-runtime-report.json
 ```
 

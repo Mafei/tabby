@@ -1,7 +1,11 @@
 apply plugin: 'com.android.application'
 apply plugin: 'org.jetbrains.kotlin.android'
 
-def selectedAbis = providers.gradleProperty('tabbyAbis').getOrElse('arm64-v8a,x86_64').split(',') as List
+def selectedAbis = providers.gradleProperty('tabbyAbis').getOrElse('arm64-v8a').split(',', -1) as List
+def supportedAbis = ['arm64-v8a', 'x86_64'] as Set
+if (selectedAbis.any { !supportedAbis.contains(it) } || selectedAbis.toSet().size() != selectedAbis.size()) {
+    throw new GradleException('tabbyAbis must contain distinct arm64-v8a or x86_64 values, with no empty entries')
+}
 
 android {
     namespace = 'org.tabby.android.prototype'
@@ -74,6 +78,7 @@ tasks.configureEach { task ->
 def createPrototypeDebugKeystore = tasks.register('createPrototypeDebugKeystore', Exec) {
     def destination = layout.buildDirectory.file('signing/android-prototype-debug.keystore')
     outputs.file(destination)
+    onlyIf { !destination.get().asFile.isFile() }
     doFirst { destination.get().asFile.parentFile.mkdirs() }
     commandLine new File(System.getProperty('java.home'), 'bin/keytool'),
         '-genkeypair', '-noprompt', '-keystore', destination.get().asFile,

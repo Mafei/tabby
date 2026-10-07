@@ -30,7 +30,7 @@ interface Prompt { text: string, echo: boolean, response: string }
         </form>
         <p class="hint">密码和私钥仅用于当前连接，不保存在 Web 存储中。进入后台会断开。</p>
       </section>
-      <section class="terminal-area" [class.selection-active]="selectionMode" [class.mouse-active]="mouseMode"
+      <section class="terminal-area" [hidden]="!busy" [class.selection-active]="selectionMode" [class.mouse-active]="mouseMode"
         (pointerdown)="touchStart($event)" (pointermove)="touchMove($event)" (pointerup)="touchEnd($event)" (pointercancel)="touchCancel()">
         <div #terminalHost class="terminal-host" aria-label="终端输出"></div>
         <div *ngIf="selectionMode" class="selection-layer">
@@ -38,7 +38,7 @@ interface Prompt { text: string, echo: boolean, response: string }
           <pre #selectionText tabindex="0">{{selectionSnapshot}}</pre>
         </div>
       </section>
-      <nav class="tools" aria-label="终端辅助键">
+      <nav class="tools" [hidden]="!busy" aria-label="终端辅助键">
         <button (pointerdown)="keepInputFocus($event)" (click)="toggleCtrl()" [attr.aria-pressed]="ctrlHeld" [class.active]="ctrlHeld">Ctrl</button>
         <button (pointerdown)="keepInputFocus($event)" (click)="sendKey('Escape')">Esc</button>
         <button (pointerdown)="keepInputFocus($event)" (click)="sendKey('Tab')">Tab</button>
@@ -47,14 +47,14 @@ interface Prompt { text: string, echo: boolean, response: string }
         <button (pointerdown)="keepInputFocus($event)" (click)="sendArrow('B')" aria-label="向下">↓</button>
         <button (pointerdown)="keepInputFocus($event)" (click)="sendArrow('C')" aria-label="向右">→</button>
       </nav>
-      <nav class="actions" aria-label="终端操作">
+      <nav class="actions" [hidden]="!busy" aria-label="终端操作">
         <button (click)="toggleSelection()" [attr.aria-pressed]="selectionMode">{{selectionMode ? '结束选择' : '选择文字'}}</button>
         <button (click)="copy()">复制</button>
         <button (pointerdown)="keepInputFocus($event)" (click)="paste()">粘贴</button>
         <button (click)="focusInput()">键盘</button>
         <button (click)="toggleMouse()" [attr.aria-pressed]="mouseMode">{{mouseMode ? '鼠标模式' : '滚动模式'}}</button>
       </nav>
-      <label class="input-strip"><span>终端输入</span><textarea *ngFor="let epoch of inputEpochs; trackBy: trackInputEpoch" #terminalInput rows="1" aria-label="终端输入" autocapitalize="off"
+      <label class="input-strip" [hidden]="!busy"><span>终端输入</span><textarea *ngFor="let epoch of inputEpochs; trackBy: trackInputEpoch" #terminalInput rows="1" aria-label="终端输入" autocapitalize="off"
         autocomplete="off" autocorrect="off" spellcheck="false" inputmode="text" enterkeyhint="send"
         [disabled]="!connected || selectionMode || !!modal"></textarea><button (pointerdown)="keepInputFocus($event)" (click)="sendKey('Enter')" aria-label="发送回车">↵</button></label>
       <div *ngIf="notice" class="notice" role="status">{{notice}}</div>
@@ -227,6 +227,10 @@ export class AppComponent implements AfterViewInit, OnDestroy {
                 if (!this.hostVerified) { this.fail('主机密钥尚未验证，连接已停止。'); return }
                 this.auth = undefined; this.modal = undefined; this.prompts = []; this.requestId = undefined
                 this.connected = true; this.statusText = '已连接'; this.view?.fit()
+                // A visible-host fit can finish during authentication, when
+                // resize commands are still gated. Synchronize those dimensions
+                // now even if the next fit leaves the local geometry unchanged.
+                if (this.view) { this.resize(this.view.terminal.cols, this.view.terminal.rows) }
                 const replies = this.protocolReplies; this.protocolReplies = []; this.protocolReplyBytes = 0
                 replies.forEach(bytes => this.writeBytes(bytes))
             } else if (event.state === 'error') {

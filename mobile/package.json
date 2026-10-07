@@ -9,6 +9,7 @@
     "check": "tsc --noEmit -p web/tsconfig.json",
     "test:web": "playwright test --config web/playwright.config.ts",
     "test:fixture": "node --test test/ssh-fixture.test.mjs",
+    "test:delivery": "python3 -m unittest discover -s test -p test_android_delivery.py -v",
     "test:native": "node scripts/test-fixture-native.mjs",
     "sync:android": "cap sync android"
   },

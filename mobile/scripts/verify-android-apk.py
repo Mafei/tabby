@@ -14,6 +14,14 @@ import zipfile
 APP = 'org.tabby.android.prototype'
 PAGE = 16384
 EXPORTS = ['start', 'command', 'poll', 'destroy']
+ABI_MACHINES = {'arm64-v8a': 183, 'x86_64': 62}
+
+
+def parse_abis(value):
+    abis = value.split(',')
+    if len(set(abis)) != len(abis) or any(abi not in ABI_MACHINES for abi in abis):
+        raise argparse.ArgumentTypeError('Expected distinct arm64-v8a or x86_64 values, with no empty entries')
+    return abis
 
 
 def require(condition, message):
@@ -52,6 +60,8 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--apk', required=True)
     parser.add_argument('--report', required=True)
+    parser.add_argument('--expected-abis', type=parse_abis, default='arm64-v8a',
+                        help='Exact comma-separated packaged ABI set (default: arm64-v8a)')
     parser.add_argument('--allow-dirty', action='store_true', help='Preliminary local inspection only; marks the receipt dirty')
     args = parser.parse_args()
     apk = Path(args.apk).resolve()
@@ -84,8 +94,11 @@ def main():
     libraries = {}
     with zipfile.ZipFile(apk) as archive, apk.open('rb') as raw, tempfile.TemporaryDirectory() as temporary:
         names = archive.namelist()
-        required_libraries = {'lib/arm64-v8a/libtabby_ssh.so': 183, 'lib/x86_64/libtabby_ssh.so': 62}
-        require({name for name in names if name.startswith('lib/')} == set(required_libraries), 'Wrong native libraries or ABIs')
+        required_libraries = {f'lib/{abi}/libtabby_ssh.so': ABI_MACHINES[abi] for abi in args.expected_abis}
+        native_names = [name for name in names if name.startswith('lib/')]
+        require(len(native_names) == len(required_libraries) and set(native_names) == set(required_libraries),
+                'Wrong native libraries or ABIs')
+        packaged_abis = sorted({Path(name).parts[1] for name in native_names})
         require(not any(re.search(r'(?:keystore|\.(?:pem|jks|key)$|fixture|CloudWebViewHarness|androidTest)', name, re.I) for name in names), 'Test data or private signing material packaged in main APK')
         for name in names:
             if name.endswith('.dex'):
@@ -123,7 +136,8 @@ def main():
               'bytes': apk.stat().st_size, 'sourceCommit': source, 'sourceTree': tree, 'sourceDirty': dirty,
               'applicationId': APP, 'minSdk': 26, 'targetSdk': 36, 'debuggable': True,
               'permissions': permissions, 'publicTestCertificateSHA256': certificate[1], 'signatureScheme': 'v2',
-              'zipAlignmentBytes': PAGE, 'nativeLibraries': libraries,
+              'zipAlignmentBytes': PAGE, 'expectedABIs': args.expected_abis, 'packagedABIs': packaged_abis,
+              'nativeLibraries': libraries, 'arm64RuntimeVerified': False,
               'limitations': ['Debug prototype, not a production release.', 'Packaging verification does not establish Android runtime or GUI behavior.',
                               'ARM64 device, 16 KiB page-size runtime, physical touch and system Chinese IME acceptance remain separate checks.']}
     destination = Path(args.report)

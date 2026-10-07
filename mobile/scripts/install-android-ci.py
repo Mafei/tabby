@@ -4,6 +4,7 @@
 This deliberately never runs `sdkmanager --licenses` or accepts another
 agreement. A changed SDK agreement fails closed for a fresh user decision.
 """
+import argparse
 import hashlib
 import os
 from pathlib import Path
@@ -16,11 +17,10 @@ import zipfile
 LICENSE_SHA256 = '1f8729233617b193fd619213792ae16a41b95d2bbbf525dfe66998252ba68b16'
 ACCEPTED_SDK_HASH = '24333f8a63b6825ea9c5514f83c2829b004d1fee'
 CLI_SHA256 = '4e4c464f145a7512b57d088ac6c278c03c9eea610886b35a5e0804e74eedf583'
-PACKAGES = [
+BASE_PACKAGES = [
     'platform-tools', 'platforms;android-36', 'build-tools;36.0.0',
-    'ndk;27.3.13750724', 'emulator', 'system-images;android-35;default;x86_64',
+    'ndk;27.3.13750724', 'emulator',
 ]
-METADATA_PACKAGES = set(PACKAGES + ['cmdline-tools;22.0'])
 
 
 def download(url, destination):
@@ -30,6 +30,12 @@ def download(url, destination):
 
 
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--emulator-api', type=int, choices=[35, 36], default=35)
+    args = parser.parse_args()
+    image = f'system-images;android-{args.emulator_api};default;x86_64'
+    packages = BASE_PACKAGES + [image]
+    metadata_packages = set(packages + ['cmdline-tools;22.0'])
     if os.environ.get('TABBY_ANDROID_SDK_LICENSE_APPROVED_SHA256') != LICENSE_SHA256:
         raise SystemExit('The explicit approval for this exact SDK agreement is required')
     sdk = Path(os.environ['ANDROID_HOME']).resolve()
@@ -50,16 +56,16 @@ def main():
         if hashlib.sha256(license.text.encode()).hexdigest() != LICENSE_SHA256:
             raise SystemExit('The Android SDK agreement changed; no agreement was accepted')
         for package in root:
-            if not package.tag.endswith('remotePackage') or package.get('path') not in METADATA_PACKAGES:
+            if not package.tag.endswith('remotePackage') or package.get('path') not in metadata_packages:
                 continue
             channel = next((x.get('ref') for x in package if x.tag.endswith('channelRef')), 'channel-0')
             if channel != 'channel-0':
                 continue
-            agreement = next(x.get('ref') for x in package if x.tag.endswith('uses-license'))
-            if agreement != 'android-sdk-license':
+            agreements = [x.get('ref') for x in package if x.tag.endswith('uses-license')]
+            if set(agreements) != {'android-sdk-license'}:
                 raise SystemExit('A selected package requires an additional agreement; installation stopped')
             selected.add(package.get('path'))
-    if selected != METADATA_PACKAGES:
+    if selected != metadata_packages:
         raise SystemExit('The exact stable package set could not be verified')
     archive = downloads / 'commandlinetools-linux-15859902_latest.zip'
     download('https://dl.google.com/android/repository/' + archive.name, archive)
@@ -82,11 +88,11 @@ def main():
     (licenses / 'android-sdk-license').write_text('\n' + ACCEPTED_SDK_HASH + '\n')
     subprocess.run([
         str(tools / 'latest' / 'bin' / 'sdkmanager'), '--channel=0',
-        '--sdk_root=' + str(sdk), *PACKAGES,
+        '--sdk_root=' + str(sdk), *packages,
     ], stdin=subprocess.DEVNULL, check=True)
     for relative in ['platform-tools/adb', 'platforms/android-36/android.jar', 'build-tools/36.0.0/aapt2',
                      'ndk/27.3.13750724/source.properties', 'emulator/emulator',
-                     'system-images/android-35/default/x86_64/system.img']:
+                     f'system-images/android-{args.emulator_api}/default/x86_64/system.img']:
         if not (sdk / relative).is_file():
             raise SystemExit('SDK installation incomplete: ' + relative)
     print('Approved stable SDK, NDK and AOSP emulator image installed')

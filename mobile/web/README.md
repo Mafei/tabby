@@ -22,6 +22,12 @@ bridge live exclusively under `web/tests/`; the production build includes only
 
 ## Input and touch behavior
 
+- While disconnected, the connection form uses the area below the header and
+  scrolls independently, including in a short landscape keyboard viewport.
+  Terminal controls appear when connecting. The hidden terminal host stays in
+  the DOM for Angular's static reference and is fitted when it becomes visible.
+  In a short connected viewport, the terminal yields space to the auxiliary keys
+  and input strip and resizes the remote PTY to the available rows.
 - A real system textarea owns input and composition. The xterm textarea is
   disabled and its keyboard handler rejects events. `disableStdin` stays false
   because xterm also uses that option to suppress terminal protocol replies.
@@ -78,6 +84,10 @@ Browser tests exercise synthetic Chromium composition/input/paste events, focus,
 state/generation handling, parser responses, byte transport and viewport changes.
 They use a fake bridge and are **not evidence of an Android system IME or an SSH
 connection**. Native/Rust fixture tests provide separate real SSH evidence.
+The layout regression also switches between representative narrow/wide,
+landscape and keyboard-sized CSS viewports while retaining one connection and
+checking PTY resize commands. These sizes are not the Find N6's physical pixel
+dimensions or evidence of physical folding/ColorOS behavior.
 
 Real Android WebView and real-device acceptance must still check Chinese candidate
 commit/backspace/cancel, different system IMEs, touch selection handles/context

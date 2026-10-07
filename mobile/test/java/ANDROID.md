@@ -1,6 +1,14 @@
 # Real Android emulator acceptance
 
-After building both real debug APKs, run from the repository root:
+For the x86_64 cloud emulator, build both real debug APKs with the explicit
+dual-ABI option (the installable prototype defaults to ARM64):
+
+```sh
+cd mobile/android
+./gradlew --no-daemon -PtabbyAbis=arm64-v8a,x86_64 assembleDebug assembleDebugAndroidTest
+```
+
+Then run from the repository root:
 
 ```sh
 node mobile/scripts/test-android.mjs --serial emulator-5554 \
@@ -13,6 +21,10 @@ Override with `--app-apk` and `--test-apk`. `ADB`, `ANDROID_HOME` or
 `ANDROID_SDK_ROOT` select the installed adb executable. The root worker/CI
 must install the approved SDK/system image, create and boot the emulator, and
 build Rust Android libraries and the APKs. **This runner does none of those.**
+The CI matrix executes this suite on API 35 and 36. It preserves the accepted
+dual-ABI APK before building the ARM64 delivery APK and verifies identical
+common payload and ARM64 library bytes. That binding does not mean the ARM64
+Android binary or an OPPO Find N6 has been executed.
 
 The script only accepts an explicit `emulator-NNNN` serial and verifies the
 device's QEMU property. Installation uses standard `adb install -r -t` of the

@@ -38,13 +38,14 @@ async function waitForTerminalFit(page: Page): Promise<void> {
     })).toBe(true)
 }
 
-async function ready(page: Page, known = false): Promise<void> {
+async function ready(page: Page, known = false, options: { fitBeforeReady?: boolean } = {}): Promise<void> {
     const priorAuthCount = await page.evaluate(() => window.testBridge.commands.filter(item => item.command.type === 'authResponse').length)
     await start(page)
     await emit(page, { type: 'hostKey', requestId: 1, status: known ? 'known' : 'unknown', algorithm: 'ssh-ed25519', fingerprint: 'SHA256:test-fixture' })
     if (!known) { await page.getByRole('button', { name: '核对后信任' }).click() }
     await emit(page, { type: 'auth', requestId: 2, mode: 'password' })
     await expect.poll(() => page.evaluate(() => window.testBridge.commands.filter(item => item.command.type === 'authResponse').length)).toBe(priorAuthCount + 1)
+    if (options.fitBeforeReady) { await waitForTerminalFit(page) }
     await emit(page, { type: 'state', state: 'ready' })
     await expect(page.getByRole('status').first()).toHaveText('已连接')
     await waitForTerminalFit(page)
@@ -64,6 +65,157 @@ async function textInput(page: Page, text: string): Promise<void> {
 }
 
 test.beforeEach(async ({ page }) => { await page.goto('/tests/harness.html') })
+
+test('short landscape form scrolls by touch and submits from an unobscured button', async ({ page }) => {
+    await page.setViewportSize({ width: 815, height: 197 })
+    const panel = page.locator('.connect-panel')
+    await expect(panel).toBeVisible()
+    await expect(page.locator('.terminal-area')).toBeHidden()
+    await expect(page.locator('.tools')).toBeHidden()
+    await expect(page.locator('.actions')).toBeHidden()
+    await expect(page.locator('.input-strip')).toBeHidden()
+    // The static Angular host remains available, while its layout is hidden.
+    await expect(page.locator('.terminal-host')).toHaveCount(1)
+    expect(await panel.evaluate(element => element.clientHeight)).toBeGreaterThan(140)
+    for (const [name, value] of [['主机', 'fixture.local'], ['用户名', 'short-landscape-user'], ['密码', 'ephemeral-landscape-password']]) {
+        const field = page.getByLabel(name, { exact: true })
+        await field.scrollIntoViewIfNeeded()
+        expect(await field.evaluate(element => {
+            const bounds = element.getBoundingClientRect()
+            const panel = element.closest('.connect-panel')!.getBoundingClientRect()
+            return bounds.top >= panel.top && bounds.bottom <= panel.bottom &&
+                element.contains(document.elementFromPoint(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2))
+        })).toBe(true)
+        await field.fill(value)
+    }
+    await panel.evaluate(element => { element.scrollTop = 0 })
+    const bounds = (await panel.boundingBox())!
+    const client = await page.context().newCDPSession(page)
+    const connect = page.getByRole('button', { name: '连接', exact: true })
+    const connectTouchable = () => connect.evaluate(element => {
+        const bounds = element.getBoundingClientRect()
+        const panel = element.closest('.connect-panel')!.getBoundingClientRect()
+        return bounds.top >= panel.top && bounds.bottom <= panel.bottom &&
+            element.contains(document.elementFromPoint(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2))
+    })
+    // Browser-engine touch scrolling, without a synthetic scroll event or an
+    // automatic click scroll that could conceal the clipped-button regression.
+    for (let swipe = 0; swipe < 4 && !(await connectTouchable()); swipe++) {
+        const priorScrollTop = await panel.evaluate(element => element.scrollTop)
+        const x = bounds.x + 6
+        const startY = bounds.y + bounds.height * .85
+        await client.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y: startY }] })
+        for (let step = 1; step <= 10; step++) {
+            await client.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x, y: startY - bounds.height * step * .07 }] })
+            await page.waitForTimeout(20)
+        }
+        await client.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
+        await expect.poll(() => panel.evaluate(element => element.scrollTop)).toBeGreaterThan(priorScrollTop)
+    }
+    await expect.poll(connectTouchable).toBe(true)
+    const button = (await connect.boundingBox())!
+    await page.touchscreen.tap(button.x + button.width / 2, button.y + button.height / 2)
+    await expect.poll(() => page.evaluate(() => window.testBridge.starts.length)).toBe(1)
+    expect(await page.evaluate(() => window.testBridge.starts[0].username)).toBe('short-landscape-user')
+    await expect(panel).toHaveCount(0)
+    await expect(page.locator('.terminal-area')).toBeVisible()
+    await client.detach()
+})
+
+test('hidden terminal fits on short landscape connect, viewport growth and reconnect', async ({ page }) => {
+    await page.setViewportSize({ width: 815, height: 197 })
+    await page.locator('.terminal-host').evaluate(element => {
+        ;(window as unknown as { initialTerminalHost: HTMLElement }).initialTerminalHost = element as HTMLElement
+    })
+    await ready(page, true, { fitBeforeReady: true })
+    for (const selector of ['.terminal-area', '.tools', '.actions', '.input-strip']) {
+        await expect(page.locator(selector)).toBeVisible()
+        expect(await page.locator(selector).evaluate(element => {
+            const bounds = element.getBoundingClientRect()
+            return bounds.top >= 0 && bounds.bottom <= innerHeight + 1
+        })).toBe(true)
+    }
+    const rows = () => page.evaluate(() => document.querySelector('.xterm-rows')!.children.length)
+    const shortRows = await rows()
+    expect(shortRows).toBeGreaterThan(0)
+    expect(shortRows).toBeLessThan(4)
+    await expect.poll(() => page.evaluate(() => window.testBridge.commands.flatMap(item => item.command.type === 'resize' ? [item.command.rows] : []).at(-1))).toBe(shortRows)
+    await textInput(page, 'short-input')
+    await page.getByRole('button', { name: 'Esc', exact: true }).click()
+    await expect.poll(() => writes(page)).toEqual(['short-input', '\x1b'])
+    await page.setViewportSize({ width: 815, height: 384 })
+    await waitForTerminalFit(page)
+    const largeRows = await rows()
+    expect(largeRows).toBeGreaterThan(shortRows)
+    await expect.poll(() => page.evaluate(() => window.testBridge.commands.flatMap(item => item.command.type === 'resize' ? [item.command.rows] : []).at(-1))).toBe(largeRows)
+    await emit(page, { type: 'data', data: btoa('LANDSCAPE_AFTER_FIT') })
+    await expect(page.locator('.xterm-rows')).toContainText('LANDSCAPE_AFTER_FIT')
+    await page.getByRole('button', { name: '断开或取消连接', exact: true }).click()
+    await expect(page.locator('.terminal-area')).toBeHidden()
+    await expect(page.getByLabel('密码', { exact: true })).toHaveValue('')
+    await page.setViewportSize({ width: 412, height: 500 })
+    const commandCount = await page.evaluate(() => window.testBridge.commands.length)
+    await ready(page, true)
+    const newConnection = await page.evaluate(() => window.testBridge.starts.at(-1)!.connectionId)
+    await expect.poll(() => page.evaluate(({ commandCount, newConnection }) => {
+        const resize = window.testBridge.commands.slice(commandCount).filter(item => item.command.type === 'resize').at(-1)
+        return resize?.connectionId === newConnection
+    }, { commandCount, newConnection })).toBe(true)
+    expect(await page.locator('.terminal-host').evaluate(element => element === (window as unknown as { initialTerminalHost: HTMLElement }).initialTerminalHost)).toBe(true)
+    await expect(page.locator('.xterm-rows')).not.toContainText('LANDSCAPE_AFTER_FIT')
+    await textInput(page, 'reconnected-input')
+    await expect.poll(() => writes(page)).toEqual(['short-input', '\x1b', 'reconnected-input'])
+})
+
+test('fold-like narrow and wide viewports, rotation and IME keep the same session and output', async ({ page }) => {
+    // Representative CSS sizes only: Find N6 physical panel pixels and the
+    // user's actual display scaling do not define WebView CSS dimensions.
+    await page.setViewportSize({ width: 393, height: 900 })
+    await ready(page, true)
+    const active = await page.evaluate(() => ({ connectionId: window.testBridge.starts[0].connectionId,
+        generation: window.testBridge.starts[0].generation }))
+    await page.locator('.xterm').evaluate(element => {
+        ;(window as unknown as { foldTerminal: Element }).foldTerminal = element
+    })
+    await emit(page, { type: 'data', data: btoa('FOLD_RESIZE_PERSIST\r\n') })
+    await expect(page.locator('.xterm-rows')).toContainText('FOLD_RESIZE_PERSIST')
+    let previousCols = await page.evaluate(() => window.testBridge.commands.flatMap(item => item.command.type === 'resize' ? [item.command.cols] : []).at(-1)!)
+    let previousWidth = 393
+    for (const viewport of [
+        { width: 750, height: 830 }, // Unfolded portrait.
+        { width: 830, height: 750 }, // Unfolded rotation.
+        { width: 750, height: 430 }, // Wide keyboard viewport.
+        { width: 393, height: 500 }, // Narrow keyboard viewport.
+        { width: 900, height: 393 }, // Folded landscape.
+        { width: 393, height: 900 }, // Back to narrow portrait.
+    ]) {
+        const priorResizeCount = await page.evaluate(() => window.testBridge.commands.filter(item => item.command.type === 'resize').length)
+        await page.setViewportSize(viewport)
+        await waitForTerminalFit(page)
+        const visibleRows = await page.evaluate(() => document.querySelector('.xterm-rows')!.children.length)
+        await expect.poll(() => page.evaluate(({ active, visibleRows, priorResizeCount }) => {
+            const commands = window.testBridge.commands.filter(item => item.command.type === 'resize')
+            const last = commands.at(-1)
+            return commands.length > priorResizeCount && last?.connectionId === active.connectionId &&
+                last.command.type === 'resize' && last.command.rows === visibleRows && last.command.cols > 0
+        }, { active, visibleRows, priorResizeCount })).toBe(true)
+        const cols = await page.evaluate(() => window.testBridge.commands.flatMap(item => item.command.type === 'resize' ? [item.command.cols] : []).at(-1)!)
+        if (viewport.width > previousWidth) { expect(cols).toBeGreaterThan(previousCols) }
+        if (viewport.width < previousWidth) { expect(cols).toBeLessThan(previousCols) }
+        previousCols = cols; previousWidth = viewport.width
+        await expect(page.locator('.xterm-rows')).toContainText('FOLD_RESIZE_PERSIST')
+        await expect(page.getByRole('status').first()).toHaveText('已连接')
+        expect(await page.evaluate(() => window.testBridge.starts.length)).toBe(1)
+        expect(await page.evaluate(() => window.testBridge.closed.length)).toBe(0)
+        expect(await page.locator('.xterm').evaluate(element => element === (window as unknown as { foldTerminal: Element }).foldTerminal)).toBe(true)
+    }
+    await emit(page, { type: 'data', data: btoa('FOLD_OUTPUT_CONTINUES') })
+    await expect(page.locator('.xterm-rows')).toContainText('FOLD_OUTPUT_CONTINUES')
+    await expect.poll(() => page.evaluate(active => window.testBridge.commands.filter(item => item.command.type === 'outputAck').every(item =>
+        item.connectionId === active.connectionId && item.command.type === 'outputAck' && item.command.generation === active.generation), active)).toBe(true)
+    await textInput(page, 'after-fold')
+    await expect.poll(() => writes(page)).toEqual(['after-fold'])
+})
 
 test('composition preedit is withheld; candidate commits once with final Chromium input', async ({ page }) => {
     await ready(page)
@@ -168,9 +320,11 @@ test('cancel while start is pending closes late handle and permits a new connect
 
 test('keyboard viewport and orientation resize produce PTY rows/cols; lifecycle closes', async ({ page }) => {
     await ready(page)
+    const initialRows = await page.evaluate(() => document.querySelector('.xterm-rows')!.children.length)
     await page.setViewportSize({ width: 393, height: 400 })
-    await expect.poll(() => page.evaluate(() => window.testBridge.commands.filter(item => item.command.type === 'resize').length)).toBeGreaterThan(0)
-    const initialRows = await page.evaluate(() => window.testBridge.starts[0].rows)
+    await waitForTerminalFit(page)
+    await expect.poll(() => page.evaluate(() => window.testBridge.commands.flatMap(item => item.command.type === 'resize' ? [item.command.rows] : []).at(-1)))
+        .toBe(await page.evaluate(() => document.querySelector('.xterm-rows')!.children.length))
     const shortRows = await page.evaluate(() => window.testBridge.commands.flatMap(item => item.command.type === 'resize' ? [item.command.rows] : []).at(-1)!)
     expect(shortRows).toBeLessThan(initialRows)
     await page.setViewportSize({ width: 800, height: 393 })
