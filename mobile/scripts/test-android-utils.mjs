@@ -37,6 +37,24 @@ export async function until (predicate, code, timeout = 30000) {
     throw new TestFailure(code)
 }
 
+/** Bound read-only CDP operations to one existing absolute deadline. */
+export async function observeUntil (promise, deadline, code) {
+    const observed = Promise.resolve(promise)
+    // Handle late rejection even when the deadline is already exhausted.
+    observed.catch(() => {})
+    check(!cancelled, 'ANDROID_TEST_CANCELLED')
+    check(Number.isSafeInteger(deadline) && Date.now() < deadline, code)
+    let timer
+    try {
+        const value = await Promise.race([observed,
+            new Promise((_, reject) => { timer = setTimeout(() => reject(new TestFailure(code)), deadline - Date.now()) }),
+        ])
+        check(!cancelled, 'ANDROID_TEST_CANCELLED')
+        check(Date.now() < deadline, code)
+        return value
+    } finally { clearTimeout(timer) }
+}
+
 /** Only generated fixture values are supplied; never user credentials. */
 export function checkNoSecrets (output, secrets) {
     for (const secret of secrets) {
@@ -51,25 +69,138 @@ export function checkNoSecrets (output, secrets) {
     check(!/-----BEGIN (?:OPENSSH |RSA |EC |ENCRYPTED )?PRIVATE KEY-----/.test(output), 'TEST_OUTPUT_CONTAINED_PRIVATE_KEY')
 }
 
-/** Parse only fixed window categories; never return titles or dump contents. */
-export function windowState (dump) {
-    const windows = [...dump.matchAll(/\n\s*Window #\d+ (Window\{[^\n]*\}):([\s\S]*?)(?=\n\s*Window #\d+ |$)/g)]
+const appPattern = new RegExp(`\\b${APP.replaceAll('.', '\\.')}[\\/\\s}]|\\b${APP.replaceAll('.', '\\.')}\\b$`)
+const testAppPattern = new RegExp(`\\b${APP.replaceAll('.', '\\.')}\\.test(?:[\\/\\s}]|$)`)
+const ownApp = text => appPattern.test(text)
+
+function focusCategory (value) {
+    if (value === undefined || value.trim() === '') { return 'UNKNOWN' }
+    const text = value.trim()
+    if (text === 'null' || text === '<none>') { return 'NONE' }
+    // AOSP error dialog titles contain the affected process after the prefix.
+    if (/\bApplication Not Responding: /.test(text)) { return 'ANR' }
+    if (/\bApplication Error: /.test(text)) { return 'CRASH' }
+    if (/\bError Dialog\b/.test(text)) { return 'SYSTEM_DIALOG' }
+    if (/\b(?:UnsupportedCompileSdkDialog|UnsupportedDisplaySizeDialog|DeprecatedTargetSdkVersionDialog|DeprecatedAbiDialog)\b/.test(text)) { return 'COMPATIBILITY' }
+    if (testAppPattern.test(text)) { return 'TEST_HELPER' }
+    if (ownApp(text)) { return 'APP' }
+    if (/\bClipboardOverlay\b/.test(text)) { return 'CLIPBOARD' }
+    if (/\bInputMethod\b|InputMethodService|inputmethod/i.test(text)) { return 'IME' }
+    if (/Keyguard|Bouncer/i.test(text)) { return 'KEYGUARD' }
+    if (/com\.android\.systemui|\bStatusBar\b|\bNotificationShade\b/.test(text)) { return 'SYSTEM_UI' }
+    if (/\bLauncher\b|com\.android\.launcher3|com\.google\.android\.apps\.nexuslauncher/.test(text)) { return 'LAUNCHER' }
+    return 'OTHER'
+}
+
+function displayID (text) {
+    const value = /^-?\d+$/.test(text || '') ? Number(text) : NaN
+    return Number.isSafeInteger(value) && value >= 0 && value <= 1000000 ? value : null
+}
+
+function displayBlocks (dump, header) {
+    const matches = [...dump.matchAll(header)]
+    return matches.map((match, index) => ({ id: displayID(match[1]),
+        body: dump.slice(match.index + match[0].length, matches[index + 1]?.index) }))
+        .filter(block => block.id !== null && block.id >= 0)
+}
+
+function windowRecords (dump) {
+    return [...dump.matchAll(/(?:^|\n)[ \t]*Window #\d+ (Window\{[^\n]*\}):([\s\S]*?)(?=\n[ \t]*Window #\d+ |$)/g)]
+}
+
+function appDisplay (displays, windows) {
+    const ids = []
+    for (const [, title, body] of windowRecords(windows)) {
+        if (focusCategory(title) !== 'APP') { continue }
+        const matches = [...body.matchAll(/^[ \t]*mDisplayId=(\d+)\b[^\n]*$/gm)]
+        const id = matches.length === 1 ? displayID(matches[0][1]) : null
+        if (id === null) { return undefined }
+        ids.push(id)
+    }
+    const unique = [...new Set(ids)]
+    if (unique.length !== 1) { return undefined }
+    const blocks = displayBlocks(displays, /^[ \t]*Display: mDisplayId=(\d+)\b[^\n]*$/gm).filter(block => block.id === unique[0])
+    return { id: unique[0], body: blocks.length === 1 ? blocks[0].body : '' }
+}
+
+function uniqueCategory (values) {
+    if (values.length === 0) { return 'UNKNOWN' }
+    const categories = new Set(values.map(focusCategory))
+    return categories.size === 1 ? [...categories][0] : 'UNKNOWN'
+}
+
+function fieldCategory (body, field) {
+    return uniqueCategory([...body.matchAll(new RegExp(`^[ \\t]*${field}=([^\\n]*)$`, 'gm'))].map(match => match[1]))
+}
+
+function indentedSection (dump, name) {
+    const match = dump.match(new RegExp(`^([ \\t]*)${name}:[ \\t]*(<none>)?[ \\t]*$`, 'm'))
+    if (!match) { return undefined }
+    if (match[2] === '<none>') { return '<none>' }
+    const lines = dump.slice(match.index + match[0].length).split('\n')
+    const body = []
+    for (const line of lines) {
+        if (line.trim() && (line.match(/^[ \t]*/)?.[0].length || 0) <= match[1].length) { break }
+        body.push(line)
+    }
+    return body.join('\n')
+}
+
+function inputFocus (dump, name, id, request = false) {
+    const body = indentedSection(dump, name)
+    if (body === undefined || id === null) { return { category: 'UNKNOWN', result: 'UNKNOWN' } }
+    if (body.trim() === '<none>') { return { category: 'NONE', result: 'UNKNOWN' } }
+    const pattern = request ? /^[ \t]*displayId=(-?\d+), name='(.*)'[ \t]*,?[ \t]+result='([^']*)'[ \t]*$/gm
+        : name === 'FocusedApplications' ? /^[ \t]*displayId=(-?\d+), name='(.*)', dispatchingTimeout=\d+ms[ \t]*$/gm
+            : /^[ \t]*displayId=(-?\d+), name='(.*)'[ \t]*$/gm
+    const rows = [...body.matchAll(pattern)].filter(match => displayID(match[1]) === id)
+    if (rows.length !== 1) { return { category: 'UNKNOWN', result: 'UNKNOWN' } }
+    return { category: focusCategory(rows[0][2]), result: ['OK', 'NO_WINDOW', 'NOT_FOCUSABLE', 'NOT_VISIBLE'].includes(rows[0][3]) ? rows[0][3] : 'UNKNOWN' }
+}
+
+/** AOSP display, InputDispatcher and Activity focus; raw names never escape. */
+export function focusStateResult (displays, input, activities, windows = '') {
+    const selected = appDisplay(displays, windows)
+    const id = selected?.id ?? null
+    const focusedIDs = [...input.matchAll(/^[ \t]*FocusedDisplayId:[ \t]*(-?\d+)[ \t]*$/gm)]
+    const focusedID = focusedIDs.length === 1 ? displayID(focusedIDs[0][1]) : null
+    const request = inputFocus(input, 'FocusRequests', id, true)
+    const activityBlocks = displayBlocks(activities, /^[ \t]*Display #(\d+) \(activities from top to bottom\):[ \t]*$/gm).filter(block => block.id === id)
+    const activityBody = activityBlocks.length === 1 ? activityBlocks[0].body : ''
+    const resumed = [...activityBody.matchAll(/^[ \t]*Resumed: ([^\n]*)$/gm)].map(match => match[1])
+    const booleanField = name => {
+        const values = [...input.matchAll(new RegExp(`^[ \\t]*${name}:[ \\t]*(true|false)[ \\t]*$`, 'gm'))]
+        return values.length === 1 ? values[0][1] === 'true' : null
+    }
+    return {
+        appDisplayId: id, inputFocusedDisplayId: focusedID,
+        appOnInputFocusedDisplay: id !== null && focusedID !== null ? id === focusedID : null,
+        wmsFocusedWindowCategory: selected ? fieldCategory(selected.body, 'mCurrentFocus') : 'UNKNOWN',
+        wmsFocusedAppCategory: selected ? fieldCategory(selected.body, 'mFocusedApp') : 'UNKNOWN',
+        inputFocusedWindowCategory: inputFocus(input, 'FocusedWindows', id).category,
+        inputFocusedApplicationCategory: inputFocus(input, 'FocusedApplications', id).category,
+        inputFocusRequestCategory: request.category, inputFocusRequestResult: request.result,
+        inputDispatchEnabled: booleanField('DispatchEnabled'), inputDispatchFrozen: booleanField('DispatchFrozen'),
+        activityDisplayResumedCategory: uniqueCategory(resumed),
+        activityDisplayHasResumedApp: resumed.length ? resumed.some(ownApp) : null,
+        // ATMS emits this global field outside the per-display blocks.
+        activityGlobalResumedCategory: uniqueCategory([...activities.matchAll(/^[ \t]*ResumedActivity: ([^\n]*)$/gm)].map(match => match[1])),
+    }
+}
+
+/** Visibility from windows; focus from the same app display in displays. */
+export function windowState (dump, displays = '') {
+    const windows = windowRecords(dump)
     const shown = body => /mHasSurface=true/.test(body) && /mViewVisibility=0x0/.test(body)
         && /\bisOnScreen=true\b|\bisVisible=true\b/.test(body)
     const any = category => windows.some(([, title, body]) => category(title) && shown(body))
-    const focus = dump.match(/\bmCurrentFocus=(.*)/)?.[1]?.trim()
-    const focusedWindowCategory = focus === undefined || focus === '' ? 'UNKNOWN'
-        : focus === 'null' ? 'NONE'
-            : focus.includes(APP) ? 'APP'
-                : /\bClipboardOverlay\b/.test(focus) ? 'CLIPBOARD'
-                    : /\bInputMethod\b|InputMethodService|inputmethod/i.test(focus) ? 'IME'
-                        : /Keyguard|Bouncer/i.test(focus) ? 'KEYGUARD'
-                            : /com\.android\.systemui|\bStatusBar\b|\bNotificationShade\b/.test(focus) ? 'SYSTEM_UI'
-                                : /\bLauncher\b|com\.android\.launcher3|com\.google\.android\.apps\.nexuslauncher/.test(focus) ? 'LAUNCHER' : 'OTHER'
+    const focus = focusStateResult(displays, '', '', dump)
+    const focusedWindowCategory = focus.wmsFocusedWindowCategory
     return {
-        appWindowFound: windows.some(([, title]) => title.includes(APP)),
-        appWindowVisible: any(title => title.includes(APP)),
-        appWindowFocused: focus?.includes(APP) === true,
+        appWindowFound: windows.some(([, title]) => focusCategory(title) === 'APP'),
+        appWindowVisible: any(title => focusCategory(title) === 'APP'),
+        appWindowFocused: focusedWindowCategory === 'UNKNOWN' ? null : focusedWindowCategory === 'APP',
+        appDisplayId: focus.appDisplayId,
         clipboardOverlayVisible: any(title => /\bClipboardOverlay\b/.test(title)),
         imeWindowVisible: any(title => /\bInputMethod\b/.test(title)),
         focusedWindowCategory,
@@ -190,7 +321,23 @@ export class Android {
     async windows (timeout = 5000) {
         // This is the explicitly selected disposable emulator. The raw dump
         // stays in memory and is never included in output or artifacts.
-        return windowState(await this.shell('dumpsys window windows', { timeout }))
+        const deadline = Date.now() + timeout
+        const [windows, displays] = await Promise.all([
+            this.shell('dumpsys window windows', { timeout }), this.shell('dumpsys window displays', { timeout }),
+        ])
+        check(Date.now() < deadline, 'ANDROID_WINDOW_STATE_DEADLINE_EXCEEDED')
+        return windowState(windows, displays)
+    }
+
+    async focusState ({ deadline = Date.now() + 5000 } = {}) {
+        check(Number.isSafeInteger(deadline) && Date.now() < deadline, 'ANDROID_FOCUS_STATE_DEADLINE_EXCEEDED')
+        const timeout = Math.max(1, Math.min(5000, deadline - Date.now()))
+        const [displays, input, activities, windows] = await Promise.all([
+            this.shell('dumpsys window displays', { timeout }), this.shell('dumpsys input', { timeout }),
+            this.shell('dumpsys activity activities', { timeout }), this.shell('dumpsys window windows', { timeout }),
+        ])
+        check(Date.now() < deadline, 'ANDROID_FOCUS_STATE_DEADLINE_EXCEEDED')
+        return focusStateResult(displays, input, activities, windows)
     }
 
     async input (command, { deadline } = {}) {

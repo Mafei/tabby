@@ -76,6 +76,15 @@ bridge. Input/gesture commands run through the instrumentation-only harness:
   a fresh process with durable public host-key pin, and actual same-endpoint
   host-key replacement rejection before authentication.
 
+Before attaching CDP, and again afterward, each harness samples the native
+window and read-only WindowManager, InputDispatcher and Activity focus state.
+Display scope comes from the actual app window's unique display ID; absent or
+ambiguous fields remain unknown. Playwright's default DOM focus simulation is
+explicitly disabled through public CDP, so `document.hasFocus()` observes the
+real page state. This does not grant native window focus. Sampling and CDP
+creation/send/cleanup share bounded deadlines within the original harness
+budget; a late session is cleaned up without retrying attachment or input.
+
 The runner temporarily enables the emulator's soft keyboard with its hardware
 keyboard and sets rotation for the size checks. Original values are restored.
 It records no Playwright trace, console payload, credential screenshot or
@@ -121,8 +130,10 @@ After real clipboard-copy equality is verified, the runner waits up to 10 s
 for Android's `ClipboardOverlay` window to disappear naturally and remain
 absent for 350 ms before touching EndSelection. It uses the same app-targeted
 MotionEvent without dispatch retries, system-window injection or permission
-changes. Window diagnostics return fixed booleans; raw window dumps stay in
-memory and never enter logs or artifacts.
+changes. Focus diagnostics contain only fixed categories, booleans and bounded
+display IDs. Window focus is read from the matching display's `mCurrentFocus`,
+not inferred from a missing field in the windows subdump. Raw window, input and
+Activity dumps stay in memory and never enter logs or artifacts.
 Each shell-command setup through the real clipboard also waits for the native
 IME to be hidden and the native/WebView geometry to stabilize, then waits for
 the clipboard preview to disappear naturally before touching Paste and Enter.

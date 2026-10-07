@@ -1,5 +1,5 @@
 import { createRequire } from 'node:module'
-import { APP, RUNNER, DONE, INPUT, METADATA, check, until, pause, TestFailure, instrumentationResult } from './test-android-utils.mjs'
+import { APP, RUNNER, DONE, INPUT, METADATA, check, until, pause, TestFailure, instrumentationResult, observeUntil } from './test-android-utils.mjs'
 
 const require = createRequire(import.meta.url)
 const quote = value => `'${value.replace(/'/g, `'"'"'`)}'`
@@ -20,6 +20,7 @@ export async function webviewAcceptance (android, fixture) {
     const settings = []
     const deviceStates = []
     let harness
+    let harnessDeadline
     let page
     let stage = 'harness-start'
     let substage = 'initializing'
@@ -43,7 +44,14 @@ export async function webviewAcceptance (android, fixture) {
                     : String(error?.message || '').includes('strict mode violation') ? 'LOCATOR_AMBIGUOUS' : 'UNEXPECTED',
             fixture: Object.fromEntries(Object.entries(fixture.stats()).filter(([name, value]) => counterNames.has(name) && Number.isSafeInteger(value) && value >= 0)),
         }
-        try { result.androidWindows = await android.windows() } catch { result.windowStateUnavailable = true }
+        try {
+            const remaining = Math.min(5000, (harnessDeadline ?? Date.now() + 5000) - Date.now())
+            check(remaining > 0, 'ANDROID_WINDOW_STATE_DEADLINE_EXCEEDED')
+            result.androidWindows = await android.windows(remaining)
+        } catch { result.windowStateUnavailable = true }
+        try {
+            result.focusState = await android.focusState({ deadline: Math.min(harnessDeadline ?? Date.now() + 5000, Date.now() + 5000) })
+        } catch { result.focusStateUnavailable = true }
         if (page) {
             try {
                 result.dom = await page.evaluate(() => {
@@ -323,7 +331,7 @@ export async function webviewAcceptance (android, fixture) {
     async function beginHarness (previousPID) {
         await android.removeFile(DONE)
         const command = `am instrument -w -r -e class ${APP}.CloudWebViewHarness -e fixtureMetadata ${METADATA} -e cloudDoneFile ${DONE} -e cloudInputFile ${INPUT} ${RUNNER}`
-        const harnessDeadline = Date.now() + 180000
+        harnessDeadline = Date.now() + 180000
         harness = android.launch(['shell', '-T', command], { timeout: 190000 })
         // Keep the promise handled if the test-only harness fails during startup.
         harness.result.catch(() => {})
@@ -332,17 +340,58 @@ export async function webviewAcceptance (android, fixture) {
             view = device.webViews().find(view => view.pkg() === APP && view.pid() !== previousPID)
             return !!view
         }, 'ANDROID_TEST_HARNESS_WEBVIEW_NOT_AVAILABLE', 45000)
-        page = await view.page()
+        const preparation = { harness: previousPID === undefined ? 'first' : 'fresh-process', actions: [] }
+        deviceStates.push(preparation)
+        preparation.beforeCDP = await step('focus-before-cdp-attach', () => focusSample())
+        page = await observeUntil(view.page(), harnessDeadline, 'ANDROID_CDP_ATTACH_DEADLINE_EXCEEDED')
         page.setDefaultTimeout(15000)
+        await step('cdp-disable-focus-emulation', async () => {
+            const deadline = Math.min(harnessDeadline, Date.now() + 5000)
+            const inTime = () => check(Date.now() < deadline, 'ANDROID_CDP_FOCUS_OBSERVATION_DEADLINE_EXCEEDED')
+            inTime()
+            const acquiring = Promise.resolve().then(() => page.context().newCDPSession(page))
+            let session
+            try { session = await observeUntil(acquiring, deadline, 'ANDROID_CDP_FOCUS_OBSERVATION_DEADLINE_EXCEEDED') }
+            catch (error) {
+                // A late session is disposed once; no second attach or send.
+                void acquiring.then(async late => { try { await late.detach() } catch {} }, () => {})
+                throw error
+            }
+            let failure
+            try {
+                inTime()
+                // Playwright enables this by default. Restore the actual DOM
+                // focus observable; this does not request Android window focus.
+                await observeUntil(session.send('Emulation.setFocusEmulationEnabled', { enabled: false }), deadline,
+                    'ANDROID_CDP_FOCUS_OBSERVATION_DEADLINE_EXCEEDED')
+                inTime()
+            } catch (error) { failure = error; throw error } finally {
+                const detaching = Promise.resolve().then(() => session.detach())
+                detaching.catch(() => {})
+                try {
+                    await observeUntil(detaching, deadline, 'ANDROID_CDP_FOCUS_OBSERVATION_DEADLINE_EXCEEDED')
+                } catch (error) { if (!failure) { throw error } }
+            }
+            inTime()
+            preparation.focusEmulationDisabled = true
+        })
+        preparation.afterCDP = await step('focus-after-cdp-attach', () => focusSample())
         page.on('dialog', dialog => {
             // Only the prototype's multiline-paste confirmation may appear.
             if (dialog.type() === 'confirm') { void dialog.accept() } else { void dialog.dismiss() }
         })
         await observe()
-        const preparation = { harness: previousPID === undefined ? 'first' : 'fresh-process', actions: [] }
-        deviceStates.push(preparation)
         await prepareDevice(preparation, harnessDeadline)
         return view.pid()
+    }
+    async function focusSample () {
+        const deadline = Math.min(harnessDeadline, Date.now() + 5000)
+        check(Date.now() < deadline, 'ANDROID_FOCUS_OBSERVATION_DEADLINE_EXCEEDED')
+        const [deviceState, focusState] = await Promise.all([
+            android.input({ type: 'deviceState' }, { deadline }), android.focusState({ deadline }),
+        ])
+        check(Date.now() < deadline, 'ANDROID_FOCUS_OBSERVATION_DEADLINE_EXCEEDED')
+        return { deviceState, focusState }
     }
     async function prepareDevice (preparation, harnessDeadline) {
         const deadline = Math.min(harnessDeadline, Date.now() + 10000)
