@@ -7,6 +7,44 @@ export interface SSHShellChannelOptions {
     term: string | null | undefined
 }
 
+/** Bound a native request even when its promise survives channel/transport closure. */
+export function boundedSSHRequest<T> (
+    request: () => Promise<T>,
+    signals: AbortSignal[],
+    timeout = 10000,
+    late?: (value: T) => Promise<unknown>,
+): Promise<T> {
+    return new Promise<T>((resolve, reject) => {
+        let settled = false
+        const cleanup = () => {
+            // eslint-disable-next-line @typescript-eslint/no-use-before-define
+            clearTimeout(timer)
+            // eslint-disable-next-line @typescript-eslint/no-use-before-define
+            signals.forEach(signal => signal.removeEventListener('abort', abort))
+        }
+        const fail = (error: unknown) => {
+            if (settled) { return }
+            settled = true
+            cleanup()
+            reject(error)
+        }
+        const abort = () => fail(new Error('SSH channel request cancelled'))
+        const timer = setTimeout(() => fail(new Error('SSH channel request timed out')), timeout)
+        signals.forEach(signal => signal.addEventListener('abort', abort, { once: true }))
+        if (signals.some(signal => signal.aborted)) { abort(); return }
+        // Also catches synchronous errors and consumes late native rejections.
+        Promise.resolve().then(() => {
+            if (signals.some(signal => signal.aborted)) { throw new Error('SSH channel request cancelled') }
+            return request()
+        }).then(value => {
+            if (settled) { late?.(value).catch(() => undefined); return }
+            settled = true
+            cleanup()
+            resolve(value)
+        }, fail)
+    })
+}
+
 interface SSHShellProfile {
     options: {
         x11: boolean

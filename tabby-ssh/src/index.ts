@@ -12,6 +12,7 @@ import { SSHProfileSettingsComponent } from './components/sshProfileSettings.com
 import { SSHPortForwardingModalComponent } from './components/sshPortForwardingModal.component'
 import { SSHPortForwardingConfigComponent } from './components/sshPortForwardingConfig.component'
 import { SSHSettingsTabComponent } from './components/sshSettingsTab.component'
+import { TmuxSelectModalComponent } from './components/tmuxSelectModal.component'
 import { SSHTabComponent } from './components/sshTab.component'
 import { SFTPPanelComponent } from './components/sftpPanel.component'
 import { SFTPDeleteModalComponent } from './components/sftpDeleteModal.component'
@@ -56,6 +57,7 @@ import { SFTPCreateDirectoryModalComponent } from './components/sftpCreateDirect
         SSHPortForwardingConfigComponent,
         SSHSettingsTabComponent,
         SSHTabComponent,
+        TmuxSelectModalComponent,
         SFTPPanelComponent,
         KeyboardInteractiveAuthComponent,
         HostKeyPromptModalComponent,

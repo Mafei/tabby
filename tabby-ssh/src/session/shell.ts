@@ -1,29 +1,42 @@
-import { Observable, Subject } from 'rxjs'
+import { Observable, Subject, Subscription } from 'rxjs'
 import stripAnsi from 'strip-ansi'
 import { Injector } from '@angular/core'
 import { LogService } from 'tabby-core'
 import { BaseSession, UTF8SplitterMiddleware, InputProcessor } from 'tabby-terminal'
 import { SSHSession } from './ssh'
-import { openShellChannelForProfile } from './shellChannel'
+import { attachCommand, shellQuote, TmuxBinding } from './tmux'
 import { SSHProfile } from '../api'
 import * as russh from 'russh'
+import { boundedSSHRequest } from './shellChannel'
 
 
 export class SSHShellSession extends BaseSession {
     shell?: russh.Channel
     get serviceMessage$ (): Observable<string> { return this.serviceMessage }
     private serviceMessage = new Subject<string>()
+    endReason: 'channel'|'transport'|'local' = 'local'
+    private shellDestroying = false
+    private refHeld = false
+    private abort = () => { this.destroy() }
+    private subscriptions: Subscription[] = []
     private ssh: SSHSession|null
+    private channelAbort = new AbortController()
 
     constructor (
         injector: Injector,
         ssh: SSHSession,
         private profile: SSHProfile,
+        private binding: TmuxBinding|null = null,
+        private takeover = false,
+        private allowOccupied = false,
+        private signal?: AbortSignal,
     ) {
         super(injector.get(LogService).create(`ssh-shell-${profile.options.host}-${profile.options.port}`))
         this.ssh = ssh
-        this.setLoginScriptsOptions(this.profile.options)
-        this.ssh.serviceMessage$.subscribe(m => this.serviceMessage.next(m))
+        if (!binding) {
+            this.setLoginScriptsOptions(this.profile.options)
+        }
+        this.subscriptions.push(this.ssh.serviceMessage$.subscribe(m => this.serviceMessage.next(m)))
         this.middleware.push(new UTF8SplitterMiddleware())
         this.middleware.push(new InputProcessor(profile.options.input))
     }
@@ -33,54 +46,80 @@ export class SSHShellSession extends BaseSession {
             throw new Error('SSH session not set')
         }
 
+        if (this.signal?.aborted) { throw new Error('Shell channel cancelled') }
+        this.signal?.addEventListener('abort', this.abort, { once: true })
         this.ssh.ref()
-        this.ssh.willDestroy$.subscribe(() => {
+        this.refHeld = true
+        this.subscriptions.push(this.ssh.willDestroy$.subscribe(() => {
+            this.endReason = this.ssh?.transportLost ? 'transport' : 'local'
             this.destroy()
-        })
+        }))
 
         this.logger.debug('Opening shell')
 
         try {
-            this.shell = await openShellChannelForProfile(this.ssh, this.profile)
+            this.shell = await this.ssh.prepareShellChannel({ x11: this.profile.options.x11, term: this.profile.options.term }, this.channelAbort.signal)
         } catch (err) {
             if (err.toString().includes('Unable to request X11')) {
                 this.emitServiceMessage('    Make sure `xauth` is installed on the remote side')
             }
+            await this.destroy()
             throw new Error(`Remote rejected opening a shell channel: ${err}`)
         }
 
+        if (this.shellDestroying) {
+            this.shell.close().catch(() => undefined)
+            throw new Error('Shell channel cancelled')
+        }
         this.open = true
         this.logger.debug('Shell open')
 
-        this.loginScriptProcessor?.executeUnconditionalScripts()
-
-        this.shell.data$.subscribe(data => {
+        this.subscriptions.push(this.shell.data$.subscribe(data => {
             this.emitOutput(Buffer.from(data))
-        })
+        }))
 
-        this.shell.eof$.subscribe(() => {
+        this.subscriptions.push(this.shell.eof$.subscribe(() => {
+            this.endReason = 'channel'
             this.logger.info('Shell session ended (EOF)')
             if (this.open) {
                 this.destroy()
             }
-        })
+        }))
 
         // The server is not required to send CHANNEL_EOF before CHANNEL_CLOSE -
         // whether it does is timing-dependent (e.g. when a `sudo` child process
         // delays the pty EOF), so rely on the channel close as well, otherwise
         // the session sometimes stays open after the remote shell has exited.
-        this.shell.closed$.subscribe(() => {
+        this.subscriptions.push(this.shell.closed$.subscribe(() => {
+            this.endReason = 'channel'
             this.logger.info('Shell session ended (channel closed)')
             if (this.open) {
                 this.destroy()
             }
-        })
+        }))
+
+        try {
+            if (this.binding) {
+                await boundedSSHRequest(() => this.shell!.requestExec(`sh -c ${shellQuote(attachCommand(this.binding!, this.takeover, this.allowOccupied))}`), [this.channelAbort.signal])
+            } else {
+                await boundedSSHRequest(() => this.shell!.requestShell(), [this.channelAbort.signal])
+                if (!this.isActive()) { return }
+                this.loginScriptProcessor?.executeUnconditionalScripts()
+            }
+        } catch (error) {
+            await this.destroy()
+            throw error
+        }
 
         // Must run after the output subscriptions above are wired, otherwise the
         // command echo and anything the remote prints in response is dropped.
-        if (this.profile.options.cwd) {
+        if (this.isActive() && !this.binding && this.profile.options.cwd) {
             this.changeInitialDirectory(this.profile.options.cwd)
         }
+    }
+
+    private isActive (): boolean {
+        return this.open && !this.shellDestroying
     }
 
     emitServiceMessage (msg: string): void {
@@ -94,12 +133,12 @@ export class SSHShellSession extends BaseSession {
             rows,
             pixHeight: 0,
             pixWidth: 0,
-        })
+        }).catch(error => this.logger.debug('Unable to resize SSH channel', error))
     }
 
     write (data: Buffer): void {
         if (this.shell) {
-            this.shell.write(new Uint8Array(data))
+            this.shell.write(new Uint8Array(data)).catch(error => this.logger.debug('Unable to write to SSH channel', error))
         }
     }
 
@@ -108,10 +147,21 @@ export class SSHShellSession extends BaseSession {
     }
 
     async destroy (): Promise<void> {
+        if (this.shellDestroying) { return }
+        this.shellDestroying = true
+        this.channelAbort.abort()
+        this.signal?.removeEventListener('abort', this.abort)
+        this.subscriptions.forEach(subscription => subscription.unsubscribe())
         this.logger.debug('Closing shell')
         this.serviceMessage.complete()
         this.kill()
-        this.ssh?.unref()
+        this.shell?.close().catch(() => undefined)
+        const transport = this.ssh
+        // Keep transport alive while disconnect$ drains after CHANNEL_CLOSE.
+        if (this.refHeld) {
+            this.refHeld = false
+            setTimeout(() => transport?.unref(), 100)
+        }
         this.ssh = null
         await super.destroy()
     }
