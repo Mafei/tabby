@@ -6,8 +6,11 @@ on:
     tags:
       - "v*"
 
+permissions:
+  contents: read
 jobs:
   tagged-release:
+    if: github.repository == 'Eugeny/tabby'
     name: "Tagged Release"
     runs-on: "ubuntu-latest"
 

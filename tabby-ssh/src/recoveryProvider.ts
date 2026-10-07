@@ -18,6 +18,8 @@ export class RecoveryProvider extends TabRecoveryProvider<SSHTabComponent> {
             inputs: {
                 profile: this.injector.get(ProfilesService).getConfigProxyForProfile(recoveryToken.profile),
                 savedState: recoveryToken.savedState,
+                tmuxBinding: recoveryToken.tmuxBinding ?? null,
+                ordinarySSH: recoveryToken.ordinarySSH ?? false,
             },
         }
     }

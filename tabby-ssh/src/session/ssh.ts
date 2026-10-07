@@ -96,6 +96,8 @@ export class KeyboardInteractivePrompt {
     }
 }
 
+export class SSHTransportError extends Error { }
+
 export class SSHSession {
     shell?: russh.Channel
     ssh: russh.SSHClient|russh.AuthenticatedSSHClient
@@ -111,6 +113,11 @@ export class SSHSession {
     authUsername: string|null = null
 
     open = false
+    connectStage: 'configuration'|'transport'|'authentication'|'ready' = 'configuration'
+    hostKeyRejected = false
+    transportLost = false
+    verifiedHostKey: string|null = null
+    private locallyDestroyed = false
 
     private logger: Logger
     private refCount = 0
@@ -376,12 +383,14 @@ export class SSHSession {
 
     async start (): Promise<void> {
         await this.init()
+        if (this.locallyDestroyed) { throw new Error('Connection cancelled') }
 
         const algorithms = {}
         for (const key of Object.values(SSHAlgorithmType)) {
             algorithms[key] = this.profile.options.algorithms[key].filter(x => supportedAlgorithms[key].includes(x))
         }
 
+        this.connectStage = 'transport'
         // eslint-disable-next-line @typescript-eslint/init-declarations
         let transport: russh.SshTransport
         if (this.profile.options.proxyCommand) {
@@ -422,8 +431,10 @@ export class SSHSession {
             transport,
             async key => {
                 if (!await this.verifyHostKey(key)) {
+                    this.hostKeyRejected = true
                     return false
                 }
+                this.verifiedHostKey = this.config.store.ssh.verifyHostKeys ? `${key.algorithm()}:${key.fingerprint()}` : null
                 this.logger.info('Host key verified')
                 return true
             },
@@ -441,6 +452,7 @@ export class SSHSession {
             },
         )
 
+        if (this.locallyDestroyed) { this.ssh.disconnect(); throw new Error('Connection cancelled') }
         this.ssh.banner$.subscribe(banner => {
             if (!this.profile.options.skipBanner) {
                 this.emitServiceMessage(banner)
@@ -448,7 +460,10 @@ export class SSHSession {
         })
 
         this.previouslyDisconnected = false
+        this.transportLost = false
         this.ssh.disconnect$.subscribe(() => {
+            this.transportLost = !this.locallyDestroyed
+            this.open = false
             if (!this.previouslyDisconnected) {
                 this.previouslyDisconnected = true
                 // Let service messages drain
@@ -459,6 +474,7 @@ export class SSHSession {
         })
 
         // Authentication
+        this.connectStage = 'authentication'
 
         this.authUsername ??= this.profile.options.user
         if (!this.authUsername) {
@@ -493,6 +509,7 @@ export class SSHSession {
             throw new Error('Authentication rejected')
         }
 
+        this.connectStage = 'ready'
         // auth success
 
         if (this.savedPassword != null) {
@@ -872,14 +889,30 @@ export class SSHSession {
     }
 
     async destroy (): Promise<void> {
+        if (this.locallyDestroyed) { return }
+        this.locallyDestroyed = true
+        this.open = false
         this.logger.info('Destroying')
         this.willDestroy.next()
         this.willDestroy.complete()
         this.serviceMessage.complete()
-        this.ssh.disconnect()
+        this.ssh?.disconnect()
+    }
+
+    async openExecChannel (): Promise<russh.Channel> {
+        if (!(this.ssh instanceof russh.AuthenticatedSSHClient)) {
+            throw new Error('Cannot execute a command before auth')
+        }
+        return this.ssh.activateChannel(await this.ssh.openSessionChannel())
     }
 
     async openShellChannel (options: SSHShellChannelOptions): Promise<russh.Channel> {
+        const ch = await this.prepareShellChannel(options)
+        await ch.requestShell()
+        return ch
+    }
+
+    async prepareShellChannel (options: SSHShellChannelOptions): Promise<russh.Channel> {
         if (!(this.ssh instanceof russh.AuthenticatedSSHClient)) {
             throw new Error('Cannot open shell channel before auth')
         }
@@ -896,7 +929,6 @@ export class SSHSession {
         if (this.profile.options.agentForward) {
             await ch.requestAgentForwarding()
         }
-        await ch.requestShell()
         return ch
     }
 

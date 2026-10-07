@@ -1,7 +1,10 @@
 name: Package-Build
 on: [push, pull_request]
+permissions:
+  contents: read
 jobs:
   Lint:
+    if: github.repository == 'Eugeny/tabby'
     runs-on: ubuntu-24.04
 
     steps:
@@ -38,6 +41,7 @@ jobs:
       run: yarn run lint
 
   macOS-Build:
+    if: github.repository == 'Eugeny/tabby'
     runs-on: macos-15
     needs: Lint
     strategy:
@@ -136,6 +140,7 @@ jobs:
         path: artifact-zip
 
   Linux-Build:
+    if: github.repository == 'Eugeny/tabby'
     runs-on: ${{matrix.os}}
     needs: Lint
     strategy:
@@ -304,6 +309,7 @@ jobs:
       if: matrix.build-arch == 'x64'
 
   Windows-Build:
+    if: github.repository == 'Eugeny/tabby'
     runs-on: windows-2022
     needs: Lint
     strategy:

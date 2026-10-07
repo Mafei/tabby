@@ -1,16 +1,21 @@
 import * as russh from 'russh'
 import { marker as _ } from '@biesbjerg/ngx-translate-extract-marker'
 import colors from 'ansi-colors'
-import { Component, Injector, HostListener } from '@angular/core'
+import { Component, Injector, HostListener, Input } from '@angular/core'
 import { NgbModal } from '@ng-bootstrap/ng-bootstrap'
-import { GetRecoveryTokenOptions, Platform, ProfilesService, RecoveryToken } from 'tabby-core'
+import { AppService, TabRecoveryService, GetRecoveryTokenOptions, Platform, ProfilesService, RecoveryToken } from 'tabby-core'
 import { BaseTerminalTabComponent, ConnectableTerminalTabComponent } from 'tabby-terminal'
 import { SSHService } from '../services/ssh.service'
-import { KeyboardInteractivePrompt, SSHSession } from '../session/ssh'
+import { KeyboardInteractivePrompt, SSHSession, SSHTransportError } from '../session/ssh'
 import { SSHPortForwardingModalComponent } from './sshPortForwardingModal.component'
 import { SSHProfile } from '../api'
 import { SSHShellSession } from '../session/shell'
 import { SSHMultiplexerService } from '../services/sshMultiplexer.service'
+import { randomUUID } from 'node:crypto'
+import { assertBinding, createCommand, framedExec, listCommand, parseSessionList, sameSession, TmuxBinding, TmuxError, TmuxSessionInfo, TmuxSocket } from '../session/tmux'
+import { SSHReconnectController } from '../session/reconnect'
+import { TmuxSelectModalComponent, TmuxSelection } from './tmuxSelectModal.component'
+import { TmuxTabsService } from '../services/tmuxTabs.service'
 
 /** @hidden */
 @Component({
@@ -23,6 +28,12 @@ import { SSHMultiplexerService } from '../services/sshMultiplexer.service'
     animations: BaseTerminalTabComponent.animations,
 })
 export class SSHTabComponent extends ConnectableTerminalTabComponent<SSHProfile> {
+    @Input() tmuxBinding: TmuxBinding|null = null
+    @Input() ordinarySSH = false
+    private connection = new SSHReconnectController()
+    private connectedAt = 0
+    private closing = false
+    private tabID = randomUUID()
     Platform = Platform
     sshSession: SSHSession|null = null
     session: SSHShellSession|null = null
@@ -37,6 +48,9 @@ export class SSHTabComponent extends ConnectableTerminalTabComponent<SSHProfile>
         private ngbModal: NgbModal,
         private profilesService: ProfilesService,
         private sshMultiplexer: SSHMultiplexerService,
+        private tmuxTabs: TmuxTabsService,
+        private app: AppService,
+        private tabRecovery: TabRecoveryService,
     ) {
         super(injector)
         this.sessionChanged$.subscribe(() => {
@@ -73,7 +87,8 @@ export class SSHTabComponent extends ConnectableTerminalTabComponent<SSHProfile>
         super.ngOnInit()
     }
 
-    async setupOneSession (injector: Injector, profile: SSHProfile, multiplex = true): Promise<SSHSession> {
+    async setupOneSession (injector: Injector, profile: SSHProfile, multiplex = true, signal?: AbortSignal): Promise<SSHSession> {
+        const generation = this.connection.epoch
         let session = await this.sshMultiplexer.getSession(profile)
         if (!multiplex || !session || !profile.options.reuseSession) {
             session = new SSHSession(injector, profile)
@@ -120,6 +135,7 @@ export class SSHTabComponent extends ConnectableTerminalTabComponent<SSHProfile>
         }
 
         this.attachSessionHandler(session.serviceMessage$, msg => {
+            if (!this.connection.current(generation)) { return }
             msg = msg.replace(/\n/g, '\r\n      ')
             this.write(`\r${colors.black.bgWhite(' SSH ')} ${msg}\r\n`)
         })
@@ -129,6 +145,7 @@ export class SSHTabComponent extends ConnectableTerminalTabComponent<SSHProfile>
         })
 
         this.attachSessionHandler(session.keyboardInteractivePrompt$, prompt => {
+            if (!this.connection.current(generation)) { prompt.reject(); return }
             this.activeKIPrompt = prompt
             setTimeout(() => {
                 this.frontend?.scrollToBottom()
@@ -140,61 +157,219 @@ export class SSHTabComponent extends ConnectableTerminalTabComponent<SSHProfile>
 
             this.startSpinner(this.translate.instant(_('Connecting')))
 
+            const connectingSession = session
+            const abort = () => { connectingSession.destroy() }
+            signal?.addEventListener('abort', abort, { once: true })
+            if (signal?.aborted) { throw new TmuxError('Connection cancelled') }
             try {
                 await session.start()
+            } catch (error) {
+                if (session.connectStage === 'transport' && !session.hostKeyRejected) {
+                    throw new SSHTransportError(String(error))
+                }
+                throw error
             } finally {
+                signal?.removeEventListener('abort', abort)
                 this.stopSpinner()
             }
 
+            if (signal?.aborted) { await session.destroy(); throw new TmuxError('Connection cancelled') }
             this.sshMultiplexer.addSession(session)
         }
 
         return session
     }
 
-    protected onSessionDestroyed (): void {
-        if (this.frontend) {
-            // Session was closed abruptly
-            this.write('\r\n' + colors.black.bgWhite(' SSH ') + ` ${this.sshSession?.profile.options.host}: session closed\r\n`)
+    protected shouldTabBeDestroyedOnSessionClose (): boolean {
+        return this.tmuxBinding ? false : super.shouldTabBeDestroyedOnSessionClose()
+    }
 
-            super.onSessionDestroyed()
+    protected onSessionDestroyed (): void {
+        const shell = this.session
+        const transport = this.sshSession
+        const generation = this.connection.epoch
+        const intentional = this.isDisconnectedByHand || this.closing
+        this.setSession(null)
+        this.frontend?.resetTerminalModes()
+        // CHANNEL_CLOSE can precede disconnect$. Decide after transport events drain,
+        // but never use a local unref/disconnect as evidence of a transport failure.
+        setTimeout(() => {
+            if (intentional || !this.connection.current(generation) || this.closing || this.isDisconnectedByHand) { return }
+            if (transport?.transportLost && shell?.endReason !== 'local') {
+                if (Date.now() - this.connectedAt > 30000) { this.connection.reset() }
+                const delay = this.connection.schedule(() => { this.initializeSession(true) })
+                this.write(`\r\nSSH transport lost. Retrying in ${delay} ms. Disconnect cancels retry.\r\n`)
+            } else {
+                this.write('\r\nSSH channel ended. Detached, taken over, or shell exited; automatic retry stopped.\r\n')
+                this.offerReconnection()
+            }
+        }, 50)
+    }
+
+    private async listTmux (ssh: SSHSession, socket: TmuxSocket, signal: AbortSignal): Promise<TmuxSessionInfo[]|null> {
+        const channel = await ssh.openExecChannel()
+        const result = await framedExec(channel, listCommand(socket), signal)
+        if (result.status === 127) { return null }
+        if (result.status) { throw new TmuxError('Cannot enumerate this tmux socket/account') }
+        return parseSessionList(result.output)
+    }
+
+    private async chooseTmux (ssh: SSHSession, signal: AbortSignal): Promise<{ takeover: boolean; allowOccupied: boolean }> {
+        if (this.ordinarySSH) { return { takeover: false, allowOccupied: false } }
+        const selectionController = new AbortController()
+        const parentSignal = signal
+        const abortSelection = () => selectionController.abort()
+        parentSignal.addEventListener('abort', abortSelection, { once: true })
+        if (parentSignal.aborted) { selectionController.abort() }
+        signal = selectionController.signal
+        const modal = this.ngbModal.open(TmuxSelectModalComponent, { backdrop: 'static' })
+        const ui = modal.componentInstance as TmuxSelectModalComponent
+        const cancel = () => modal.dismiss('cancelled')
+        signal.addEventListener('abort', cancel, { once: true })
+        ui.restoring = !!this.tmuxBinding
+        ui.socket = this.tmuxBinding ? { ...this.tmuxBinding.selector } : { kind: 'default', value: '' }
+        ui.load = async () => {
+            const sessions = await this.listTmux(ssh, ui.socket, signal)
+            ui.available = sessions !== null
+            if (this.tmuxBinding) {
+                const match = sessions?.find(session => sameSession(this.tmuxBinding!, session))
+                if (!match) { throw new TmuxError('Saved tmux session is missing or its identity changed') }
+                return [match]
+            }
+            return sessions ?? []
+        }
+        ui.make = async name => {
+            const channel = await ssh.openExecChannel()
+            const result = await framedExec(channel, createCommand(ui.socket, name, this.profile.options.cwd), signal)
+            if (result.status) { throw new TmuxError('tmux creation failed (duplicate name or server error). Refresh before retrying.') }
+            const identity = result.output.trim().split(':')
+            if (identity.length !== 4 || !/^\$\d+$/u.test(identity[2])) { throw new TmuxError('Invalid creation response; refresh before retrying') }
+            const sessions = await this.listTmux(ssh, ui.socket, signal)
+            const created = sessions?.find(session => `${session.serverPID}:${session.serverStarted}:${session.sessionID}:${session.sessionCreated}` === identity.join(':'))
+            if (!created) { throw new TmuxError('Created session disappeared before attachment') }
+            return created
+        }
+        ui.refresh()
+        try {
+            const selection = await modal.result as TmuxSelection
+            if (signal.aborted) { throw new TmuxError('Selection cancelled') }
+            if (!selection.session) {
+                this.ordinarySSH = true
+                return { takeover: false, allowOccupied: false }
+            }
+            if (!ssh.verifiedHostKey || !ssh.authUsername) {
+                throw new TmuxError('tmux recovery requires an authenticated account and verified host key')
+            }
+            this.tmuxBinding = {
+                ...selection.session, version: 1, host: this.profile.options.host,
+                port: this.profile.options.port ?? 22, hostKey: ssh.verifiedHostKey,
+                account: ssh.authUsername, selector: { ...ui.socket }, mode: selection.mode, tabID: this.tabID,
+            }
+            return { takeover: selection.takeover, allowOccupied: true }
+        } finally {
+            signal.removeEventListener('abort', cancel)
+            parentSignal.removeEventListener('abort', abortSelection)
+            selectionController.abort()
         }
     }
 
-    private async initializeSessionMaybeMultiplex (multiplex = true): Promise<void> {
-        this.sshSession = await this.setupOneSession(this.injector, this.profile, multiplex)
-        const session = new SSHShellSession(this.injector, this.sshSession, this.profile)
-
-        this.setSession(session)
-        this.attachSessionHandler(session.serviceMessage$, msg => {
-            msg = msg.replace(/\n/g, '\r\n      ')
-            this.write(`\r${colors.black.bgWhite(' SSH ')} ${msg}\r\n`)
-            session.resize(this.size.columns, this.size.rows)
-        })
-
-        await session.start()
-
-        this.session?.resize(this.size.columns, this.size.rows)
-    }
-
-    async initializeSession (): Promise<void> {
-        await super.initializeSession()
+    private async connect (signal: AbortSignal, generation: number, automatic: boolean): Promise<void> {
+        const ssh = await this.setupOneSession(this.injector, this.profile, true, signal)
+        ssh.ref() // Own the authenticated transport while selecting/creating a session.
+        let shell: SSHShellSession|null = null
         try {
-            await this.initializeSessionMaybeMultiplex(true)
-        } catch {
-            try {
-                await this.initializeSessionMaybeMultiplex(false)
-            } catch (e) {
-                console.error('SSH session initialization failed', e)
-                this.write(colors.black.bgRed(' X ') + ' ' + colors.red(e.message) + '\r\n')
+            if (!this.connection.current(generation)) { return }
+            this.sshSession = ssh
+            let selection = { takeover: false, allowOccupied: false }
+            if (this.tmuxBinding) {
+                assertBinding(this.tmuxBinding, {
+                    host: this.profile.options.host, port: this.profile.options.port ?? 22,
+                    account: ssh.authUsername, hostKey: ssh.verifiedHostKey,
+                })
+                const sessions = await this.listTmux(ssh, this.tmuxBinding.selector, signal)
+                const match = sessions?.find(session => sameSession(this.tmuxBinding!, session))
+                if (!match) { throw new TmuxError('Saved tmux session is missing or was replaced; no session was created') }
+                if (match.clients) {
+                    if (automatic) { throw new TmuxError('tmux session is occupied. Reconnect manually to choose shared, read-only or takeover.') }
+                    selection = await this.chooseTmux(ssh, signal)
+                }
+            } else {
+                selection = await this.chooseTmux(ssh, signal)
+            }
+            if (!this.connection.current(generation)) { return }
+            if (this.tmuxBinding) {
+                const owner = this.tmuxTabs.claim(this.tmuxBinding, this)
+                if (owner !== this) {
+                    this.app.selectTab(this.app.getParentTab(owner) ?? owner)
+                    this.destroy()
+                    return
+                }
+            }
+            shell = new SSHShellSession(this.injector, ssh, this.profile, this.tmuxBinding, selection.takeover, selection.allowOccupied)
+            this.setSession(shell)
+            this.attachSessionHandler(shell.serviceMessage$, msg => {
+                this.write(`\r${colors.black.bgWhite(' SSH ')} ${msg.replace(/\n/g, '\r\n      ')}\r\n`)
+            })
+            await shell.start()
+            if (!this.connection.current(generation)) {
+                await shell.destroy()
                 return
             }
+            shell.resize(this.size.columns, this.size.rows)
+            this.connectedAt = Date.now()
+            await this.tabRecovery.saveTabs(this.app.tabs)
+        } catch (error) {
+            if (shell) { await shell.destroy() }
+            throw error
+        } finally {
+            ssh.unref()
         }
+    }
+
+    async initializeSession (automatic = false): Promise<void> {
+        await this.connection.run(async (signal, generation) => {
+            await super.initializeSession()
+            try {
+                await this.connect(signal, generation, automatic)
+            } catch (error) {
+                if (!this.connection.current(generation)) { return }
+                this.write(colors.black.bgRed(' X ') + ' ' + colors.red(String(error)) + '\r\n')
+                // Only an already bound tmux session can retry transient connect failures.
+                // Auth and host-key failures are always manual, never a fallback second auth.
+                if (automatic && error instanceof SSHTransportError) {
+                    this.connection.schedule(() => { this.initializeSession(true) })
+                } else {
+                    this.offerReconnection()
+                }
+            }
+        })
+    }
+
+    async disconnect (): Promise<void> {
+        this.connection.cancel()
+        await super.disconnect()
+    }
+
+    async reconnect (): Promise<void> {
+        await this.disconnect()
+        this.connection.reset()
+        await super.reconnect()
+    }
+
+    ngOnDestroy (): void {
+        this.closing = true
+        this.connection.cancel()
+        this.tmuxTabs.release(this)
+        super.ngOnDestroy()
     }
 
     async getRecoveryToken (options?: GetRecoveryTokenOptions): Promise<RecoveryToken> {
         const token = await super.getRecoveryToken(options)
-        if (this.profile.options.rememberCwd) {
+        if (options?.includeState) {
+            token.tmuxBinding = this.tmuxBinding
+            token.ordinarySSH = this.ordinarySSH
+        }
+        if (!this.tmuxBinding && this.profile.options.rememberCwd) {
             const cwd = await this.session?.getWorkingDirectory() ?? this.profile.options.cwd
             if (cwd) {
                 token.profile = {
