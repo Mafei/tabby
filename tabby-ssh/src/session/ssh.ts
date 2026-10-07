@@ -104,6 +104,7 @@ export class SSHSession {
     sftp?: russh.SFTP
     forwardedPorts: ForwardedPort[] = []
     jumpChannel: russh.NewChannel|null = null
+    private discardJumpChannel: (() => void)|null = null
     savedPassword?: string
     get serviceMessage$ (): Observable<string> { return this.serviceMessage }
     get keyboardInteractivePrompt$ (): Observable<KeyboardInteractivePrompt> { return this.keyboardInteractivePrompt }
@@ -121,6 +122,9 @@ export class SSHSession {
     private prompts = new Set<NgbModalRef>()
     private activeKIPrompts = new Set<KeyboardInteractivePrompt>()
     private channelAbort = new AbortController()
+    private stalledChannelRequests = new Set<object>()
+
+    get canAcquireChannels (): boolean { return this.stalledChannelRequests.size === 0 }
 
     private logger: Logger
     private refCount = 0
@@ -435,8 +439,10 @@ export class SSHSession {
             }
             transport = await russh.SshTransport.newCommand(argv[0], argv.slice(1))
         } else if (this.jumpChannel) {
-            transport = await russh.SshTransport.newSshChannel(this.jumpChannel.take())
+            const channel = this.jumpChannel
             this.jumpChannel = null
+            this.discardJumpChannel = null
+            transport = await russh.SshTransport.newSshChannel(channel.take())
         } else if (this.profile.options.socksProxyHost) {
             this.emitServiceMessage(colors.bgBlue.black(' Proxy ') + ` Using ${this.profile.options.socksProxyHost}:${this.profile.options.socksProxyPort}`)
             transport = await russh.SshTransport.newSocksProxy(
@@ -933,6 +939,9 @@ export class SSHSession {
         this.locallyDestroyed = true
         this.previouslyDisconnected = true
         this.channelAbort.abort()
+        this.discardJumpChannel?.()
+        this.discardJumpChannel = null
+        this.jumpChannel = null
         for (const prompt of this.activeKIPrompts) { prompt.reject() }
         this.activeKIPrompts.clear()
         for (const modal of this.prompts) { modal.dismiss('SSH connection cancelled') }
@@ -946,11 +955,60 @@ export class SSHSession {
         this.disconnectClient()
     }
 
-    async openExecChannel (): Promise<russh.Channel> {
+    async openExecChannel (signal?: AbortSignal, timeout = 10000): Promise<russh.Channel> {
         if (!(this.ssh instanceof russh.AuthenticatedSSHClient)) {
             throw new Error('Cannot execute a command before auth')
         }
-        return this.ssh.activateChannel(await this.ssh.openSessionChannel())
+        const client = this.ssh
+        return this.acquireChannel(async () => client.activateChannel(await client.openSessionChannel()), [this.channelAbort.signal, ...signal ? [signal] : []], timeout, channel => channel.close())
+    }
+
+    async acquireJumpChannel (jump: SSHSession, signal?: AbortSignal, timeout = 10000): Promise<void> {
+        this.ensureActive()
+        if (!(jump.ssh instanceof russh.AuthenticatedSSHClient)) {
+            throw new Error('Jump session is not authenticated')
+        }
+        const client = jump.ssh
+        const discard = async (channel: russh.NewChannel) => {
+            // NewChannel has no close method; activate it only to close it. Bound
+            // activation too, and close any channel returned after that deadline.
+            const active = await boundedSSHRequest(() => client.activateChannel(channel), [], timeout, late => late.close())
+            await active.close()
+        }
+        const channel = await jump.acquireChannel(() => client.openTCPForwardChannel({
+            addressToConnectTo: this.profile.options.host,
+            portToConnectTo: this.profile.options.port ?? 22,
+            originatorAddress: '127.0.0.1',
+            originatorPort: 0,
+        }), [this.channelAbort.signal, jump.channelAbort.signal, ...signal ? [signal] : []], timeout, discard)
+        // Cancellation can run after the bounded promise resolves, before this
+        // continuation owns the channel. Never hand that channel to transport.
+        if (this.channelAbort.signal.aborted || signal?.aborted) {
+            discard(channel).catch(() => undefined)
+            throw new Error('Jump channel acquisition cancelled')
+        }
+        this.jumpChannel = channel
+        this.discardJumpChannel = () => { discard(channel).catch(() => undefined) }
+    }
+
+    private async acquireChannel<T> (request: () => Promise<T>, signals: AbortSignal[], timeout: number, late: (value: T) => Promise<unknown>): Promise<T> {
+        const requestID = {}
+        const state = { pending: false }
+        try {
+            return await boundedSSHRequest(async () => {
+                state.pending = true
+                try { return await request() } finally {
+                    state.pending = false
+                    this.stalledChannelRequests.delete(requestID)
+                }
+            }, signals, timeout, late)
+        } catch (error) {
+            // russh holds its client mutex while waiting for channel-open reply.
+            // Existing channels stay usable, but new acquisitions must use a new
+            // transport until the abandoned native request eventually settles.
+            if (state.pending) { this.stalledChannelRequests.add(requestID) }
+            throw error
+        }
     }
 
     async openShellChannel (options: SSHShellChannelOptions): Promise<russh.Channel> {
@@ -969,7 +1027,7 @@ export class SSHSession {
         const remaining = () => Math.max(1, deadline - Date.now())
         // Always activate an acquired NewChannel, even after cancellation, so a late
         // channel has an owner that can close it. Never leave it between two awaits.
-        const ch = await boundedSSHRequest(async () => client.activateChannel(await client.openSessionChannel()), signals, remaining(), channel => channel.close())
+        const ch = await this.acquireChannel(async () => client.activateChannel(await client.openSessionChannel()), signals, remaining(), channel => channel.close())
         try {
             await boundedSSHRequest(() => requestShellPTY(ch, options), signals, remaining())
             if (options.x11) {

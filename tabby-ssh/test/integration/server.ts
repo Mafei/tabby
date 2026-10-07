@@ -15,6 +15,7 @@ export async function localhostSSH (keyboardInteractive = false) {
     const clients = new Set<any>()
     const children = new Set<ReturnType<typeof spawn>>()
     const stats = { responses: 0, connections: 0, commands: [] as string[] }
+    const forwarding = { paused: false, pending: [] as (() => void)[], opened: 0, closed: 0 }
     const server = new ssh2.Server({ hostKeys: [privateKey.export({ type: 'pkcs1', format: 'pem' })] }, client => {
         clients.add(client)
         const ownedChildren = new Set<ReturnType<typeof spawn>>()
@@ -34,12 +35,18 @@ export async function localhostSSH (keyboardInteractive = false) {
             client.on('tcpip', (accept, reject, info) => {
                 // Forward only to other loopback fixtures.
                 if (info.destIP !== '127.0.0.1') { reject(); return }
-                const socket = connect(info.destPort, info.destIP, () => {
-                    const stream = accept()
-                    socket.pipe(stream).pipe(socket)
-                    stream.on('close', () => socket.destroy())
-                })
-                socket.on('error', () => { try { reject() } catch {} })
+                const open = () => {
+                    if (client._sock.destroyed) { return }
+                    const socket = connect(info.destPort, info.destIP, () => {
+                        const stream = accept()
+                        forwarding.opened++
+                        socket.pipe(stream).pipe(socket)
+                        stream.on('error', () => socket.destroy())
+                        stream.on('close', () => { forwarding.closed++; socket.destroy() })
+                    })
+                    socket.on('error', () => { try { reject() } catch {} })
+                }
+                if (forwarding.paused) { forwarding.pending.push(open) } else { open() }
             })
             client.on('session', accept => {
                 const session = accept()
@@ -75,9 +82,10 @@ export async function localhostSSH (keyboardInteractive = false) {
     await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
     return {
         port: (server.address() as any).port as number,
-        stats, clients, env,
+        stats, clients, env, forwarding,
         interrupt: () => { for (const client of clients) { client._sock.destroy() } },
         close: async () => {
+            forwarding.pending.length = 0
             for (const child of children) { child.kill() }
             for (const client of clients) { client._sock.destroy() }
             await new Promise<void>(resolve => server.close(() => resolve()))

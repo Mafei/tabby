@@ -1,4 +1,3 @@
-import * as russh from 'russh'
 import { marker as _ } from '@biesbjerg/ngx-translate-extract-marker'
 import colors from 'ansi-colors'
 import { Component, Injector, HostListener, Input } from '@angular/core'
@@ -89,52 +88,59 @@ export class SSHTabComponent extends ConnectableTerminalTabComponent<SSHProfile>
 
     async setupOneSession (injector: Injector, profile: SSHProfile, multiplex = true, signal?: AbortSignal): Promise<SSHSession> {
         const generation = this.connection.epoch
+        const jumpState = { transportLost: false }
         let session = await this.sshMultiplexer.getSession(profile)
-        if (!multiplex || !session?.open || session.transportLost || !profile.options.reuseSession) {
+        if (!multiplex || !session?.open || session.transportLost || !session.canAcquireChannels || !profile.options.reuseSession) {
             session = new SSHSession(injector, profile)
+            const targetSession = session
+            const abort = () => { targetSession.destroy() }
+            // Own cancellation before resolving/authenticating a jump host or
+            // waiting for direct-tcpip; a shared jump transport may remain alive.
+            signal?.addEventListener('abort', abort, { once: true })
+            try {
+                if (signal?.aborted) { throw new TmuxError('Connection cancelled') }
+                if (profile.options.jumpHost) {
+                    const jumpConnection = (await this.profilesService.getProfiles()).find(x => x.id === profile.options.jumpHost)
 
-            if (profile.options.jumpHost) {
-                const jumpConnection = (await this.profilesService.getProfiles()).find(x => x.id === profile.options.jumpHost)
+                    if (!jumpConnection) {
+                        throw new Error(`${profile.options.host}: jump host "${profile.options.jumpHost}" not found in your config`)
+                    }
 
-                if (!jumpConnection) {
-                    throw new Error(`${profile.options.host}: jump host "${profile.options.jumpHost}" not found in your config`)
-                }
-
-                const jumpSession = await this.setupOneSession(
-                    this.injector,
-                    this.profilesService.getConfigProxyForProfile<SSHProfile>(jumpConnection),
-                    true,
-                    signal,
-                )
-
-                jumpSession.ref()
-                const targetSession = session
-                const jumpDestroyed = jumpSession.willDestroy$.subscribe(() => {
-                    targetSession.destroy(jumpSession.transportLost ? 'transport' : 'local')
-                })
-                session.willDestroy$.subscribe(() => {
-                    jumpDestroyed.unsubscribe()
-                    jumpSession.unref()
-                })
-
-                if (!(jumpSession.ssh instanceof russh.AuthenticatedSSHClient)) {
-                    throw new Error('Jump session is not authenticated yet somehow')
-                }
-
-                try {
-                    session.jumpChannel = await jumpSession.ssh.openTCPForwardChannel({
-                        addressToConnectTo: profile.options.host,
-                        portToConnectTo: profile.options.port ?? 22,
-                        originatorAddress: '127.0.0.1',
-                        originatorPort: 0,
-                    })
-                } catch (err) {
-                    this.notifications.error(
-                        this.translate.instant(_('Could not set up port forward on {host}'), { host: jumpConnection.name }),
-                        err.toString(),
+                    const jumpSession = await this.setupOneSession(
+                        this.injector,
+                        this.profilesService.getConfigProxyForProfile<SSHProfile>(jumpConnection),
+                        true,
+                        signal,
                     )
-                    throw err
+                    if (signal?.aborted) { throw new TmuxError('Connection cancelled') }
+                    jumpSession.ref()
+                    const jumpDestroyed = jumpSession.willDestroy$.subscribe(() => {
+                        jumpState.transportLost = jumpSession.transportLost
+                        targetSession.destroy(jumpState.transportLost ? 'transport' : 'local')
+                    })
+                    session.willDestroy$.subscribe(() => {
+                        jumpDestroyed.unsubscribe()
+                        jumpSession.unref()
+                    })
+
+                    try {
+                        await session.acquireJumpChannel(jumpSession, signal)
+                    } catch (err) {
+                        if (!signal?.aborted) {
+                            this.notifications.error(
+                                this.translate.instant(_('Could not set up port forward on {host}'), { host: jumpConnection.name }),
+                                err.toString(),
+                            )
+                        }
+                        throw err
+                    }
                 }
+            } catch (error) {
+                await session.destroy()
+                if (session.transportLost) { throw new SSHTransportError(String(error)) }
+                throw error
+            } finally {
+                signal?.removeEventListener('abort', abort)
             }
         }
 
@@ -170,7 +176,7 @@ export class SSHTabComponent extends ConnectableTerminalTabComponent<SSHProfile>
                 await session.start()
             } catch (error) {
                 await session.destroy()
-                if (session.connectStage === 'transport' && !session.hostKeyRejected) {
+                if ((session.connectStage === 'transport' || jumpState.transportLost) && !session.hostKeyRejected) {
                     throw new SSHTransportError(String(error))
                 }
                 throw error
@@ -214,7 +220,7 @@ export class SSHTabComponent extends ConnectableTerminalTabComponent<SSHProfile>
     }
 
     private async listTmux (ssh: SSHSession, socket: TmuxSocket, signal: AbortSignal): Promise<TmuxSessionInfo[]|null> {
-        const result = await runSSHExec(() => ssh.openExecChannel(), listCommand(socket), signal)
+        const result = await runSSHExec(() => ssh.openExecChannel(signal), listCommand(socket), signal)
         if (result.status === 127) { return null }
         if (result.status) { throw new TmuxError('Cannot enumerate this tmux socket/account') }
         return parseSessionList(result.output)
@@ -246,7 +252,7 @@ export class SSHTabComponent extends ConnectableTerminalTabComponent<SSHProfile>
             return sessions ?? []
         }
         ui.make = async name => {
-            const result = await runSSHExec(() => ssh.openExecChannel(), createCommand(ui.socket, name, this.profile.options.cwd ?? undefined), signal)
+            const result = await runSSHExec(() => ssh.openExecChannel(signal), createCommand(ui.socket, name, this.profile.options.cwd ?? undefined), signal)
             if (result.status) { throw new TmuxError('tmux creation failed (duplicate name or server error). Refresh before retrying.') }
             const identity = result.output.trim().split(':')
             if (identity.length !== 4 || !/^\$\d+$/u.test(identity[2])) { throw new TmuxError('Invalid creation response; refresh before retrying') }

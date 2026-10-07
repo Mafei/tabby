@@ -20,7 +20,7 @@ function stall (phase: typeof phases[number], client: any, c: ReturnType<typeof 
 }
 
 for (const phase of phases) {
-    test(`SSHTab cancel during ${phase} frees single-flight and reconnects on a shared transport`, async () => {
+    test(`SSHTab cancel during ${phase} frees single-flight and reconnects without tearing down the shared transport`, async t => {
         const env = environment()
         const p = profile({ x11: true, agentForward: true })
         const { ssh, client } = authenticatedSession(env, p)
@@ -34,6 +34,12 @@ for (const phase of phases) {
         const fresh = channel()
         client.openSessionChannel = async () => fresh
         client.activateChannel = async (c: any) => c
+        t.mock.method(SSHSession.prototype, 'start', async function (this: SSHSession) {
+            const replacement = authenticatedSession(env, this.profile).client
+            replacement.openSessionChannel = async () => fresh
+            this.ssh = replacement
+            this.open = true
+        })
         await tab.reconnect()
         await first
         assert.equal(tab.session?.open, true)
@@ -44,6 +50,7 @@ for (const phase of phases) {
         assert.equal(old.shellRequests, 0)
         assert.equal(tab.session?.shell, fresh)
         await tab.disconnect()
+        await tab.sshSession?.destroy()
         await ssh.destroy()
     })
 
@@ -162,4 +169,126 @@ test('late resize and write failures after transport loss are consumed', async (
     await new Promise(resolve => setTimeout(resolve, 10))
     assert.equal(shell.open, false)
     assert.equal(shell.endReason, 'transport')
+})
+
+for (const failure of ['cancel', 'reject', 'timeout', 'transport'] as const) {
+    test(`SSHTab pending jump forward ${failure} settles, balances references and cleans up late channels`, async t => {
+        const jumpProfile = profile({ host: 'jump' })
+        jumpProfile.id = 'jump'
+        const env = environment([jumpProfile])
+        const { ssh: jump, client } = authenticatedSession(env, jumpProfile)
+        await env.multiplexer.addSession(jump)
+        const initialObservers = (jump as any).willDestroy.observers.length
+        const p = profile({ host: 'target', jumpHost: 'jump' }), tab = env.tab(p)
+        const pending = deferred<any>(), old = channel()
+        let entered = false, starts = 0, target: SSHSession|undefined
+        client.openTCPForwardChannel = () => { entered = true; return pending.promise }
+        const acquire = SSHSession.prototype.acquireJumpChannel
+        t.mock.method(SSHSession.prototype, 'acquireJumpChannel', function (this: SSHSession, j: SSHSession, signal?: AbortSignal) {
+            target = this
+            return acquire.call(this, j, signal, 50)
+        })
+        t.mock.method(SSHSession.prototype, 'start', async function (this: SSHSession) {
+            if (this.profile.options.host === 'target') { starts++ }
+            this.ssh = authenticatedSession(env, this.profile).client
+            this.open = true
+        })
+        let retries = 0
+        t.mock.method((tab as any).connection, 'schedule', () => { retries++; return 1000 })
+        const first = tab.initializeSession()
+        await until(() => entered)
+        assert.equal((jump as any).refCount, 2)
+        if (failure === 'cancel') { await tab.disconnect() }
+        if (failure === 'reject') { pending.reject(new Error('forward denied')) }
+        if (failure === 'transport') { await jump.destroy('transport') }
+        await first
+        assert.equal(starts, 0)
+        assert.equal((target as any).locallyDestroyed, true)
+        assert.equal((jump as any).refCount, 1)
+        assert.equal(jump.canAcquireChannels, failure === 'reject')
+        // The tab's jump UI handler remains until the next setSession. Its
+        // dependent-target subscription must have been removed already.
+        assert.equal((jump as any).willDestroy.observers.length, failure === 'transport' ? 0 : initialObservers + 1)
+        assert.equal(retries, failure === 'transport' ? 1 : 0)
+        if (failure !== 'transport') {
+            assert.equal(jump.open, true)
+            client.openTCPForwardChannel = async () => channel()
+            await tab.reconnect()
+            assert.equal(tab.session?.open, true)
+            assert.equal(starts, 1)
+        }
+        if (failure !== 'reject') {
+            pending.resolve(old)
+            await until(() => old.closes === 1, 'late direct-tcpip cleanup')
+            assert.equal(jump.canAcquireChannels, true)
+            assert.equal(old.shellRequests, 0)
+            if (failure !== 'transport') { assert.equal(tab.session?.open, true) }
+        }
+        await tab.disconnect()
+        await tab.sshSession?.destroy()
+        await jump.destroy()
+    })
+}
+
+test('target startup failure discards an acquired, unconsumed jump channel and releases the jump', async t => {
+    const jumpProfile = profile({ host: 'jump' })
+    jumpProfile.id = 'jump'
+    const env = environment([jumpProfile]), { ssh: jump, client } = authenticatedSession(env, jumpProfile)
+    await env.multiplexer.addSession(jump)
+    const acquired = channel()
+    client.openTCPForwardChannel = async () => acquired
+    t.mock.method(SSHSession.prototype, 'start', async () => { throw new Error('target startup failed') })
+    const tab = env.tab(profile({ host: 'target', jumpHost: 'jump' }))
+    await tab.initializeSession()
+    await until(() => acquired.closes === 1, 'unconsumed forward cleanup')
+    assert.equal((jump as any).refCount, 1)
+    assert.equal(jump.open, true)
+    assert.equal(tab.session, null)
+    await jump.destroy()
+})
+
+test('tmux exec acquisition cancellation excludes the stalled transport and closes a late channel', async () => {
+    const env = environment(), { ssh, client } = authenticatedSession(env)
+    const c = channel(), pending = deferred<any>(), controller = new AbortController()
+    let entered = false
+    client.openSessionChannel = () => { entered = true; return pending.promise }
+    const opening = ssh.openExecChannel(controller.signal)
+    const rejected = assert.rejects(opening, /cancelled/)
+    await until(() => entered)
+    controller.abort()
+    await rejected
+    assert.equal(ssh.canAcquireChannels, false)
+    assert.equal(ssh.open, true)
+    pending.resolve(c)
+    await until(() => c.closes === 1, 'late exec cleanup')
+    assert.equal(ssh.canAcquireChannels, true)
+    assert.equal(c.execRequests.length, 0)
+    await ssh.destroy()
+})
+
+test('jump loss during target authentication releases the target and schedules transport retry', async t => {
+    const jumpProfile = profile({ host: 'jump' })
+    jumpProfile.id = 'jump'
+    const env = environment([jumpProfile]), { ssh: jump, client } = authenticatedSession(env, jumpProfile)
+    await env.multiplexer.addSession(jump)
+    client.openTCPForwardChannel = async () => channel()
+    const pending = deferred<void>()
+    let target: SSHSession|undefined
+    t.mock.method(SSHSession.prototype, 'start', async function (this: SSHSession) {
+        target = this
+        this.connectStage = 'authentication'
+        this.willDestroy$.subscribe(() => pending.reject(new Error('auth interrupted')))
+        await pending.promise
+    })
+    const tab = env.tab(profile({ host: 'target', jumpHost: 'jump' }))
+    let retries = 0
+    t.mock.method((tab as any).connection, 'schedule', () => { retries++; return 1000 })
+    const first = tab.initializeSession()
+    await until(() => !!target)
+    await jump.destroy('transport')
+    await first
+    assert.equal(target!.transportLost, true)
+    assert.equal((jump as any).refCount, 1)
+    assert.equal(retries, 1)
+    await tab.disconnect()
 })

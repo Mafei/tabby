@@ -57,6 +57,14 @@ cycle alive. Shell acquisition
 to shell or transport cancellation. A late acquired channel is activated only for
 cleanup and never starts a shell. Shell/exec startup requests are also bounded.
 Jump-host destruction explicitly propagates transport loss to its dependent targets;
+target cancellation is registered before jump lookup/authentication and direct-tcpip
+acquisition. Forward acquisition has the same deadline/cancellation boundary and
+late cleanup; rejection and target startup failure release the jump reference.
+russh retains its client mutex during native channel-open requests. An abandoned
+request temporarily excludes that transport from new multiplexed acquisitions;
+reconnect authenticates a fresh transport while existing tabs keep the old one.
+The exclusion ends when the native request settles, and a late channel is closed.
+The wrapper cannot forcibly cancel that native request while preserving other tabs.
 local teardown remains distinct. Native teardown, resize and write rejections after
 TCP loss are consumed.
 
@@ -91,7 +99,11 @@ Node integration tests import the actual SSHSession, SSHShellSession, SSHTabComp
 connectable tab lifecycle and terminal middleware. Angular/Electron rendering and
 credential-storage APIs are stand-ins; no production credentials are read. Deferred
 native-channel fixtures cover cancellation, rejection and timeout at each acquisition
-stage while another tab keeps the transport alive. Loopback-only SSH2 servers with
+stage while another tab keeps the transport alive. Pending direct-tcpip tests cover
+cancel/reject/timeout/transport loss, jump reference balance, late cleanup and target
+startup failure. A held native direct-tcpip test verifies reconnect with a fresh
+transport while preserving the shared jump and discarding a late forward.
+Loopback-only SSH2 servers with
 in-memory disposable host keys exercise the real russh client, keyboard-interactive
 cancel/reconnect, actual TCP interruption, and two targets sharing a jump transport.
 Tests explicitly collect unreachable native handles to exercise finalizers without
