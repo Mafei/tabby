@@ -103,6 +103,11 @@ absent for 350 ms before touching EndSelection. It uses the same app-targeted
 MotionEvent without dispatch retries, system-window injection or permission
 changes. Window diagnostics return fixed booleans; raw window dumps stay in
 memory and never enter logs or artifacts.
+Each shell-command setup through the real clipboard also waits for the native
+IME to be hidden and the native/WebView geometry to stabilize, then waits for
+the clipboard preview to disappear naturally before touching Paste and Enter.
+The actual command still travels through the UI and real SSH PTY; no direct
+write substitutes for these paste/enter gates.
 PTY-size measurements send only a fresh-counter `stty size` query through the
 actual native plugin's SSH write. They do not touch the UI or send a resize.
 Each measurement requires 350 ms of stable native/browser/xterm geometry and

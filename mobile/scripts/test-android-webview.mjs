@@ -117,7 +117,17 @@ export async function webviewAcceptance (android, fixture) {
                         nativeTouch: geometry(window.__tabbyCloudObservation?.lastNativeTouch),
                         nativeTouchHitTarget: window.__tabbyCloudObservation?.nativeTouchHitTarget === true,
                         clipboardOverlay: { observed: window.__tabbyCloudObservation?.clipboardOverlay?.observed === true,
-                            cleared: window.__tabbyCloudObservation?.clipboardOverlay?.cleared === true },
+                            cleared: window.__tabbyCloudObservation?.clipboardOverlay?.cleared === true,
+                            phase: ['command', 'selection'].includes(window.__tabbyCloudObservation?.clipboardOverlay?.phase)
+                                ? window.__tabbyCloudObservation.clipboardOverlay.phase : 'unknown' },
+                        commandPreparation: {
+                            phase: ['before-clipboard', 'after-clipboard'].includes(window.__tabbyCloudObservation?.commandPreparation?.phase)
+                                ? window.__tabbyCloudObservation.commandPreparation.phase : 'unknown',
+                            geometry: geometry(window.__tabbyCloudObservation?.commandPreparation?.geometry),
+                            documentFocused: window.__tabbyCloudObservation?.commandPreparation?.documentFocused === true,
+                            keyboardHidden: window.__tabbyCloudObservation?.commandPreparation?.keyboardHidden === true,
+                            stable: window.__tabbyCloudObservation?.commandPreparation?.stable === true,
+                        },
                         ptySizes: Object.fromEntries(['hidden', 'shown', 'rotated'].filter(phase => window.__tabbyCloudObservation?.ptySizes?.[phase])
                             .map(phase => {
                                 const value = window.__tabbyCloudObservation.ptySizes[phase]
@@ -182,10 +192,69 @@ export async function webviewAcceptance (android, fixture) {
     async function plugin (method, options) {
         return page.evaluate(async ({ method, options }) => window.Capacitor.Plugins.TabbySSH[method](options), { method, options })
     }
+    async function clipboardOverlayCleared (phase) {
+        // Clipboard preview belongs to SystemUI. Wait for its natural timeout
+        // before app-owned injection; do not change permissions or retry touch.
+        let observed = false
+        let clearSince
+        const deadline = Date.now() + 10000
+        const inTime = () => check(Date.now() < deadline, 'ANDROID_CLIPBOARD_OVERLAY_DID_NOT_DISAPPEAR')
+        await until(async () => {
+            inTime()
+            let windows
+            try { windows = await android.windows(Math.min(5000, deadline - Date.now())) }
+            catch (error) { inTime(); throw error }
+            inTime()
+            check(windows.appWindowFound && windows.appWindowVisible, 'ANDROID_CLIPBOARD_APP_WINDOW_UNAVAILABLE')
+            // A missing mCurrentFocus field is represented as false by the
+            // windows parser; it does not establish that our app lost focus.
+            if (windows.clipboardOverlayVisible) { observed = true; clearSince = undefined }
+            else if (clearSince === undefined) { clearSince = Date.now() }
+            const cleared = clearSince !== undefined && Date.now() - clearSince >= 350
+            await page.evaluate(value => { window.__tabbyCloudObservation.clipboardOverlay = value }, { phase, observed, cleared })
+            inTime()
+            return cleared
+        }, 'ANDROID_CLIPBOARD_OVERLAY_DID_NOT_DISAPPEAR', 10000)
+    }
+    async function commandViewportHidden (phase) {
+        const deadline = Date.now() + 10000
+        const inTime = () => check(Date.now() < deadline, 'ANDROID_COMMAND_VIEWPORT_DID_NOT_STABILIZE')
+        let previous
+        let stableSince = Date.now()
+        await until(async () => {
+            inTime()
+            const [native, browser] = await Promise.all([
+                viewport(), page.evaluate(() => {
+                    const scroll = window.__tabbyCloudObservation.readScroll()
+                    const keys = ['terminalX', 'terminalY', 'terminalWidth', 'terminalHeight', 'screenWidth', 'screenHeight',
+                        'rowCount', 'viewportWidth', 'viewportHeight', 'visualHeight', 'devicePixelRatio']
+                    return { geometry: Object.fromEntries(keys.map(key => [key, scroll[key]])), documentFocused: document.hasFocus() }
+                }),
+            ])
+            inTime()
+            const geometry = { ...browser.geometry, nativeViewportWidth: native.viewportWidth, nativeViewportHeight: native.viewportHeight }
+            const keyboardHidden = native.visible === false
+            const valid = Object.values(geometry).every(Number.isFinite)
+                && ['terminalWidth', 'terminalHeight', 'screenWidth', 'screenHeight', 'rowCount', 'viewportWidth',
+                    'viewportHeight', 'visualHeight', 'devicePixelRatio', 'nativeViewportWidth', 'nativeViewportHeight'].every(key => geometry[key] > 0)
+                && keyboardHidden && browser.documentFocused === true
+            const serialized = JSON.stringify({ geometry, keyboardHidden, documentFocused: browser.documentFocused })
+            if (!valid || serialized !== previous) { previous = serialized; stableSince = Date.now() }
+            const stable = valid && Date.now() - stableSince >= 350
+            await page.evaluate(value => { window.__tabbyCloudObservation.commandPreparation = value },
+                { phase, geometry, documentFocused: browser.documentFocused === true, keyboardHidden, stable })
+            inTime()
+            return stable
+        }, 'ANDROID_COMMAND_VIEWPORT_DID_NOT_STABILIZE', 10000)
+    }
     async function sendLine (line) {
-        await plugin('writeClipboard', { text: line })
-        await nativeTouch(page.getByRole('button', { name: '粘贴', exact: true }))
-        await nativeTouch(page.getByRole('button', { name: '发送回车', exact: true }))
+        await step('command-hide-ime', () => plugin('hideKeyboard'))
+        await step('command-before-clipboard-viewport-stable', () => commandViewportHidden('before-clipboard'))
+        await step('command-write-system-clipboard', () => plugin('writeClipboard', { text: line }))
+        await step('command-system-overlay-cleared', () => clipboardOverlayCleared('command'))
+        await step('command-after-clipboard-viewport-stable', () => commandViewportHidden('after-clipboard'))
+        await step('command-paste-native-touch', () => nativeTouch(page.getByRole('button', { name: '粘贴', exact: true })))
+        await step('command-enter-native-touch', () => nativeTouch(page.getByRole('button', { name: '发送回车', exact: true })))
     }
     async function observe () {
         await page.waitForSelector('tabby-mobile')
@@ -428,7 +497,7 @@ export async function webviewAcceptance (android, fixture) {
         await plugin('hideKeyboard')
         await resetOutput()
         await sendLine("printf '%s\\n' ANDROIDCLIPBOARDTOKEN; seq 1 80; printf '%s%s\\n' 'W_SCROLL_' 'HISTORY_READY'")
-        await output('W_SCROLL_HISTORY_READY')
+        await step('terminal-history-command-output-ready', () => output('W_SCROLL_HISTORY_READY'))
         await plugin('hideKeyboard')
         await step('parsed-terminal-history-ready', () => until(() => page.evaluate(() => {
             const rows = document.querySelector('.xterm-rows')?.textContent || ''
@@ -520,29 +589,7 @@ export async function webviewAcceptance (android, fixture) {
         await step('selection-copy-native-touch', () => nativeTouch(page.getByRole('button', { name: '复制', exact: true })))
         const copied = await step('selection-read-system-clipboard', () => plugin('readClipboard'))
         check(copied.text === selected, 'ANDROID_SYSTEM_CLIPBOARD_COPY_MISMATCH')
-        await step('clipboard-system-overlay-cleared', async () => {
-            // Android's real copy preview temporarily covers EndSelection.
-            // Keep injection confined to the app by waiting for its natural
-            // timeout before the original native touch; never retry dispatch.
-            let observed = false
-            let clearSince
-            const deadline = Date.now() + 10000
-            const inTime = () => check(Date.now() < deadline, 'ANDROID_CLIPBOARD_OVERLAY_DID_NOT_DISAPPEAR')
-            await until(async () => {
-                inTime()
-                let windows
-                try { windows = await android.windows(Math.min(5000, deadline - Date.now())) }
-                catch (error) { inTime(); throw error }
-                inTime()
-                check(windows.appWindowFound && windows.appWindowVisible, 'ANDROID_CLIPBOARD_APP_WINDOW_UNAVAILABLE')
-                if (windows.clipboardOverlayVisible) { observed = true; clearSince = undefined }
-                else if (clearSince === undefined) { clearSince = Date.now() }
-                const cleared = clearSince !== undefined && Date.now() - clearSince >= 350
-                await page.evaluate(value => { window.__tabbyCloudObservation.clipboardOverlay = value }, { observed, cleared })
-                inTime()
-                return cleared
-            }, 'ANDROID_CLIPBOARD_OVERLAY_DID_NOT_DISAPPEAR', 10000)
-        })
+        await step('clipboard-system-overlay-cleared', () => clipboardOverlayCleared('selection'))
         await step('selection-end-native-touch', () => nativeTouch(page.getByRole('button', { name: '结束选择', exact: true })))
         await step('clipboard-paste-native-touch', () => nativeTouch(page.getByRole('button', { name: '粘贴', exact: true })))
         await step('clipboard-focus-input-native-touch', () => nativeTouch(page.getByRole('button', { name: '键盘', exact: true })))
