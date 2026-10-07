@@ -15,6 +15,8 @@ export class SSHShellSession extends BaseSession {
     private serviceMessage = new Subject<string>()
     endReason: 'channel'|'transport'|'local' = 'local'
     private shellDestroying = false
+    private refHeld = false
+    private abort = () => { this.destroy() }
     private subscriptions: Subscription[] = []
     private ssh: SSHSession|null
 
@@ -25,6 +27,7 @@ export class SSHShellSession extends BaseSession {
         private binding: TmuxBinding|null = null,
         private takeover = false,
         private allowOccupied = false,
+        private signal?: AbortSignal,
     ) {
         super(injector.get(LogService).create(`ssh-shell-${profile.options.host}-${profile.options.port}`))
         this.ssh = ssh
@@ -41,7 +44,10 @@ export class SSHShellSession extends BaseSession {
             throw new Error('SSH session not set')
         }
 
+        if (this.signal?.aborted) { throw new Error('Shell channel cancelled') }
+        this.signal?.addEventListener('abort', this.abort, { once: true })
         this.ssh.ref()
+        this.refHeld = true
         this.subscriptions.push(this.ssh.willDestroy$.subscribe(() => {
             this.endReason = this.ssh?.transportLost ? 'transport' : 'local'
             this.destroy()
@@ -93,15 +99,19 @@ export class SSHShellSession extends BaseSession {
             await this.shell.requestExec(`sh -c ${shellQuote(attachCommand(this.binding, this.takeover, this.allowOccupied))}`)
         } else {
             await this.shell.requestShell()
-            if (!this.open || this.shellDestroying) { return }
+            if (!this.isActive()) { return }
             this.loginScriptProcessor?.executeUnconditionalScripts()
         }
 
         // Must run after the output subscriptions above are wired, otherwise the
         // command echo and anything the remote prints in response is dropped.
-        if (this.open && !this.binding && this.profile.options.cwd) {
+        if (this.isActive() && !this.binding && this.profile.options.cwd) {
             this.changeInitialDirectory(this.profile.options.cwd)
         }
+    }
+
+    private isActive (): boolean {
+        return this.open && !this.shellDestroying
     }
 
     emitServiceMessage (msg: string): void {
@@ -131,6 +141,7 @@ export class SSHShellSession extends BaseSession {
     async destroy (): Promise<void> {
         if (this.shellDestroying) { return }
         this.shellDestroying = true
+        this.signal?.removeEventListener('abort', this.abort)
         this.subscriptions.forEach(subscription => subscription.unsubscribe())
         this.logger.debug('Closing shell')
         this.serviceMessage.complete()
@@ -138,7 +149,10 @@ export class SSHShellSession extends BaseSession {
         this.shell?.close().catch(() => undefined)
         const transport = this.ssh
         // Keep transport alive while disconnect$ drains after CHANNEL_CLOSE.
-        setTimeout(() => transport?.unref(), 100)
+        if (this.refHeld) {
+            this.refHeld = false
+            setTimeout(() => transport?.unref(), 100)
+        }
         this.ssh = null
         await super.destroy()
     }

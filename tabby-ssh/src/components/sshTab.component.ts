@@ -322,7 +322,7 @@ export class SSHTabComponent extends ConnectableTerminalTabComponent<SSHProfile>
                 if (current.clients && !selection.allowOccupied) { throw new TmuxError('Session became occupied; reconnect manually to choose access mode') }
             }
             if (!this.connection.current(generation)) { return }
-            shell = new SSHShellSession(this.injector, ssh, this.profile, this.tmuxBinding, selection.takeover, selection.allowOccupied)
+            shell = new SSHShellSession(this.injector, ssh, this.profile, this.tmuxBinding, selection.takeover, selection.allowOccupied, signal)
             this.setSession(shell)
             this.attachSessionHandler(shell.serviceMessage$, msg => {
                 this.write(`\r${colors.black.bgWhite(' SSH ')} ${msg.replace(/\n/g, '\r\n      ')}\r\n`)
