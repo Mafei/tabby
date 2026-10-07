@@ -22,6 +22,7 @@ export async function webviewAcceptance (android, fixture) {
     let page
     let stage = 'harness-start'
     let substage = 'initializing'
+    let sizeSequence = 0
 
     const verify = label => { passed.push(label); console.log(`PASS Android WebView: ${label}.`) }
     async function step (name, action) {
@@ -116,6 +117,15 @@ export async function webviewAcceptance (android, fixture) {
                         nativeTouch: geometry(window.__tabbyCloudObservation?.lastNativeTouch),
                         clipboardOverlay: { observed: window.__tabbyCloudObservation?.clipboardOverlay?.observed === true,
                             cleared: window.__tabbyCloudObservation?.clipboardOverlay?.cleared === true },
+                        ptySizes: Object.fromEntries(['hidden', 'shown', 'rotated'].filter(phase => window.__tabbyCloudObservation?.ptySizes?.[phase])
+                            .map(phase => {
+                                const value = window.__tabbyCloudObservation.ptySizes[phase]
+                                return [phase, { expectedIME: value.expectedIME === true, before: geometry(value.before), after: geometry(value.after),
+                                    ...(typeof value.before?.nativeKeyboardVisible === 'boolean' ? { beforeIME: value.before.nativeKeyboardVisible } : {}),
+                                    ...(typeof value.after?.nativeKeyboardVisible === 'boolean' ? { afterIME: value.after.nativeKeyboardVisible } : {}),
+                                    remote: Object.fromEntries(['rows', 'cols'].filter(key => Number.isFinite(value.remote?.[key])).map(key => [key, value.remote[key]])),
+                                    converged: value.converged === true }]
+                            })),
                     }
                 })
             } catch { result.domUnavailable = true }
@@ -286,16 +296,74 @@ export async function webviewAcceptance (android, fixture) {
         await android.shell(`settings put ${namespace} ${name} ${value}`)
     }
     async function viewport () { return plugin('getViewport') }
-    async function size () {
-        await resetOutput()
-        await sendLine("printf '__PTY_SIZE__'; stty size")
-        let match
-        await until(async () => {
-            const text = await page.evaluate(() => window.__tabbyCloudObservation.output)
-            match = text.match(/__PTY_SIZE__(\d+) (\d+)/)
-            return !!match
-        }, 'ANDROID_REMOTE_PTY_SIZE_NOT_RECEIVED')
-        return { rows: Number(match[1]), cols: Number(match[2]) }
+    async function size (expectedIME, phase) {
+        const keys = ['terminalX', 'terminalY', 'terminalWidth', 'terminalHeight', 'screenWidth', 'screenHeight', 'rowCount',
+            'viewportWidth', 'viewportHeight', 'visualHeight', 'devicePixelRatio']
+        const geometry = async () => {
+            const [scroll, native] = await Promise.all([
+                page.evaluate(() => window.__tabbyCloudObservation.readScroll()), viewport(),
+            ])
+            return { ...Object.fromEntries(keys.map(key => [key, scroll[key]])), nativeViewportWidth: native.viewportWidth,
+                nativeViewportHeight: native.viewportHeight, nativeKeyboardVisible: native.visible }
+        }
+        const deadline = Date.now() + 10000
+        const inTime = () => check(Date.now() < deadline, 'ANDROID_REMOTE_PTY_SIZE_DID_NOT_CONVERGE')
+        let previous
+        let stableSince = Date.now()
+        let before
+        await step(`pty-${phase}-geometry-stable`, () => until(async () => {
+            inTime()
+            const current = await geometry()
+            inTime()
+            const valid = keys.every(key => Number.isFinite(current[key])) && current.rowCount > 0 && current.screenHeight > 0
+                && current.nativeKeyboardVisible === expectedIME && Number.isFinite(current.nativeViewportWidth) && Number.isFinite(current.nativeViewportHeight)
+                && current.nativeViewportWidth > 0 && current.nativeViewportHeight > 0
+            const serialized = JSON.stringify(current)
+            if (!valid || serialized !== previous) { previous = serialized; stableSince = Date.now(); return false }
+            before = current
+            return Date.now() - stableSince >= 350
+        }, 'ANDROID_PTY_SIZE_LAYOUT_DID_NOT_STABILIZE', 10000))
+        await page.evaluate(({ phase, ...value }) => {
+            window.__tabbyCloudObservation.ptySizes ??= {}
+            window.__tabbyCloudObservation.ptySizes[phase] = value
+        }, { phase, expectedIME, before, converged: false })
+        inTime()
+        // A real UI tap can reopen a hidden IME when its textarea is focused.
+        // Measure through the actual plugin's SSH write, without a focus change
+        // or any test-generated resize request.
+        while (Date.now() < deadline) {
+            substage = `pty-${phase}-native-write-query`
+            const ready = await page.evaluate(() => window.__tabbyCloudObservation.events.findLast(event => event.type === 'state' && event.state === 'ready'))
+            inTime()
+            const validID = typeof ready?.connectionId === 'string' && /^[1-9]\d{0,18}$/.test(ready.connectionId)
+                && BigInt(ready.connectionId) <= 9223372036854775807n
+            check(validID && Number.isSafeInteger(ready?.generation) && ready.generation >= 0, 'ANDROID_PTY_SIZE_READY_IDENTITY_MISSING')
+            const marker = `__PTY_SIZE_${++sizeSequence}__`
+            await plugin('command', { connectionId: ready.connectionId, command: { type: 'write', generation: ready.generation,
+                data: Buffer.from(`printf '${marker}'; stty size\r`).toString('base64') } })
+            inTime()
+            let remote
+            await step(`pty-${phase}-fresh-remote-size`, () => until(async () => {
+                remote = await page.evaluate(marker => {
+                    const match = window.__tabbyCloudObservation.output.match(new RegExp(`${marker}(\\d+) (\\d+)\\r?\\n`))
+                    return match ? { rows: Number(match[1]), cols: Number(match[2]) } : undefined
+                }, marker)
+                inTime()
+                return !!remote
+            }, 'ANDROID_REMOTE_PTY_SIZE_NOT_RECEIVED', Math.max(1, deadline - Date.now())))
+            const after = await geometry()
+            inTime()
+            const unchanged = JSON.stringify(after) === JSON.stringify(before)
+            const valid = Number.isSafeInteger(remote.rows) && remote.rows > 0 && Number.isSafeInteger(remote.cols) && remote.cols > 0
+            const converged = valid && remote.rows === after.rowCount
+            await page.evaluate(({ phase, ...value }) => { Object.assign(window.__tabbyCloudObservation.ptySizes[phase], value) }, { phase, after, remote, converged })
+            inTime()
+            check(unchanged, 'ANDROID_PTY_SIZE_PROBE_CHANGED_VIEWPORT')
+            check(valid, 'ANDROID_REMOTE_PTY_SIZE_INVALID')
+            if (converged) { return remote }
+            await pause(50)
+        }
+        throw new TestFailure('ANDROID_REMOTE_PTY_SIZE_DID_NOT_CONVERGE')
     }
     async function rawProbe (marker, count) {
         await resetOutput()
@@ -468,23 +536,26 @@ export async function webviewAcceptance (android, fixture) {
         verify('native Android swipe/long-press selection → system clipboard → real PTY paste')
 
         stage = 'system-keyboard-and-rotation-resize'
-        await setting('secure', 'show_ime_with_hard_keyboard', 1)
-        await plugin('hideKeyboard')
-        await until(async () => !(await viewport()).visible, 'ANDROID_IME_DID_NOT_HIDE')
+        await step('keyboard-enable-system-ime', () => setting('secure', 'show_ime_with_hard_keyboard', 1))
+        await step('keyboard-hide-for-baseline', () => plugin('hideKeyboard'))
+        await step('keyboard-hidden-native-state', () => until(async () => !(await viewport()).visible, 'ANDROID_IME_DID_NOT_HIDE'))
+        const sizeBefore = await size(false, 'hidden')
         const hidden = await viewport()
-        const sizeBefore = await size()
-        await nativeTouch(page.getByRole('button', { name: '键盘', exact: true }))
-        await until(async () => (await viewport()).visible, 'ANDROID_SYSTEM_IME_DID_NOT_SHOW')
+        await step('keyboard-show-native-touch', () => nativeTouch(page.getByRole('button', { name: '键盘', exact: true })))
+        await step('keyboard-shown-native-state', () => until(async () => (await viewport()).visible, 'ANDROID_SYSTEM_IME_DID_NOT_SHOW'))
+        const sizeShown = await size(true, 'shown')
         const shown = await viewport()
+        substage = 'keyboard-native-viewport-shrank'
         check(shown.height > 0 && shown.viewportHeight < hidden.viewportHeight, 'ANDROID_IME_VIEWPORT_DID_NOT_SHRINK')
-        const sizeShown = await size()
+        substage = 'keyboard-real-pty-rows-decreased'
         check(sizeShown.rows < sizeBefore.rows, 'ANDROID_IME_DID_NOT_RESIZE_REMOTE_PTY')
-        await plugin('hideKeyboard')
-        await until(async () => !(await viewport()).visible, 'ANDROID_IME_DID_NOT_HIDE_AFTER_SHOW')
-        await setting('system', 'accelerometer_rotation', 0)
-        await setting('system', 'user_rotation', 1)
-        await until(async () => { const value = await viewport(); return value.viewportWidth > value.viewportHeight }, 'ANDROID_ROTATION_DID_NOT_CHANGE_VIEWPORT')
-        const sizeRotated = await size()
+        await step('keyboard-hide-after-shown-size', () => plugin('hideKeyboard'))
+        await step('keyboard-hidden-before-rotation', () => until(async () => !(await viewport()).visible, 'ANDROID_IME_DID_NOT_HIDE_AFTER_SHOW'))
+        await step('rotation-disable-automatic', () => setting('system', 'accelerometer_rotation', 0))
+        await step('rotation-landscape', () => setting('system', 'user_rotation', 1))
+        await step('rotation-native-viewport-landscape', () => until(async () => { const value = await viewport(); return value.viewportWidth > value.viewportHeight }, 'ANDROID_ROTATION_DID_NOT_CHANGE_VIEWPORT'))
+        const sizeRotated = await size(false, 'rotated')
+        substage = 'rotation-real-pty-cols-changed'
         check(sizeRotated.cols !== sizeBefore.cols, 'ANDROID_ROTATION_DID_NOT_RESIZE_REMOTE_PTY')
         verify('actual AOSP system keyboard show/hide and rotation update WebView and SSH PTY dimensions')
 

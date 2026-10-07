@@ -88,6 +88,13 @@ absent for 350 ms before touching EndSelection. It uses the same app-targeted
 MotionEvent without dispatch retries, system-window injection or permission
 changes. Window diagnostics return fixed booleans; raw window dumps stay in
 memory and never enter logs or artifacts.
+PTY-size measurements send only a fresh-counter `stty size` query through the
+actual native plugin's SSH write. They do not touch the UI or send a resize.
+Each measurement requires 350 ms of stable native/browser/xterm geometry and
+the expected IME state, then unchanged viewport/IME and fresh real PTY rows
+matching the rendered xterm row count within a 10 s absolute deadline. The
+native keyboard button, system show/hide and rotation still drive the app's
+fit/resize behavior; keyboard rows must decrease and rotation columns change.
 
 `--native-only` and `--webview-only` support focused reruns, and explicitly mark
 their partial scope in the report. The default runs both phases.
