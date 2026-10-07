@@ -86,7 +86,12 @@ def main():
         names = archive.namelist()
         required_libraries = {'lib/arm64-v8a/libtabby_ssh.so': 183, 'lib/x86_64/libtabby_ssh.so': 62}
         require({name for name in names if name.startswith('lib/')} == set(required_libraries), 'Wrong native libraries or ABIs')
-        require(not any(re.search(r'(?:keystore|\.pem$|fixture|CloudWebViewHarness|androidTest)', name, re.I) for name in names), 'Test data or private signing material packaged in main APK')
+        require(not any(re.search(r'(?:keystore|\.(?:pem|jks|key)$|fixture|CloudWebViewHarness|androidTest)', name, re.I) for name in names), 'Test data or private signing material packaged in main APK')
+        for name in names:
+            if name.endswith('.dex'):
+                dex = archive.read(name)
+                for test_class in ['CloudWebViewHarness', 'RealSSHBridgeTest', 'AndroidHostKeyStoreTest', 'ViewportLifecycleTest']:
+                    require(('Lorg/tabby/android/prototype/' + test_class + ';').encode() not in dex, 'Instrumentation class packaged in main DEX: ' + test_class)
         config = json.loads(archive.read('assets/capacitor.config.json'))
         require(config.get('loggingBehavior') == 'none', 'Capacitor logging must remain disabled')
         require(config['android'].get('allowMixedContent') is False and config['android'].get('webContentsDebuggingEnabled') is False, 'Unsafe WebView configuration')

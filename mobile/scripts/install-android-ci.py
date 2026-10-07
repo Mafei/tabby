@@ -20,6 +20,7 @@ PACKAGES = [
     'platform-tools', 'platforms;android-36', 'build-tools;36.0.0',
     'ndk;27.3.13750724', 'emulator', 'system-images;android-35;default;x86_64',
 ]
+METADATA_PACKAGES = set(PACKAGES + ['cmdline-tools;22.0'])
 
 
 def download(url, destination):
@@ -49,7 +50,7 @@ def main():
         if hashlib.sha256(license.text.encode()).hexdigest() != LICENSE_SHA256:
             raise SystemExit('The Android SDK agreement changed; no agreement was accepted')
         for package in root:
-            if not package.tag.endswith('remotePackage') or package.get('path') not in PACKAGES:
+            if not package.tag.endswith('remotePackage') or package.get('path') not in METADATA_PACKAGES:
                 continue
             channel = next((x.get('ref') for x in package if x.tag.endswith('channelRef')), 'channel-0')
             if channel != 'channel-0':
@@ -58,7 +59,7 @@ def main():
             if agreement != 'android-sdk-license':
                 raise SystemExit('A selected package requires an additional agreement; installation stopped')
             selected.add(package.get('path'))
-    if selected != set(PACKAGES):
+    if selected != METADATA_PACKAGES:
         raise SystemExit('The exact stable package set could not be verified')
     archive = downloads / 'commandlinetools-linux-15859902_latest.zip'
     download('https://dl.google.com/android/repository/' + archive.name, archive)
@@ -83,7 +84,7 @@ def main():
         str(tools / 'latest' / 'bin' / 'sdkmanager'), '--channel=0',
         '--sdk_root=' + str(sdk), *PACKAGES,
     ], stdin=subprocess.DEVNULL, check=True)
-    for relative in ['platform-tools/adb', 'build-tools/36.0.0/aapt2',
+    for relative in ['platform-tools/adb', 'platforms/android-36/android.jar', 'build-tools/36.0.0/aapt2',
                      'ndk/27.3.13750724/source.properties', 'emulator/emulator',
                      'system-images/android-35/default/x86_64/system.img']:
         if not (sdk / relative).is_file():

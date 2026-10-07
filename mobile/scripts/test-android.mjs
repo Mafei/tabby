@@ -28,6 +28,7 @@ const cancel = () => { cancelled = true; cancelCommands() }
 process.once('SIGTERM', cancel)
 process.once('SIGINT', cancel)
 try {
+    check(!(process.argv.includes('--native-only') && process.argv.includes('--webview-only')), 'CONFLICTING_TEST_SCOPES')
     const serial = option('--serial', process.env.ANDROID_SERIAL)
     reportPath = option('--report', process.env.ANDROID_TEST_REPORT)
     const appAPK = resolve(option('--app-apk', resolve(repository, 'mobile/android/app/build/outputs/apk/debug/app-debug.apk')))
