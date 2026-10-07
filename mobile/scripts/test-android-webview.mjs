@@ -68,7 +68,9 @@ export async function webviewAcceptance (android, fixture) {
                     const pointerEvents = new Set(['pointerdown', 'pointermove', 'pointerup', 'pointercancel'])
                     const pointerTargets = new Set(['terminal', 'auxiliary', 'terminal-input', 'form', 'modal', 'other'])
                     const geometry = values => Object.fromEntries(['sliderCount', 'sliderTop', 'legacyViewportCount', 'legacyScrollTop',
-                        'x', 'y', 'width', 'height', 'fromX', 'fromY', 'toX', 'toY'].filter(key => Number.isFinite(values?.[key]))
+                        'x', 'y', 'width', 'height', 'fromX', 'fromY', 'toX', 'toY', 'terminalX', 'terminalY', 'terminalWidth', 'terminalHeight',
+                        'screenWidth', 'screenHeight', 'rowCount', 'scrollbarHeight', 'sliderHeight', 'viewportWidth', 'viewportHeight',
+                        'visualHeight', 'devicePixelRatio', 'nativeViewportWidth', 'nativeViewportHeight', 'firstHistoryOrdinal'].filter(key => Number.isFinite(values?.[key]))
                         .map(key => [key, values[key]]))
                     const notice = document.querySelector('.notice')?.textContent || ''
                     return {
@@ -105,7 +107,9 @@ export async function webviewAcceptance (android, fixture) {
                             after: geometry(window.__tabbyCloudObservation?.scroll?.after),
                             requested: geometry(window.__tabbyCloudObservation?.scroll?.requested),
                             renderedReady: window.__tabbyCloudObservation?.scroll?.renderedReady === true,
-                            renderedChanged: window.__tabbyCloudObservation?.scroll?.renderedChanged === true },
+                            renderedChanged: window.__tabbyCloudObservation?.scroll?.renderedChanged === true,
+                            geometryStable: window.__tabbyCloudObservation?.scroll?.geometryStable === true,
+                            earlierHistory: window.__tabbyCloudObservation?.scroll?.earlierHistory === true },
                     }
                 })
             } catch { result.domUnavailable = true }
@@ -135,13 +139,14 @@ export async function webviewAcceptance (android, fixture) {
     async function observe () {
         await page.waitForSelector('tabby-mobile')
         await page.evaluate(async () => {
-            const observation = { output: '', events: [], inputEvents: [], pointers: [], scroll: {} }
+            const observation = { output: '', events: [], inputEvents: [], pointers: [], scroll: {}, lastDataAt: performance.now() }
             window.__tabbyCloudObservation = observation
             const decoder = new TextDecoder()
             await window.Capacitor.Plugins.TabbySSH.addListener('sshEvent', event => {
                 // Only observe genuine emitted events; never replace the bridge.
                 if (observation.events.length < 1024) { observation.events.push(event) }
                 if (event.type === 'data') {
+                    observation.lastDataAt = performance.now()
                     const binary = atob(event.data)
                     observation.output += decoder.decode(Uint8Array.from(binary, char => char.charCodeAt(0)), { stream: true })
                     if (observation.output.length > 2 * 1024 * 1024) { observation.output = observation.output.slice(-1024 * 1024) }
@@ -172,8 +177,17 @@ export async function webviewAcceptance (android, fixture) {
                 const slider = document.querySelector(selector)
                 const top = Number.parseFloat(slider?.style.top || '')
                 const viewport = document.querySelector('.xterm-viewport')
+                const terminal = document.querySelector('.terminal-area')?.getBoundingClientRect()
+                const screen = document.querySelector('.xterm-screen')?.getBoundingClientRect()
+                const rows = [...document.querySelectorAll('.xterm-rows > div')]
+                const first = rows.map(row => row.textContent.trim()).find(text => /^(?:[1-9]|[1-7][0-9]|80)$/.test(text))
                 return { sliderCount: document.querySelectorAll(selector).length, sliderTop: Number.isFinite(top) ? top : null,
-                    legacyViewportCount: document.querySelectorAll('.xterm-viewport').length, legacyScrollTop: viewport?.scrollTop || 0 }
+                    legacyViewportCount: document.querySelectorAll('.xterm-viewport').length, legacyScrollTop: viewport?.scrollTop || 0,
+                    terminalX: terminal?.x || 0, terminalY: terminal?.y || 0, terminalWidth: terminal?.width || 0, terminalHeight: terminal?.height || 0,
+                    screenWidth: screen?.width || 0, screenHeight: screen?.height || 0, rowCount: rows.length,
+                    scrollbarHeight: slider?.parentElement?.getBoundingClientRect().height || 0, sliderHeight: slider?.getBoundingClientRect().height || 0,
+                    viewportWidth: innerWidth, viewportHeight: innerHeight, visualHeight: window.visualViewport?.height || 0,
+                    devicePixelRatio: window.devicePixelRatio, firstHistoryOrdinal: first === undefined ? null : Number(first) }
             }
         })
     }
@@ -312,15 +326,36 @@ export async function webviewAcceptance (android, fixture) {
             const scroll = window.__tabbyCloudObservation.readScroll()
             return rows.includes('W_SCROLL_HISTORY_READY') && scroll.sliderCount === 1 && scroll.sliderTop > 0
         }), 'ANDROID_TERMINAL_HISTORY_NOT_RENDERED'))
-        const scrollPosition = () => page.evaluate(() => window.__tabbyCloudObservation.readScroll())
-        const beforeScroll = await scrollPosition()
+        const scrollPosition = async () => {
+            const [scroll, native] = await Promise.all([
+                page.evaluate(() => window.__tabbyCloudObservation.readScroll()), viewport(),
+            ])
+            return { ...scroll, nativeViewportWidth: native.viewportWidth, nativeViewportHeight: native.viewportHeight,
+                nativeKeyboardVisible: native.visible }
+        }
+        let previousGeometry
+        let stableSince = Date.now()
+        let beforeScroll
+        await step('terminal-layout-and-output-stable', () => until(async () => {
+            const current = await scrollPosition()
+            const quietOutput = await page.evaluate(() => performance.now() - window.__tabbyCloudObservation.lastDataAt >= 350)
+            const serialized = JSON.stringify(current)
+            if (serialized !== previousGeometry || current.nativeKeyboardVisible || !quietOutput) {
+                previousGeometry = serialized
+                stableSince = Date.now()
+                return false
+            }
+            beforeScroll = current
+            return Date.now() - stableSince >= 350
+        }, 'ANDROID_TERMINAL_LAYOUT_DID_NOT_STABILIZE'))
         check(beforeScroll.sliderCount === 1 && Number.isFinite(beforeScroll.sliderTop), 'ANDROID_TERMINAL_SCROLLBAR_NOT_AVAILABLE')
+        check(Number.isInteger(beforeScroll.firstHistoryOrdinal), 'ANDROID_RENDERED_HISTORY_BASELINE_MISSING')
         const terminal = await page.locator('.terminal-area').boundingBox()
         check(!!terminal, 'ANDROID_TERMINAL_BOUNDS_MISSING')
         const gesture = { type: 'swipe', fromX: terminal.x + terminal.width / 2, fromY: terminal.y + terminal.height / 4,
             toX: terminal.x + terminal.width / 2, toY: terminal.y + terminal.height * 3 / 4, durationMs: 300 }
         await page.evaluate(({ before, requested }) => {
-            window.__tabbyCloudObservation.scroll = { before, requested, renderedReady: true }
+            window.__tabbyCloudObservation.scroll = { before, requested, renderedReady: true, geometryStable: true }
             // Keep rendered contents only in the WebView to compare equality.
             // No terminal contents are returned to reports or diagnostics.
             window.__tabbyCloudObservation.renderedBefore = document.querySelector('.xterm-rows')?.textContent || ''
@@ -335,13 +370,20 @@ export async function webviewAcceptance (android, fixture) {
         }), 'ANDROID_NATIVE_GESTURE_WAS_NOT_TOUCH', 3000))
         await step('terminal-scroll-position-changed', () => until(async () => {
             const after = await scrollPosition()
-            const renderedChanged = await page.evaluate(after => {
+            const sameGeometry = ['terminalX', 'terminalY', 'terminalWidth', 'terminalHeight', 'screenWidth', 'screenHeight', 'rowCount',
+                'scrollbarHeight', 'sliderHeight', 'viewportWidth', 'viewportHeight', 'visualHeight', 'devicePixelRatio',
+                'nativeViewportWidth', 'nativeViewportHeight', 'nativeKeyboardVisible'].every(key => after[key] === beforeScroll[key])
+            const earlierHistory = Number.isInteger(after.firstHistoryOrdinal) && after.firstHistoryOrdinal < beforeScroll.firstHistoryOrdinal
+            const renderedChanged = await page.evaluate(({ after, earlierHistory, sameGeometry }) => {
                 const observation = window.__tabbyCloudObservation
                 observation.scroll.after = after
                 observation.scroll.renderedChanged = (document.querySelector('.xterm-rows')?.textContent || '') !== observation.renderedBefore
+                observation.scroll.earlierHistory = earlierHistory
+                observation.scroll.geometryStable = sameGeometry
                 return observation.scroll.renderedChanged
-            }, after)
-            return after.sliderCount === 1 && Number.isFinite(after.sliderTop) && after.sliderTop < beforeScroll.sliderTop && renderedChanged
+            }, { after, earlierHistory, sameGeometry })
+            return sameGeometry && after.sliderCount === 1 && Number.isFinite(after.sliderTop) && after.sliderTop < beforeScroll.sliderTop
+                && renderedChanged && earlierHistory
         }, 'ANDROID_TOUCH_DID_NOT_SCROLL_TERMINAL'))
         substage = 'native-selection-and-clipboard'
         await rawProbe('W_CLIP', undefined)

@@ -74,7 +74,10 @@ actual select element because its wrapping label also contains the option text.
 The swipe gate waits for a fresh unique marker in both SSH output and parsed
 visible rows, with nonzero scrollback. It requires trusted WebView pointer
 events identified as touch, an actual xterm scrollbar-position change toward
-history and changed visible rows. Its failure diagnostics contain only pointer
+history and an earlier ordinal from the known `seq 1 80` output. Before the
+swipe, WebView/native viewport, terminal/screen/scrollbar geometry and row count
+must remain stable for at least 350 ms with quiet SSH output; the same geometry
+must hold after the gesture. Its failure diagnostics contain only pointer
 type, trust flag, numeric coordinates, scrollbar geometry and readiness/change
 booleans; visible terminal contents remain inside the WebView for comparison.
 

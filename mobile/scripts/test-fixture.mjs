@@ -8,10 +8,17 @@ import { join, resolve, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { spawn } from 'node:child_process'
 import { createServer, createConnection } from 'node:net'
+import { generateFixtureEd25519 } from './test-fixture-keys.mjs'
 
 const require = createRequire(import.meta.url)
 const { Server, utils } = require('ssh2')
 const ptyScript = fileURLToPath(new URL('./test-fixture-pty.py', import.meta.url))
+class RotationFailure extends Error {
+    constructor (stage, error) {
+        const codes = new Set(['EADDRINUSE', 'EACCES', 'ENOENT', 'ERR_SERVER_NOT_RUNNING'])
+        super(`FIXTURE_ROTATE_${stage}_${codes.has(error?.code) ? error.code : 'FAILED'}`)
+    }
+}
 
 function sameSecret (value, expected) {
     const a = Buffer.from(value)
@@ -36,9 +43,9 @@ function keyInfo (pair) {
 export async function startFixture ({ metadataFile, port = 0 } = {}) {
     const directory = await mkdtemp(join(tmpdir(), 'tabby-android-ssh-'))
     await chmod(directory, 0o700)
-    const generated = utils.generateKeyPairSync('ed25519')
+    const generated = generateFixtureEd25519()
     const passphrase = randomBytes(24).toString('base64url')
-    const encrypted = utils.generateKeyPairSync('ed25519', { passphrase, cipher: 'aes256-cbc' })
+    const encrypted = generateFixtureEd25519({ passphrase })
     const clientKeys = [keyInfo(generated), keyInfo(encrypted)]
     const privateKeyFile = join(directory, 'client-key')
     const encryptedPrivateKeyFile = join(directory, 'client-key-encrypted')
@@ -58,7 +65,7 @@ export async function startFixture ({ metadataFile, port = 0 } = {}) {
     let control
     let stopping = false
     let actualPort = port
-    let hostPair = utils.generateKeyPairSync('ed25519')
+    let hostPair = generateFixtureEd25519()
     let hostInfo = keyInfo(hostPair)
     let metadataCreated = false
 
@@ -306,13 +313,21 @@ export async function startFixture ({ metadataFile, port = 0 } = {}) {
         }
         if (input.type === 'dropConnections') { return dropConnections() }
         if (input.type === 'rotateHostKey') {
-            await dropConnections()
-            await new Promise(resolveClose => server.close(resolveClose))
-            hostPair = utils.generateKeyPairSync('ed25519')
-            hostInfo = keyInfo(hostPair)
-            await listenSSH()
-            await writeMetadata()
-            return { fingerprint: hostInfo.fingerprint, keyBase64: hostInfo.keyBase64, port: actualPort }
+            let stage = 'DROP'
+            try {
+                await dropConnections()
+                stage = 'CLOSE'
+                await new Promise(resolveClose => server.close(resolveClose))
+                stage = 'GENERATE'
+                hostPair = generateFixtureEd25519()
+                stage = 'PUBLIC_KEY'
+                hostInfo = keyInfo(hostPair)
+                stage = 'LISTEN'
+                await listenSSH()
+                stage = 'METADATA'
+                await writeMetadata()
+                return { fingerprint: hostInfo.fingerprint, keyBase64: hostInfo.keyBase64, port: actualPort }
+            } catch (error) { throw new RotationFailure(stage, error) }
         }
         throw new Error('Unknown control command')
     }
@@ -338,8 +353,8 @@ export async function startFixture ({ metadataFile, port = 0 } = {}) {
                             const input = JSON.parse(line)
                             const result = await command(input)
                             socket.write(`${JSON.stringify({ ok: true, result })}\n`)
-                        } catch {
-                            socket.write(`${JSON.stringify({ ok: false, error: 'Fixture command failed' })}\n`)
+                        } catch (error) {
+                            socket.write(`${JSON.stringify({ ok: false, error: error instanceof RotationFailure ? error.message : 'Fixture command failed' })}\n`)
                         }
                     })
                 }

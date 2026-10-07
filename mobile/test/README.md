@@ -2,6 +2,11 @@
 
 This fixture uses `ssh2` for a real SSH server and Python's system PTY support
 to run `/bin/sh`. It listens only on `127.0.0.1` at a randomly allocated port.
+Ed25519 test keys are serialized from Node crypto's fixed-width JWK public and
+seed bytes. This preserves leading zero bytes that ssh2 1.17's key generator
+incorrectly removes. Encrypted fixture keys retain OpenSSH bcrypt (16 rounds)
+and AES-256-CBC. The deterministic leading-zero regression verifies both key
+formats and signatures; generated credentials still remain private test data.
 No production host, user credential, SSH agent or user home directory is used.
 
 From the repository root, after installing the normal project dependencies:

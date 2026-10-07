@@ -461,3 +461,38 @@ test('browser-engine touch swipe scrolls real xterm 6 history and changes visibl
     await expect(page.locator('.selection-layer')).toHaveCount(0)
     await client.detach()
 })
+
+test('history direction remains semantic when a keyboard-size fit overlaps a browser touch swipe', async ({ page }) => {
+    await page.setViewportSize({ width: 412, height: 500 })
+    await ready(page)
+    const lines = Array.from({ length: 100 }, (_, index) => `RESIZE_HISTORY_${String(index + 1).padStart(3, '0')}`).join('\r\n')
+    await emit(page, { type: 'data', data: Buffer.from(lines).toString('base64') })
+    await expect.poll(() => page.evaluate(() => window.testBridge.commands.filter(item => item.command.type === 'outputAck').length)).toBe(1)
+    const metrics = () => page.evaluate(() => {
+        const slider = document.querySelector<HTMLElement>('.xterm-scrollable-element > .scrollbar.vertical > .slider')!
+        return { top: Number.parseFloat(slider.style.top),
+            screenHeight: document.querySelector('.xterm-screen')!.getBoundingClientRect().height,
+            rows: document.querySelector('.xterm-rows')!.children.length,
+            firstOrdinal: Number(/RESIZE_HISTORY_(\d{3})/.exec(document.querySelector('.xterm-rows')!.textContent ?? '')?.[1]) }
+    })
+    const before = await metrics()
+    await page.setViewportSize({ width: 412, height: 815 })
+    const bounds = await page.locator('.terminal-area').boundingBox()
+    expect(bounds).not.toBeNull()
+    const client = await page.context().newCDPSession(page)
+    const x = bounds!.x + bounds!.width / 2
+    const startY = bounds!.y + bounds!.height / 4
+    await client.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y: startY }] })
+    for (let index = 1; index <= 12; index++) {
+        await client.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x, y: startY + bounds!.height * index / 24 }] })
+        await page.waitForTimeout(25)
+    }
+    await client.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
+    await expect.poll(async () => (await metrics()).firstOrdinal).toBeLessThan(before.firstOrdinal)
+    const after = await metrics()
+    expect(after.screenHeight).toBeGreaterThan(before.screenHeight)
+    // Pixel thumb coordinates change their scale on resize; visible known row
+    // ordinals provide the history direction assertion across this transition.
+    console.log('RESIZE_TOUCH_METRICS', JSON.stringify({ before, after }))
+    await client.detach()
+})

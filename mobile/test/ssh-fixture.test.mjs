@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { createRequire } from 'node:module'
 import { readFile, stat, access, mkdtemp, rm } from 'node:fs/promises'
-import { createHash } from 'node:crypto'
+import { createHash, randomBytes } from 'node:crypto'
 import { once } from 'node:events'
 import { spawn } from 'node:child_process'
 import { createInterface } from 'node:readline'
@@ -10,11 +10,30 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { fileURLToPath } from 'node:url'
 import { startFixture, controlFixture } from '../scripts/test-fixture.mjs'
+import { generateFixtureEd25519 } from '../scripts/test-fixture-keys.mjs'
 
 const require = createRequire(import.meta.url)
-const { Client } = require('ssh2')
+const { Client, utils } = require('ssh2')
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms))
 const quote = value => `'${value.replace(/'/g, `'"'"'`)}'`
+
+test('generated Ed25519 fixture keys preserve a leading-zero public byte, including encryption', () => {
+    // Public deterministic test vector; it is never a production credential.
+    const seed = createHash('sha256').update('Tabby fixture leading-zero regression 423').digest()
+    const challenge = Buffer.from('isolated fixture key serialization regression')
+    for (const passphrase of [undefined, randomBytes(24).toString('base64url')]) {
+        const pair = generateFixtureEd25519({ seed, passphrase })
+        const publicKey = utils.parseKey(pair.public)
+        assert.equal(publicKey instanceof Error, false)
+        assert.equal(publicKey.getPublicSSH().length, 51)
+        assert.equal(publicKey.getPublicSSH().subarray(-32)[0], 0)
+        const parsed = utils.parseKey(pair.private, passphrase)
+        assert.equal(parsed instanceof Error, false)
+        const privateKey = Array.isArray(parsed) ? parsed[0] : parsed
+        assert.equal(publicKey.verify(challenge, privateKey.sign(challenge)), true)
+        if (passphrase) { assert.equal(utils.parseKey(pair.private, 'wrong-test-passphrase') instanceof Error, true) }
+    }
+})
 
 async function until (condition, description, timeout = 5000) {
     const deadline = Date.now() + timeout
