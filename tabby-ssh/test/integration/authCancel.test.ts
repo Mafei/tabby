@@ -13,14 +13,16 @@ test('native localhost SSH: unanswered keyboard-interactive cancel → reconnect
     await tab.disconnect()
     assert.equal(tab.activeKIPrompt, null)
     await first
-    await collectReleasedNativeHandles()
-    await until(() => server.clients.size === 0, 'cancelled native transport released')
     const second = tab.reconnect()
     await until(() => !!tab.activeKIPrompt, 'new native prompt')
     assert.notEqual(tab.activeKIPrompt, old)
-    old.respond()
     tab.activeKIPrompt!.respond()
     await Promise.all([first, second])
+    // Reconnect completes without answering the old prompt or forcing GC first.
+    // A late old-generation response must still have no effect.
+    old.respond()
+    await collectReleasedNativeHandles()
+    await until(() => server.clients.size === 1, 'only the new native transport remains')
     assert.equal(server.stats.responses, 1)
     assert.equal(server.stats.connections, 2)
     assert.equal(tab.session?.open, true)
