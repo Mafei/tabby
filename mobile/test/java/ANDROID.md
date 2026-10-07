@@ -48,6 +48,15 @@ accidental skips of a cloud harness:
   Capacitor `PluginCall` JSON number conversion and invalid-type rejection.
 - `ViewportLifecycleTest`: actual Activity/WebView rotation and dimensions.
 
+The viewport test also dispatches a constructed visible, zero-height IME
+inset through the real Activity's Decor listener, with a positive navigation
+inset. It checks native padding, actual WebView bounds and reported viewport,
+then restores platform insets before the existing rotation/bridge checks.
+This is a synthetic inset regression, not physical keyboard acceptance.
+The application owns padding with the maximum system-bar/cutout/visible-IME
+insets and clears consumed child system-bar/cutout information, so a zero-height
+IME cannot move bottom controls under navigation and CSS does not pad twice.
+
 All seven selected instrumentation tests must pass with zero skips. Each of the
 two explicit WebView harness invocations must separately report exactly one
 passing test; partial test discovery fails the runner.
@@ -125,7 +134,8 @@ awake, display-on and unlocked within 10 s and the original harness deadline.
 Initial and prepared states enter the success/failure report as fixed values,
 without window titles or raw dumps. The test APK's visible Activity uses
 `FLAG_KEEP_SCREEN_ON` during interaction; it adds no wake-lock permission and
-allows normal screen timeout when backgrounded. The production app is unchanged.
+allows normal screen timeout when backgrounded. This flag is absent from the
+production app.
 After real clipboard-copy equality is verified, the runner waits up to 10 s
 for Android's `ClipboardOverlay` window to disappear naturally and remain
 absent for 350 ms before touching EndSelection. It uses the same app-targeted

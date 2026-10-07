@@ -15,6 +15,9 @@ const config: CapacitorConfig = {
         webContentsDebuggingEnabled: false,
         backgroundColor: '#161b22',
     },
+    plugins: {
+        SystemBars: { insetsHandling: 'disable' },
+    },
 }
 
 export default config

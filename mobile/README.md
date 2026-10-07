@@ -26,6 +26,11 @@ The configured minimum is Android 8 / API 26; compile/target SDK is 36. The
 default application build targets ARM64. The cloud emulator build explicitly
 includes ARM64 and x86_64. Both use SDK 36 and NDK 27.3. Modern WebView
 compatibility on the oldest supported devices remains an acceptance item.
+The Activity owns native window insets. Each edge retains the larger system
+bar/cutout or visible IME inset, including navigation space when the IME is
+visible with zero height. Child WebView system-bar/cutout insets are cleared
+after native padding to avoid applying them twice. Capacitor's automatic inset
+handler is disabled; the final WebView layout still drives terminal/PTY resize.
 This first prototype does not implement mobile tmux recovery, multi-tab
 management, jump hosts, SSH agents, X11, host certificates or background SSH.
 The reserved Rust exec API is not exposed by the Android plugin and successful
