@@ -95,6 +95,19 @@ The workflow installs an approved stable AOSP API 35 or 36 image per matrix job;
 both package references use the same already-approved SDK agreement.
 No preview, Google Play, store, billing or personal signing agreement was accepted.
 
+The same free public `ubuntu-24.04` runner gives the disposable emulator four
+virtual CPUs and 4096 MiB RAM. Before launch, a numeric host-capacity check
+requires four available CPUs, 8 GiB total RAM and 6 GiB available RAM. Boot,
+the existing single ordinary MENU action, and stable
+Launcher drawing/resume/input-focus checks share the original 240-second
+deadline. Current error dialogs fail the check; raw system dumps and window
+identities are never printed. Historical ANR state is excluded from current
+input readiness. MENU is sent only after the emulator/API/boot checks and
+observably no current error dialog; it cannot bypass a secure keyguard. The
+application's existing native security check before form input stays unchanged.
+This environment check does not establish the cause of an ANR
+or replace the actual application acceptance tests.
+
 Use official SDK packages, JDK 21 and a license-approved NDK.
 The Rust build script downloads nothing and does not accept licenses:
 

@@ -144,6 +144,11 @@ changes. Focus diagnostics contain only fixed categories, booleans and bounded
 display IDs. Window focus is read from the matching display's `mCurrentFocus`,
 not inferred from a missing field in the windows subdump. Raw window, input and
 Activity dumps stay in memory and never enter logs or artifacts.
+Current InputDispatcher fields are scoped before its historical ANR snapshot;
+duplicated historical focus fields cannot override the current state. A focused
+ANR window's affected category requires the actual app display and an exact
+known process in the dialog title. Labels or ambiguous titles stay unknown;
+this observation does not associate a last-ANR trace with the current dialog.
 Failure-only ANR observations read the verified disposable emulator's last-ANR
 window/activity summaries and latest traces in parallel with the existing
 window/focus/DOM observations. They share one five-second deadline capped by

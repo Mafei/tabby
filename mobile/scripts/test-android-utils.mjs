@@ -169,8 +169,19 @@ function inputFocus (dump, name, id, request = false) {
     return { category: focusCategory(rows[0][2]), result: ['OK', 'NO_WINDOW', 'NOT_FOCUSABLE', 'NOT_VISIBLE'].includes(rows[0][3]) ? rows[0][3] : 'UNKNOWN' }
 }
 
+function currentInputState (dump) {
+    const current = [...dump.matchAll(/^[ \t]*Input Dispatcher State:[ \t]*$/gm)]
+    const historical = [...dump.matchAll(/^[ \t]*Input Dispatcher State at time of last ANR:[ \t]*$/gm)]
+    if (current.length !== 1 || historical.length > 1
+        || (historical.length === 1 && historical[0].index < current[0].index)) { return '' }
+    return dump.slice(current[0].index + current[0][0].length, historical[0]?.index)
+}
+
 /** AOSP display, InputDispatcher and Activity focus; raw names never escape. */
 export function focusStateResult (displays, input, activities, windows = '') {
+    // InputDispatcher appends a complete historical snapshot after the current
+    // state. Its duplicated fields cannot describe the current input focus.
+    input = currentInputState(input)
     const selected = appDisplay(displays, windows)
     const id = selected?.id ?? null
     const focusedIDs = [...input.matchAll(/^[ \t]*FocusedDisplayId:[ \t]*(-?\d+)[ \t]*$/gm)]
@@ -199,6 +210,25 @@ export function focusStateResult (displays, input, activities, windows = '') {
     }
 }
 
+function focusedANRAffectedCategory (displays, windows) {
+    const selected = appDisplay(displays, windows)
+    if (!selected?.body) { return 'UNKNOWN' }
+    const matches = [...selected.body.matchAll(/^[ \t]*mCurrentFocus=([^\n]*)$/gm)]
+    if (matches.length !== 1) { return 'UNKNOWN' }
+    const value = matches[0][1].trim()
+    if (value === 'null') { return 'NONE' }
+    const window = /^Window\{[a-fA-F0-9]+ u\d+ ([^{}\r\n]+)\}$/.exec(value)
+    if (!window || window[1].length > 4096) { return 'UNKNOWN' }
+    const title = window[1]
+    if (!title.includes('Application Not Responding')) { return 'NONE' }
+    const process = /^Application Not Responding: ([A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*(?::[A-Za-z_][A-Za-z0-9_]*)?)$/.exec(title)
+    if (!process) { return 'UNKNOWN' }
+    const category = anrProcessCategory(process[1])
+    // Dialog labels can resemble process names. Only exact known identities
+    // establish an affected category; neither labels nor substrings do so.
+    return category === 'OTHER' ? 'UNKNOWN' : category
+}
+
 /** Visibility from windows; focus from the same app display in displays. */
 export function windowState (dump, displays = '') {
     const windows = windowRecords(dump)
@@ -215,6 +245,7 @@ export function windowState (dump, displays = '') {
         clipboardOverlayVisible: any(title => /\bClipboardOverlay\b/.test(title)),
         imeWindowVisible: any(title => /\bInputMethod\b/.test(title)),
         focusedWindowCategory,
+        focusedANRAffectedCategory: focusedANRAffectedCategory(displays, dump),
     }
 }
 
