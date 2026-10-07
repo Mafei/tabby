@@ -80,8 +80,11 @@ must remain stable for at least 350 ms with quiet SSH output; the same geometry
 must hold after the gesture. Its failure diagnostics contain only pointer
 type, trust flag, numeric coordinates, scrollbar geometry and readiness/change
 booleans; visible terminal contents remain inside the WebView for comparison.
-Every native button touch first requires 350 ms of stable target bounds,
-native/browser viewport and IME state, with its tap point inside the WebView.
+Every native button touch first scrolls the target into view without activating
+it, then requires 350 ms of stable target bounds, native/browser viewport and
+IME state. Its tap point must be inside the WebView and `elementFromPoint`
+must hit the target or its descendant, preventing clipped-form taps. Activation
+uses one actual app-targeted MotionEvent, with no DOM click or dispatch retry.
 After real clipboard-copy equality is verified, the runner waits up to 10 s
 for Android's `ClipboardOverlay` window to disappear naturally and remain
 absent for 350 ms before touching EndSelection. It uses the same app-targeted
@@ -95,6 +98,10 @@ the expected IME state, then unchanged viewport/IME and fresh real PTY rows
 matching the rendered xterm row count within a 10 s absolute deadline. The
 native keyboard button, system show/hide and rotation still drive the app's
 fit/resize behavior; keyboard rows must decrease and rotation columns change.
+The changed-key form uses the same keyboard-hide and verified-hidden state as
+the first connection. The same-endpoint replacement must produce one new real
+SSH connection, no authentication increase, a changed-key rejection and zero
+remaining fixture resources.
 
 `--native-only` and `--webview-only` support focused reruns, and explicitly mark
 their partial scope in the report. The default runs both phases.

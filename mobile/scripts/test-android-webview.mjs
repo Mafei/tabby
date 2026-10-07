@@ -115,6 +115,7 @@ export async function webviewAcceptance (android, fixture) {
                             geometryStable: window.__tabbyCloudObservation?.scroll?.geometryStable === true,
                             earlierHistory: window.__tabbyCloudObservation?.scroll?.earlierHistory === true },
                         nativeTouch: geometry(window.__tabbyCloudObservation?.lastNativeTouch),
+                        nativeTouchHitTarget: window.__tabbyCloudObservation?.nativeTouchHitTarget === true,
                         clipboardOverlay: { observed: window.__tabbyCloudObservation?.clipboardOverlay?.observed === true,
                             cleared: window.__tabbyCloudObservation?.clipboardOverlay?.cleared === true },
                         ptySizes: Object.fromEntries(['hidden', 'shown', 'rotated'].filter(phase => window.__tabbyCloudObservation?.ptySizes?.[phase])
@@ -136,15 +137,25 @@ export async function webviewAcceptance (android, fixture) {
         await until(() => ['clients', 'sessions', 'ptys', 'timers', 'pendingAuth'].every(key => fixture.stats()[key] === 0), 'ANDROID_FIXTURE_RESOURCES_NOT_RELEASED')
     }
     async function nativeTouch (locator, durationMs = 100) {
+        const deadline = Date.now() + 10000
+        const inTime = () => check(Date.now() < deadline, 'ANDROID_TOUCH_TARGET_DID_NOT_STABILIZE')
+        await page.evaluate(() => { window.__tabbyCloudObservation.nativeTouchHitTarget = false })
+        inTime()
+        // Prepare visibility only. Activation remains the one real native
+        // MotionEvent below; a viewport-inside box can still be panel-clipped.
+        await locator.scrollIntoViewIfNeeded({ timeout: 3000 })
+        inTime()
         let box
         let previous
         let stableSince = Date.now()
         await until(async () => {
+            inTime()
             const [bounds, native, visual] = await Promise.all([
                 locator.boundingBox(), viewport(),
                 page.evaluate(() => ({ viewportWidth: innerWidth, viewportHeight: innerHeight,
                     visualHeight: window.visualViewport?.height || innerHeight })),
             ])
+            inTime()
             if (!bounds || bounds.width <= 0 || bounds.height <= 0) { previous = undefined; stableSince = Date.now(); return false }
             const state = { ...bounds, ...visual, nativeViewportWidth: native.viewportWidth,
                 nativeViewportHeight: native.viewportHeight, nativeKeyboardVisible: native.visible }
@@ -153,10 +164,15 @@ export async function webviewAcceptance (android, fixture) {
             const centerX = bounds.x + bounds.width / 2
             const centerY = bounds.y + bounds.height / 2
             const inside = centerX >= 0 && centerY >= 0 && centerX < native.viewportWidth && centerY < native.viewportHeight
-            if (!inside || serialized !== previous) { previous = serialized; stableSince = Date.now(); return false }
+            const hitTarget = inside && await locator.evaluate((element, point) => element.contains(document.elementFromPoint(point.x, point.y)), { x: centerX, y: centerY })
+            inTime()
+            await page.evaluate(value => { window.__tabbyCloudObservation.nativeTouchHitTarget = value }, hitTarget)
+            inTime()
+            if (!hitTarget || serialized !== previous) { previous = serialized; stableSince = Date.now(); return false }
             box = bounds
             return Date.now() - stableSince >= 350
-        }, 'ANDROID_TOUCH_TARGET_DID_NOT_STABILIZE', 10000)
+        }, 'ANDROID_TOUCH_TARGET_DID_NOT_STABILIZE', Math.max(1, deadline - Date.now()))
+        inTime()
         await android.input({ type: 'touch', x: box.x + box.width / 2, y: box.y + box.height / 2, durationMs })
     }
     async function output (needle) {
@@ -612,20 +628,28 @@ export async function webviewAcceptance (android, fixture) {
         await endHarness()
 
         stage = 'durable-pin-fresh-process'
-        await android.shell(`am force-stop ${APP}`)
-        const secondPID = await beginHarness(firstPID)
+        await step('durable-first-process-force-stop', () => android.shell(`am force-stop ${APP}`))
+        const secondPID = await step('durable-start-fresh-harness', () => beginHarness(firstPID))
         check(secondPID !== firstPID, 'ANDROID_DURABLE_PIN_TEST_DID_NOT_RESTART_PROCESS')
         await connect(true)
-        const known = await page.evaluate(() => window.__tabbyCloudObservation.events.some(event => event.type === 'hostKey' && event.status === 'known'))
+        const known = await step('durable-known-pin-event', () => page.evaluate(() => window.__tabbyCloudObservation.events.some(event => event.type === 'hostKey' && event.status === 'known')))
         check(known && await page.getByRole('dialog').count() === 0, 'ANDROID_PUBLIC_PIN_WAS_NOT_DURABLE')
-        await disconnect()
+        await step('durable-known-connection-disconnect', () => disconnect())
         const authenticated = fixture.stats().authenticated
-        await fixture.command({ type: 'rotateHostKey' })
-        await page.getByLabel('密码', { exact: true }).fill(fixture.metadata.password)
-        await nativeTouch(page.getByRole('button', { name: '连接', exact: true }))
-        await until(async () => (await page.locator('.notice').textContent())?.includes('主机密钥已变化'), 'ANDROID_CHANGED_HOST_KEY_DID_NOT_FAIL_CLOSED')
+        const replacementConnections = fixture.stats().connections
+        await step('replacement-rotate-same-endpoint-host-key', () => fixture.command({ type: 'rotateHostKey' }))
+        await step('replacement-form-password', () => page.getByLabel('密码', { exact: true }).fill(fixture.metadata.password))
+        await step('replacement-hide-ime', () => plugin('hideKeyboard'))
+        await step('replacement-ime-hidden', () => until(async () => !(await viewport()).visible, 'ANDROID_REPLACEMENT_FORM_IME_DID_NOT_HIDE'))
+        await step('replacement-visible-native-submit', () => nativeTouch(page.getByRole('button', { name: '连接', exact: true })))
+        await step('replacement-host-key-failure-visible', () => until(async () => {
+            const notice = page.locator('.notice')
+            return await notice.count() > 0 && (await notice.textContent())?.includes('主机密钥已变化')
+        }, 'ANDROID_CHANGED_HOST_KEY_DID_NOT_FAIL_CLOSED'))
+        substage = 'replacement-rejected-before-auth'
+        check(fixture.stats().connections === replacementConnections + 1, 'ANDROID_CHANGED_HOST_KEY_CONNECTION_NOT_OBSERVED')
         check(fixture.stats().authenticated === authenticated, 'ANDROID_CHANGED_HOST_KEY_AUTHENTICATED')
-        await quiet()
+        await step('replacement-resources-released', () => quiet())
         verify('durable native host-key pin survives a fresh process and rejects same-endpoint replacement')
         await endHarness()
         return { passed: true, cases: passed, skipped: 0, inputEvidence: 'Actual Android InputConnection; specific Chinese IME candidate UI unverified.',
