@@ -65,11 +65,6 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     env:
-      ANDROID_HOME: ${{ runner.temp }}/tabby-android-sdk
-      ANDROID_SDK_ROOT: ${{ runner.temp }}/tabby-android-sdk
-      ANDROID_USER_HOME: ${{ runner.temp }}/tabby-android-user
-      ANDROID_AVD_HOME: ${{ runner.temp }}/tabby-android-avd
-      GRADLE_USER_HOME: ${{ runner.temp }}/tabby-android-gradle
       # Explicit user approval: 2026-10-07 09:12 UTC, Android SDK agreement.
       # A changed or additional agreement fails closed; no --licenses command.
       TABBY_ANDROID_SDK_LICENSE_APPROVED_SHA256: 1f8729233617b193fd619213792ae16a41b95d2bbbf525dfe66998252ba68b16
@@ -78,6 +73,9 @@ jobs:
         with:
           persist-credentials: false
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Configure disposable Android tool directories
+        run: |
+          printf 'ANDROID_HOME=%s/tabby-android-sdk\nANDROID_SDK_ROOT=%s/tabby-android-sdk\nANDROID_USER_HOME=%s/tabby-android-user\nANDROID_AVD_HOME=%s/tabby-android-avd\nGRADLE_USER_HOME=%s/tabby-android-gradle\n' "$RUNNER_TEMP" "$RUNNER_TEMP" "$RUNNER_TEMP" "$RUNNER_TEMP" "$RUNNER_TEMP" >> "$GITHUB_ENV"
       - uses: actions/setup-node@v4
         with:
           node-version: 22
