@@ -108,11 +108,13 @@ export class SSHTabComponent extends ConnectableTerminalTabComponent<SSHProfile>
                 )
 
                 jumpSession.ref()
-                session.willDestroy$.subscribe(() => jumpSession.unref())
-                jumpSession.willDestroy$.subscribe(() => {
-                    if (session?.open) {
-                        session.destroy()
-                    }
+                const targetSession = session
+                const jumpDestroyed = jumpSession.willDestroy$.subscribe(() => {
+                    targetSession.destroy(jumpSession.transportLost ? 'transport' : 'local')
+                })
+                session.willDestroy$.subscribe(() => {
+                    jumpDestroyed.unsubscribe()
+                    jumpSession.unref()
                 })
 
                 if (!(jumpSession.ssh instanceof russh.AuthenticatedSSHClient)) {
@@ -369,6 +371,7 @@ export class SSHTabComponent extends ConnectableTerminalTabComponent<SSHProfile>
     }
 
     async disconnect (): Promise<void> {
+        this.activeKIPrompt = null
         this.connection.cancel()
         await super.disconnect()
     }
@@ -381,6 +384,7 @@ export class SSHTabComponent extends ConnectableTerminalTabComponent<SSHProfile>
 
     ngOnDestroy (): void {
         this.closing = true
+        this.activeKIPrompt = null
         this.connection.cancel()
         this.tmuxTabs.release(this)
         super.ngOnDestroy()

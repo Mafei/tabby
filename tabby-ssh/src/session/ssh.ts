@@ -17,7 +17,7 @@ import { SSHAlgorithmType, SSHProfile, AutoPrivateKeyLocator, PortForwardType } 
 import { ForwardedPort } from './forwards'
 import { X11Socket } from './x11'
 import { supportedAlgorithms } from '../algorithms'
-import { requestShellPTY, SSHShellChannelOptions } from './shellChannel'
+import { boundedSSHRequest, requestShellPTY, SSHShellChannelOptions } from './shellChannel'
 import * as russh from 'russh'
 import { selectNextAuthMethod, updateAuthPlanAfterFailure } from './authMethodSelection'
 
@@ -100,7 +100,7 @@ export class SSHTransportError extends Error { }
 
 export class SSHSession {
     shell?: russh.Channel
-    ssh: russh.SSHClient|russh.AuthenticatedSSHClient
+    ssh?: russh.SSHClient|russh.AuthenticatedSSHClient
     sftp?: russh.SFTP
     forwardedPorts: ForwardedPort[] = []
     jumpChannel: russh.NewChannel|null = null
@@ -119,6 +119,8 @@ export class SSHSession {
     verifiedHostKey: string|null = null
     private locallyDestroyed = false
     private prompts = new Set<NgbModalRef>()
+    private activeKIPrompts = new Set<KeyboardInteractivePrompt>()
+    private channelAbort = new AbortController()
 
     private logger: Logger
     private refCount = 0
@@ -164,10 +166,19 @@ export class SSHSession {
     private ensureActive (): void {
         // Called after awaits because cancellation can mutate state during acquisition/auth.
         if (this.locallyDestroyed) {
-            // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
-            this.ssh?.disconnect()
+            this.disconnectClient()
             throw new Error('Connection cancelled')
         }
+    }
+
+    private disconnectClient (): void {
+        const client = this.ssh
+        // russh 0.63.3 waits for an auth response while a KI prompt is pending and
+        // ignores queued Disconnect messages in that wait. Release the handle so
+        // its sender can drop: the native host-key callback otherwise retains this
+        // session, forming a cycle that keeps the cancelled transport alive.
+        this.ssh = undefined
+        client?.disconnect().catch(() => undefined)
     }
 
     private openPrompt (component: any): NgbModalRef {
@@ -481,13 +492,13 @@ export class SSHSession {
         this.previouslyDisconnected = false
         this.transportLost = false
         this.ssh.disconnect$.subscribe(() => {
-            this.transportLost = !this.locallyDestroyed
+            this.transportLost ||= !this.locallyDestroyed
             this.open = false
             if (!this.previouslyDisconnected) {
                 this.previouslyDisconnected = true
                 // Let service messages drain
                 setTimeout(() => {
-                    this.destroy()
+                    this.destroy(this.transportLost ? 'transport' : 'local')
                 })
             }
         })
@@ -522,7 +533,7 @@ export class SSHSession {
         if (authenticatedClient) {
             this.ssh = authenticatedClient
         } else {
-            this.ssh.disconnect()
+            this.ssh.disconnect().catch(() => undefined)
             this.passwordStorage.deletePassword(this.profile, this.authUsername ?? undefined)
             // eslint-disable-next-line @typescript-eslint/no-base-to-string
             throw new Error('Authentication rejected')
@@ -675,6 +686,8 @@ export class SSHSession {
     }
 
     async handleAuth (): Promise<russh.AuthenticatedSSHClient|null> {
+        this.ensureActive()
+        if (!this.ssh) { throw new Error('SSH client not set') }
         const subscription = this.ssh.disconnect$.subscribe(() => {
             // Auto auth and >=3 keys found
             if (!this.profile.options.auth && this.allAuthMethods.filter(x => x.type === 'publickey').length >= 3) {
@@ -724,6 +737,7 @@ export class SSHSession {
         }
 
         while (true) {
+            this.ensureActive()
             const method = selectNextAuthMethod(remainingMethods, methodsLeft, sshAuthTypeForMethod)
 
             if (this.previouslyDisconnected || !method) {
@@ -813,16 +827,21 @@ export class SSHSession {
                             }
                         }
 
-                        this.emitKeyboardInteractivePrompt(prompt)
-
+                        this.activeKIPrompts.add(prompt)
                         try {
+                            this.ensureActive()
+                            this.emitKeyboardInteractivePrompt(prompt)
                             // eslint-disable-next-line @typescript-eslint/await-thenable
                             responses = await prompt.promise
                         } catch {
+                            this.ensureActive()
                             break // this loop
+                        } finally {
+                            this.activeKIPrompts.delete(prompt)
                         }
                     }
 
+                    this.ensureActive()
                     state = await this.ssh.continueKeyboardInteractiveAuthentication(responses)
 
                     if (state instanceof russh.AuthenticatedSSHClient) {
@@ -908,9 +927,14 @@ export class SSHSession {
         this.logger.info(`Stopped forwarding ${fw}`)
     }
 
-    async destroy (): Promise<void> {
+    async destroy (reason: 'local'|'transport' = 'local'): Promise<void> {
         if (this.locallyDestroyed) { return }
+        this.transportLost ||= reason === 'transport'
         this.locallyDestroyed = true
+        this.previouslyDisconnected = true
+        this.channelAbort.abort()
+        for (const prompt of this.activeKIPrompts) { prompt.reject() }
+        this.activeKIPrompts.clear()
         for (const modal of this.prompts) { modal.dismiss('SSH connection cancelled') }
         this.prompts.clear()
         this.open = false
@@ -918,9 +942,8 @@ export class SSHSession {
         this.willDestroy.next()
         this.willDestroy.complete()
         this.serviceMessage.complete()
-        // SSH is not assigned yet when transport acquisition is cancelled.
-        // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
-        this.ssh?.disconnect()
+        this.keyboardInteractivePrompt.complete()
+        this.disconnectClient()
     }
 
     async openExecChannel (): Promise<russh.Channel> {
@@ -936,24 +959,35 @@ export class SSHSession {
         return ch
     }
 
-    async prepareShellChannel (options: SSHShellChannelOptions): Promise<russh.Channel> {
+    async prepareShellChannel (options: SSHShellChannelOptions, signal?: AbortSignal, timeout = 10000): Promise<russh.Channel> {
         if (!(this.ssh instanceof russh.AuthenticatedSSHClient)) {
             throw new Error('Cannot open shell channel before auth')
         }
-        const ch = await this.ssh.activateChannel(await this.ssh.openSessionChannel())
-        await requestShellPTY(ch, options)
-        if (options.x11) {
-            await ch.requestX11Forwarding({
-                singleConnection: false,
-                authProtocol: 'MIT-MAGIC-COOKIE-1',
-                authCookie: crypto.randomBytes(16).toString('hex'),
-                screenNumber: 0,
-            })
+        const client = this.ssh
+        const signals = [this.channelAbort.signal, ...signal ? [signal] : []]
+        const deadline = Date.now() + timeout
+        const remaining = () => Math.max(1, deadline - Date.now())
+        // Always activate an acquired NewChannel, even after cancellation, so a late
+        // channel has an owner that can close it. Never leave it between two awaits.
+        const ch = await boundedSSHRequest(async () => client.activateChannel(await client.openSessionChannel()), signals, remaining(), channel => channel.close())
+        try {
+            await boundedSSHRequest(() => requestShellPTY(ch, options), signals, remaining())
+            if (options.x11) {
+                await boundedSSHRequest(() => ch.requestX11Forwarding({
+                    singleConnection: false,
+                    authProtocol: 'MIT-MAGIC-COOKIE-1',
+                    authCookie: crypto.randomBytes(16).toString('hex'),
+                    screenNumber: 0,
+                }), signals, remaining())
+            }
+            if (this.profile.options.agentForward) {
+                await boundedSSHRequest(() => ch.requestAgentForwarding(), signals, remaining())
+            }
+            return ch
+        } catch (error) {
+            ch.close().catch(() => undefined)
+            throw error
         }
-        if (this.profile.options.agentForward) {
-            await ch.requestAgentForwarding()
-        }
-        return ch
     }
 
     private setupSocketChannelEvents (channel: russh.Channel, socket: Socket, logPrefix: string): void {

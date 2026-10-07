@@ -43,6 +43,9 @@ jobs:
       - run: yarn test:ssh-term
         env:
           TABBY_TEST_TMUX: '1'
+      - run: yarn test:ssh-integration
+        env:
+          TABBY_TEST_TMUX: '1'
       - run: yarn test:unit
         if: always() && steps.install.outcome == 'success'
       - run: yarn build:typings

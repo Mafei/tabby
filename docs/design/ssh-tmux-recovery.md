@@ -48,6 +48,18 @@ connection and cancellation generation prevent stale completion/events from chan
 new state. Auth/host-key rejection, missing tmux/session and occupancy stop retry.
 Explicit reconnect may retry; creation is never replayed after an uncertain outcome.
 
+Embedded keyboard-interactive prompts belong to the SSH transport and are rejected
+on destruction as well as cleared from the tab on cancellation. Destroy also releases
+the native client handle: russh's pending keyboard-interactive response wait can
+ignore Disconnect, so retaining the handle would keep the cancelled callback/session
+cycle alive. Shell acquisition
+(open/activation, PTY, X11 and agent requests) has a 10-second deadline and responds
+to shell or transport cancellation. A late acquired channel is activated only for
+cleanup and never starts a shell. Shell/exec startup requests are also bounded.
+Jump-host destruction explicitly propagates transport loss to its dependent targets;
+local teardown remains distinct. Native teardown, resize and write rejections after
+TCP loss are consumed.
+
 ## Acceptance cases
 
 - Detect missing tmux, empty server, default/named/path socket and invalid metadata.
@@ -70,7 +82,27 @@ Explicit reconnect may retry; creation is never replayed after an uncertain outc
 
 ## Validation boundary
 
-Current cloud scratch: Node 22 available; system package installation rejected and
-npm/Yarn registries currently blocked by network policy. Pure Node/TS tests run here.
-Native packaging and real tmux integration must be reported separately as CI checks
-until this environment is prepared through its official installation/network channel.
+Saved cloud environment: Node 22 and 24, the installed russh 0.1.38 native client, JS
+dependencies and a tmux 3.5a binary unpacked in a temporary directory are usable.
+Desktop native development libraries and a GUI are absent. The fork CI uses Node 22
+and installs its own native build dependencies; it also runs `test:ssh-integration`.
+
+Node integration tests import the actual SSHSession, SSHShellSession, SSHTabComponent,
+connectable tab lifecycle and terminal middleware. Angular/Electron rendering and
+credential-storage APIs are stand-ins; no production credentials are read. Deferred
+native-channel fixtures cover cancellation, rejection and timeout at each acquisition
+stage while another tab keeps the transport alive. Loopback-only SSH2 servers with
+in-memory disposable host keys exercise the real russh client, keyboard-interactive
+cancel/reconnect, actual TCP interruption, and two targets sharing a jump transport.
+Tests explicitly collect unreachable native handles to exercise finalizers without
+depending on Node memory pressure; they exit naturally without force-exit.
+Python PTYs exercise real tmux attached shared/read-only/takeover clients, automatic
+identity recovery, occupied restore pause, rename, missing/replaced identity, escaped
+names and explicit atomic creation. Socket directories are private test fixtures.
+Regression checks against 7d90f7b5 reproduce the retained auth prompt, hung PTY flight,
+and missing jump-target retry; the fixed paths pass these checks.
+
+These tests and unsigned artifacts do not establish Electron GUI behavior on any
+desktop platform. Real production OpenSSH/PAM/agent/X11 combinations remain outside
+the fixture coverage. PID/start-time identity does not survive server replacement
+across reboot and does not provide hard fencing.

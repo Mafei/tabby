@@ -7,6 +7,7 @@ import { SSHSession } from './ssh'
 import { attachCommand, shellQuote, TmuxBinding } from './tmux'
 import { SSHProfile } from '../api'
 import * as russh from 'russh'
+import { boundedSSHRequest } from './shellChannel'
 
 
 export class SSHShellSession extends BaseSession {
@@ -19,6 +20,7 @@ export class SSHShellSession extends BaseSession {
     private abort = () => { this.destroy() }
     private subscriptions: Subscription[] = []
     private ssh: SSHSession|null
+    private channelAbort = new AbortController()
 
     constructor (
         injector: Injector,
@@ -56,16 +58,17 @@ export class SSHShellSession extends BaseSession {
         this.logger.debug('Opening shell')
 
         try {
-            this.shell = await this.ssh.prepareShellChannel({ x11: this.profile.options.x11, term: this.profile.options.term })
+            this.shell = await this.ssh.prepareShellChannel({ x11: this.profile.options.x11, term: this.profile.options.term }, this.channelAbort.signal)
         } catch (err) {
             if (err.toString().includes('Unable to request X11')) {
                 this.emitServiceMessage('    Make sure `xauth` is installed on the remote side')
             }
+            await this.destroy()
             throw new Error(`Remote rejected opening a shell channel: ${err}`)
         }
 
         if (this.shellDestroying) {
-            await this.shell.close()
+            this.shell.close().catch(() => undefined)
             throw new Error('Shell channel cancelled')
         }
         this.open = true
@@ -95,12 +98,17 @@ export class SSHShellSession extends BaseSession {
             }
         }))
 
-        if (this.binding) {
-            await this.shell.requestExec(`sh -c ${shellQuote(attachCommand(this.binding, this.takeover, this.allowOccupied))}`)
-        } else {
-            await this.shell.requestShell()
-            if (!this.isActive()) { return }
-            this.loginScriptProcessor?.executeUnconditionalScripts()
+        try {
+            if (this.binding) {
+                await boundedSSHRequest(() => this.shell!.requestExec(`sh -c ${shellQuote(attachCommand(this.binding!, this.takeover, this.allowOccupied))}`), [this.channelAbort.signal])
+            } else {
+                await boundedSSHRequest(() => this.shell!.requestShell(), [this.channelAbort.signal])
+                if (!this.isActive()) { return }
+                this.loginScriptProcessor?.executeUnconditionalScripts()
+            }
+        } catch (error) {
+            await this.destroy()
+            throw error
         }
 
         // Must run after the output subscriptions above are wired, otherwise the
@@ -125,12 +133,12 @@ export class SSHShellSession extends BaseSession {
             rows,
             pixHeight: 0,
             pixWidth: 0,
-        })
+        }).catch(error => this.logger.debug('Unable to resize SSH channel', error))
     }
 
     write (data: Buffer): void {
         if (this.shell) {
-            this.shell.write(new Uint8Array(data))
+            this.shell.write(new Uint8Array(data)).catch(error => this.logger.debug('Unable to write to SSH channel', error))
         }
     }
 
@@ -141,6 +149,7 @@ export class SSHShellSession extends BaseSession {
     async destroy (): Promise<void> {
         if (this.shellDestroying) { return }
         this.shellDestroying = true
+        this.channelAbort.abort()
         this.signal?.removeEventListener('abort', this.abort)
         this.subscriptions.forEach(subscription => subscription.unsubscribe())
         this.logger.debug('Closing shell')
