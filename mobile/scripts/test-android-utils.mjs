@@ -139,12 +139,23 @@ export class Android {
     }
 
     async input (command) {
+        const commandNames = new Map([['touch', 'TOUCH'], ['swipe', 'SWIPE'], ['compose', 'COMPOSE'], ['commit', 'COMMIT'],
+            ['composeStart', 'COMPOSE_START'], ['composeUpdate', 'COMPOSE_UPDATE'], ['composeFinish', 'COMPOSE_FINISH'], ['deleteBackward', 'DELETE_BACKWARD']])
+        const reasons = new Set(['invalid_command', 'gesture_validation', 'gesture_dispatch', 'input_connection_missing', 'input_dispatch',
+            'set_composing_rejected', 'finish_composing_rejected', 'commit_rejected', 'delete_rejected', 'ok'])
+        check(commandNames.has(command.type), 'ANDROID_NATIVE_INPUT_UNKNOWN_COMMAND')
+        this.lastInput = { command: commandNames.get(command.type), reason: 'PENDING' }
         await this.removeFile(INPUT_RESULT)
         await this.privateFile(INPUT, JSON.stringify(command))
         let result
         await until(async () => { result = await this.readFile(INPUT_RESULT); return !!result }, 'ANDROID_INPUT_CONNECTION_TIMEOUT')
-        check(JSON.parse(result).ok === true, 'ANDROID_INPUT_CONNECTION_REJECTED')
-        await this.removeFile(INPUT_RESULT)
+        try {
+            let response
+            try { response = JSON.parse(result) } catch { throw new TestFailure('ANDROID_NATIVE_INPUT_INVALID_RESULT') }
+            check(response && response.command === command.type && reasons.has(response.reason) && typeof response.ok === 'boolean', 'ANDROID_NATIVE_INPUT_INVALID_RESULT')
+            this.lastInput = { command: commandNames.get(command.type), reason: response.reason.toUpperCase() }
+            check(response.ok && response.reason === 'ok', `ANDROID_NATIVE_INPUT_${commandNames.get(command.type)}_${response.reason.toUpperCase()}`)
+        } finally { await this.removeFile(INPUT_RESULT) }
     }
 }
 

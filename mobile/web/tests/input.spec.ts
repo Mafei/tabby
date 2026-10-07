@@ -19,6 +19,25 @@ async function emit(page: Page, payload: Partial<SSHEvent>): Promise<void> {
     }, payload)
 }
 
+async function waitForTerminalFit(page: Page): Promise<void> {
+    // Native SSH authentication takes time; the fake bridge can become ready
+    // before the debounced initial fit. Observe the fitted DOM geometry before
+    // sending fixture output, rather than racing the default 80-column screen.
+    await expect.poll(() => page.evaluate(() => {
+        const host = document.querySelector<HTMLElement>('.terminal-host')!
+        const screen = document.querySelector<HTMLElement>('.xterm-screen')!
+        const rows = document.querySelector('.xterm-rows')!
+        const { height, width } = screen.getBoundingClientRect()
+        const style = getComputedStyle(host)
+        const availableHeight = Number.parseInt(style.height)
+        const availableWidth = Number.parseInt(style.width)
+        const cellHeight = height / rows.children.length
+        return Number.isFinite(cellHeight) && cellHeight > 0 && width > 0 &&
+            availableHeight - height >= -1 && availableHeight - height < cellHeight + 1 &&
+            availableWidth - width >= -1 && availableWidth - width < 30
+    })).toBe(true)
+}
+
 async function ready(page: Page, known = false): Promise<void> {
     const priorAuthCount = await page.evaluate(() => window.testBridge.commands.filter(item => item.command.type === 'authResponse').length)
     await start(page)
@@ -28,6 +47,7 @@ async function ready(page: Page, known = false): Promise<void> {
     await expect.poll(() => page.evaluate(() => window.testBridge.commands.filter(item => item.command.type === 'authResponse').length)).toBe(priorAuthCount + 1)
     await emit(page, { type: 'state', state: 'ready' })
     await expect(page.getByRole('status').first()).toHaveText('已连接')
+    await waitForTerminalFit(page)
 }
 
 async function writes(page: Page): Promise<string[]> {
@@ -164,7 +184,8 @@ test('selection snapshot uses parsed public buffer; copy is plain text with wrap
     await ready(page)
     const value = '<b>安全文本</b>' + 'x'.repeat(120)
     await emit(page, { type: 'data', data: Buffer.from(`\x1b[31m${value}\x1b[0m`).toString('base64') })
-    await page.waitForTimeout(50)
+    await expect.poll(() => page.evaluate(() => window.testBridge.commands.filter(item => item.command.type === 'outputAck').length)).toBe(1)
+    await expect(page.locator('.xterm-rows')).toContainText(value)
     await page.getByRole('button', { name: '选择文字', exact: true }).click()
     const snapshot = page.locator('.selection-layer pre')
     await expect(snapshot).toContainText(value)
@@ -442,6 +463,7 @@ test('browser-engine touch swipe scrolls real xterm 6 history and changes visibl
     const lines = Array.from({ length: 100 }, (_, index) => `TOUCH_HISTORY_${String(index + 1).padStart(3, '0')}`).join('\r\n')
     await emit(page, { type: 'data', data: Buffer.from(lines).toString('base64') })
     await expect.poll(() => page.evaluate(() => window.testBridge.commands.filter(item => item.command.type === 'outputAck').length)).toBe(1)
+    await expect(page.locator('.xterm-rows')).toContainText('TOUCH_HISTORY_100')
     const slider = page.locator('.xterm-scrollable-element > .scrollbar.vertical > .slider')
     await expect.poll(() => slider.evaluate(element => Number.parseFloat((element as HTMLElement).style.top))).toBeGreaterThan(0)
     const beforeTop = await slider.evaluate(element => Number.parseFloat((element as HTMLElement).style.top))
@@ -468,6 +490,7 @@ test('history direction remains semantic when a keyboard-size fit overlaps a bro
     const lines = Array.from({ length: 100 }, (_, index) => `RESIZE_HISTORY_${String(index + 1).padStart(3, '0')}`).join('\r\n')
     await emit(page, { type: 'data', data: Buffer.from(lines).toString('base64') })
     await expect.poll(() => page.evaluate(() => window.testBridge.commands.filter(item => item.command.type === 'outputAck').length)).toBe(1)
+    await expect(page.locator('.xterm-rows')).toContainText('RESIZE_HISTORY_100')
     const metrics = () => page.evaluate(() => {
         const slider = document.querySelector<HTMLElement>('.xterm-scrollable-element > .scrollbar.vertical > .slider')!
         return { top: Number.parseFloat(slider.style.top),
@@ -475,11 +498,13 @@ test('history direction remains semantic when a keyboard-size fit overlaps a bro
             rows: document.querySelector('.xterm-rows')!.children.length,
             firstOrdinal: Number(/RESIZE_HISTORY_(\d{3})/.exec(document.querySelector('.xterm-rows')!.textContent ?? '')?.[1]) }
     })
+    await expect.poll(async () => Number.isFinite((await metrics()).firstOrdinal)).toBe(true)
     const before = await metrics()
+    expect(before.firstOrdinal).toBeGreaterThan(0)
+    const client = await page.context().newCDPSession(page)
     await page.setViewportSize({ width: 412, height: 815 })
     const bounds = await page.locator('.terminal-area').boundingBox()
     expect(bounds).not.toBeNull()
-    const client = await page.context().newCDPSession(page)
     const x = bounds!.x + bounds!.width / 2
     const startY = bounds!.y + bounds!.height / 4
     await client.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y: startY }] })

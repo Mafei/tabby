@@ -35,6 +35,7 @@ export async function webviewAcceptance (android, fixture) {
         const counterNames = new Set(['clients', 'sessions', 'pendingAuth', 'ptys', 'timers', 'authenticated',
             'authPrompts', 'authAnswers', 'shellStarts', 'resizeRequests', 'connections'])
         const result = { stage, substage, passedCases: [...passed],
+            nativeInput: android.lastInput,
             errorKind: error instanceof TestFailure ? 'FIXED_TEST_FAILURE'
                 : error?.name === 'TimeoutError' ? 'PLAYWRIGHT_TIMEOUT'
                     : String(error?.message || '').includes('strict mode violation') ? 'LOCATOR_AMBIGUOUS' : 'UNEXPECTED',
@@ -59,6 +60,7 @@ export async function webviewAcceptance (android, fixture) {
                         ['SSH 连接失败或认证被拒绝。', 'SSH_FAILED'], ['SSH 连接已关闭。', 'CLOSED'],
                         ['主机密钥信息不完整。', 'HOST_KEY_INCOMPLETE'], ['主机密钥尚未验证，认证已停止。', 'HOST_KEY_NOT_VERIFIED'],
                         ['认证已取消或凭据已释放。请重新连接。', 'AUTH_RELEASED'],
+                        ['已复制。', 'COPIED'], ['复制失败。', 'COPY_FAILED'], ['请先长按或拖动选择文字。', 'SELECTION_REQUIRED'],
                     ])
                     const events = window.__tabbyCloudObservation?.events || []
                     const eventTypes = new Set(['hostKey', 'auth', 'state', 'data'])
@@ -110,6 +112,7 @@ export async function webviewAcceptance (android, fixture) {
                             renderedChanged: window.__tabbyCloudObservation?.scroll?.renderedChanged === true,
                             geometryStable: window.__tabbyCloudObservation?.scroll?.geometryStable === true,
                             earlierHistory: window.__tabbyCloudObservation?.scroll?.earlierHistory === true },
+                        nativeTouch: geometry(window.__tabbyCloudObservation?.lastNativeTouch),
                     }
                 })
             } catch { result.domUnavailable = true }
@@ -122,6 +125,7 @@ export async function webviewAcceptance (android, fixture) {
     async function nativeTouch (locator, durationMs = 100) {
         const box = await locator.boundingBox()
         check(!!box && box.width > 0 && box.height > 0, 'ANDROID_TOUCH_TARGET_NOT_VISIBLE')
+        await page.evaluate(value => { window.__tabbyCloudObservation.lastNativeTouch = value }, box)
         await android.input({ type: 'touch', x: box.x + box.width / 2, y: box.y + box.height / 2, durationMs })
     }
     async function output (needle) {
@@ -385,11 +389,11 @@ export async function webviewAcceptance (android, fixture) {
             return sameGeometry && after.sliderCount === 1 && Number.isFinite(after.sliderTop) && after.sliderTop < beforeScroll.sliderTop
                 && renderedChanged && earlierHistory
         }, 'ANDROID_TOUCH_DID_NOT_SCROLL_TERMINAL'))
-        substage = 'native-selection-and-clipboard'
-        await rawProbe('W_CLIP', undefined)
-        await plugin('hideKeyboard')
-        await nativeTouch(page.locator('.terminal-area'), 700)
-        await page.locator('.selection-layer pre').waitFor()
+        await step('clipboard-raw-pty-probe', () => rawProbe('W_CLIP', undefined))
+        await step('selection-hide-ime', () => plugin('hideKeyboard'))
+        await step('selection-open-snapshot-native-longpress', () => nativeTouch(page.locator('.terminal-area'), 700))
+        await step('selection-snapshot-visible', () => page.locator('.selection-layer pre').waitFor())
+        substage = 'selection-locate-token-geometry'
         const point = await page.evaluate(() => {
             const pre = document.querySelector('.selection-layer pre')
             const node = pre.firstChild
@@ -405,18 +409,18 @@ export async function webviewAcceptance (android, fixture) {
             return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 }
         })
         check(!!point, 'ANDROID_SELECTION_SNAPSHOT_MISSING_TEXT')
-        await android.input({ type: 'touch', ...point, durationMs: 900 })
+        await step('selection-token-native-longpress', () => android.input({ type: 'touch', ...point, durationMs: 900 }))
         let selected
-        await until(async () => { selected = await page.evaluate(() => window.getSelection()?.toString() || ''); return selected.includes('ANDROIDCLIPBOARDTOKEN') }, 'ANDROID_NATIVE_LONG_PRESS_SELECTION_FAILED')
-        await nativeTouch(page.getByRole('button', { name: '复制', exact: true }))
-        const copied = await plugin('readClipboard')
+        await step('selection-native-text-selected', () => until(async () => { selected = await page.evaluate(() => window.getSelection()?.toString() || ''); return selected.includes('ANDROIDCLIPBOARDTOKEN') }, 'ANDROID_NATIVE_LONG_PRESS_SELECTION_FAILED'))
+        await step('selection-copy-native-touch', () => nativeTouch(page.getByRole('button', { name: '复制', exact: true })))
+        const copied = await step('selection-read-system-clipboard', () => plugin('readClipboard'))
         check(copied.text === selected, 'ANDROID_SYSTEM_CLIPBOARD_COPY_MISMATCH')
-        await nativeTouch(page.getByRole('button', { name: '结束选择', exact: true }))
-        await nativeTouch(page.getByRole('button', { name: '粘贴', exact: true }))
-        await nativeTouch(page.getByRole('button', { name: '键盘', exact: true }))
-        await nativeTouch(page.getByRole('button', { name: 'Ctrl', exact: true }))
-        await android.input({ type: 'commit', text: 'd' })
-        await output(`W_CLIP_HEX_${Buffer.from(selected).toString('hex')}`)
+        await step('selection-end-native-touch', () => nativeTouch(page.getByRole('button', { name: '结束选择', exact: true })))
+        await step('clipboard-paste-native-touch', () => nativeTouch(page.getByRole('button', { name: '粘贴', exact: true })))
+        await step('clipboard-focus-input-native-touch', () => nativeTouch(page.getByRole('button', { name: '键盘', exact: true })))
+        await step('clipboard-ctrl-native-touch', () => nativeTouch(page.getByRole('button', { name: 'Ctrl', exact: true })))
+        await step('clipboard-raw-pty-eof-input', () => android.input({ type: 'commit', text: 'd' }))
+        await step('clipboard-exact-real-pty-bytes', () => output(`W_CLIP_HEX_${Buffer.from(selected).toString('hex')}`))
         verify('native Android swipe/long-press selection → system clipboard → real PTY paste')
 
         stage = 'system-keyboard-and-rotation-resize'

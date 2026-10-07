@@ -18,6 +18,19 @@ import org.json.JSONObject
 /** Explicit cloud-test CDP window; release/main code never enables inspection. */
 @RunWith(AndroidJUnit4::class)
 class CloudWebViewHarness {
+    private enum class InputReason(val code: String) {
+        OK("ok"),
+        INVALID_COMMAND("invalid_command"),
+        GESTURE_VALIDATION("gesture_validation"),
+        GESTURE_DISPATCH("gesture_dispatch"),
+        INPUT_CONNECTION_MISSING("input_connection_missing"),
+        INPUT_DISPATCH("input_dispatch"),
+        SET_COMPOSING_REJECTED("set_composing_rejected"),
+        FINISH_COMPOSING_REJECTED("finish_composing_rejected"),
+        COMMIT_REJECTED("commit_rejected"),
+        DELETE_REJECTED("delete_rejected"),
+    }
+
     @Test fun holdTheRealAppForCloudInteraction() {
         val args = InstrumentationRegistry.getArguments()
         assumeTrue("Explicit cloud harness only", args.containsKey("cloudDoneFile"))
@@ -40,47 +53,74 @@ class CloudWebViewHarness {
                 while (!done.isFile && System.nanoTime() < deadline) {
                     if (inputEnabled && input.isFile) {
                         var ok = false
+                        var commandType = "unknown"
+                        var reason = InputReason.INVALID_COMMAND
                         try {
                             require(input.length() in 1..8192)
                             val command = JSONObject(input.readText())
                             val type = command.getString("type")
+                            require(type in setOf("touch", "swipe", "compose", "commit", "composeStart",
+                                "composeUpdate", "composeFinish", "deleteBackward"))
+                            commandType = type
                             if (type in setOf("touch", "swipe")) {
-                                executeGesture(scenario, command)
+                                reason = InputReason.GESTURE_VALIDATION
+                                executeGesture(scenario, command) { reason = InputReason.GESTURE_DISPATCH }
                                 ok = true
-                            } else scenario.onActivity { activity ->
-                                val connection = activity.bridge.webView.onCreateInputConnection(EditorInfo())
-                                if (connection != null) {
-                                    when (type) {
-                                        "compose" -> {
-                                            val preedit = command.getString("preedit")
-                                            val text = command.getString("text")
-                                            require(preedit.length <= 1024 && text.length <= 1024)
-                                            ok = connection.setComposingText(preedit, 1) &&
-                                                connection.setComposingText(text, 1) && connection.finishComposingText()
+                            } else {
+                                reason = InputReason.INPUT_DISPATCH
+                                scenario.onActivity { activity ->
+                                    val connection = activity.bridge.webView.onCreateInputConnection(EditorInfo())
+                                    if (connection == null) {
+                                        reason = InputReason.INPUT_CONNECTION_MISSING
+                                    } else {
+                                        reason = InputReason.INVALID_COMMAND
+                                        when (type) {
+                                            "compose" -> {
+                                                val preedit = command.getString("preedit")
+                                                val text = command.getString("text")
+                                                require(preedit.length <= 1024 && text.length <= 1024)
+                                                reason = InputReason.SET_COMPOSING_REJECTED
+                                                ok = connection.setComposingText(preedit, 1) &&
+                                                    connection.setComposingText(text, 1)
+                                                if (ok) {
+                                                    reason = InputReason.FINISH_COMPOSING_REJECTED
+                                                    ok = connection.finishComposingText()
+                                                }
+                                            }
+                                            "commit" -> {
+                                                val text = command.getString("text")
+                                                require(text.length <= 1024)
+                                                reason = InputReason.COMMIT_REJECTED
+                                                ok = connection.commitText(text, 1)
+                                            }
+                                            "composeStart", "composeUpdate" -> {
+                                                val text = command.getString("text")
+                                                require(text.length <= 1024)
+                                                reason = InputReason.SET_COMPOSING_REJECTED
+                                                ok = connection.setComposingText(text, 1)
+                                            }
+                                            "composeFinish" -> {
+                                                reason = InputReason.FINISH_COMPOSING_REJECTED
+                                                ok = connection.finishComposingText()
+                                            }
+                                            "deleteBackward" -> {
+                                                reason = InputReason.DELETE_REJECTED
+                                                ok = connection.deleteSurroundingText(1, 0)
+                                            }
+                                            else -> error("unsupported input command")
                                         }
-                                        "commit" -> {
-                                            val text = command.getString("text")
-                                            require(text.length <= 1024)
-                                            ok = connection.commitText(text, 1)
-                                        }
-                                        "composeStart", "composeUpdate" -> {
-                                            val text = command.getString("text")
-                                            require(text.length <= 1024)
-                                            ok = connection.setComposingText(text, 1)
-                                        }
-                                        "composeFinish" -> ok = connection.finishComposingText()
-                                        "deleteBackward" -> ok = connection.deleteSurroundingText(1, 0)
-                                        else -> error("unsupported input command")
                                     }
                                 }
                             }
+                            if (ok) reason = InputReason.OK
                         } catch (_: Throwable) {
                             // No text, credential, or dependency message leaves
                             // the test-only input boundary.
                             ok = false
                         }
                         input.delete()
-                        resultTemporary.writeText(JSONObject().put("ok", ok).toString())
+                        resultTemporary.writeText(JSONObject().put("ok", ok)
+                            .put("command", commandType).put("reason", reason.code).toString())
                         check(resultTemporary.renameTo(result)) { "Cannot publish input result" }
                     }
                     Thread.sleep(50)
@@ -98,7 +138,7 @@ class CloudWebViewHarness {
         }
     }
 
-    private fun executeGesture(scenario: ActivityScenario<MainActivity>, command: JSONObject) {
+    private fun executeGesture(scenario: ActivityScenario<MainActivity>, command: JSONObject, onValidated: () -> Unit) {
         val type = command.getString("type")
         val duration = command.optInt("durationMs", if (type == "touch") 60 else 300)
         require(duration in 1..1500)
@@ -121,6 +161,7 @@ class CloudWebViewHarness {
         }
         val from = if (type == "touch") point("x", "y") else point("fromX", "fromY")
         val to = if (type == "touch") from else point("toX", "toY")
+        onValidated()
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val downTime = SystemClock.uptimeMillis()
         var current = from
