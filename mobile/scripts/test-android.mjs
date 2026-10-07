@@ -56,7 +56,7 @@ try {
         const classes = ['RealSSHBridgeTest', 'AndroidHostKeyStoreTest', 'ViewportLifecycleTest'].map(name => `${APP}.${name}`).join(',')
         const command = `am instrument -w -r -e fixtureMetadata ${METADATA} -e class ${classes} ${RUNNER}`
         const result = await android.launch(['shell', '-T', command], { timeout: 180000 }).result
-        report.instrumentation = instrumentationResult(result)
+        report.instrumentation = instrumentationResult(result, 6)
         console.log(`PASS Android instrumentation: ${report.instrumentation.tests} tests, no skips.`)
     }
     if (!process.argv.includes('--native-only')) {
@@ -67,7 +67,9 @@ try {
     console.log(JSON.stringify(report))
 } catch (error) {
     report.failure = error instanceof TestFailure ? error.code : 'ANDROID_TEST_SETUP_OR_UNEXPECTED_FAILURE'
+    if (error instanceof TestFailure && error.diagnostics) { report.diagnostics = error.diagnostics }
     console.error(`Cloud Android tests failed: ${report.failure}. Credential-bearing output is suppressed.`)
+    if (report.diagnostics) { console.error(`Android failure diagnostics: ${JSON.stringify(report.diagnostics)}`) }
     process.exitCode = cancelled ? 130 : 1
 } finally {
     if (android) {

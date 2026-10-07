@@ -35,6 +35,10 @@ accidental skips of a cloud harness:
   storage, including the injected commit-failure fail-closed path.
 - `ViewportLifecycleTest`: actual Activity/WebView rotation and dimensions.
 
+All six selected instrumentation tests must pass with zero skips. Each of the
+two explicit WebView harness invocations must separately report exactly one
+passing test; partial test discovery fails the runner.
+
 The second phase invokes `CloudWebViewHarness` explicitly. Only its test APK
 temporarily enables WebView inspection while the real application is running;
 its `finally` disables inspection. Production Capacitor configuration stays
@@ -51,8 +55,9 @@ bridge. Input/gesture commands run through the instrumentation-only harness:
 - Actual AOSP system keyboard show/hide, native WebView viewport and remote
   PTY size, then device rotation and another remote size check.
 - Activity background cancellation, rejection of old auth/connection replies,
-  reconnection, a fresh process with durable public host-key pin, and actual
-  same-endpoint host-key replacement rejection before authentication.
+  reconnection, real TCP loss with a disabled terminal and explicit reconnect,
+  a fresh process with durable public host-key pin, and actual same-endpoint
+  host-key replacement rejection before authentication.
 
 The runner temporarily enables the emulator's soft keyboard with its hardware
 keyboard and sets rotation for the size checks. Original values are restored.
@@ -60,6 +65,11 @@ It records no Playwright trace, console payload, credential screenshot or
 private metadata artifact. The JSON report contains APK hashes, public device
 API/ABI, pass labels and limitations. Failures and skipped instrumentation
 tests are treated as failures; a missing runtime does not become a pass.
+On failure the public report includes a fixed stage/substage and allowlisted
+DOM state, control counts, viewport dimensions, event types and fixture resource
+counts. It never includes input values, raw Playwright errors, authentication
+prompts, terminal output, HTML or screenshots. Form-control selection uses the
+actual select element because its wrapping label also contains the option text.
 
 `--native-only` and `--webview-only` support focused reruns, and explicitly mark
 their partial scope in the report. The default runs both phases.

@@ -21,8 +21,77 @@ export async function webviewAcceptance (android, fixture) {
     let harness
     let page
     let stage = 'harness-start'
+    let substage = 'initializing'
 
     const verify = label => { passed.push(label); console.log(`PASS Android WebView: ${label}.`) }
+    async function step (name, action) {
+        substage = name
+        return action()
+    }
+    async function diagnostics (error) {
+        // All text returned here is selected from fixed allowlists. In
+        // particular, never return HTML, field values, exception messages,
+        // auth prompts, terminal data, screenshots or server console output.
+        const counterNames = new Set(['clients', 'sessions', 'pendingAuth', 'ptys', 'timers', 'authenticated',
+            'authPrompts', 'authAnswers', 'shellStarts', 'resizeRequests', 'connections'])
+        const result = { stage, substage, passedCases: [...passed],
+            errorKind: error instanceof TestFailure ? 'FIXED_TEST_FAILURE'
+                : error?.name === 'TimeoutError' ? 'PLAYWRIGHT_TIMEOUT'
+                    : String(error?.message || '').includes('strict mode violation') ? 'LOCATOR_AMBIGUOUS' : 'UNEXPECTED',
+            fixture: Object.fromEntries(Object.entries(fixture.stats()).filter(([name, value]) => counterNames.has(name) && Number.isSafeInteger(value) && value >= 0)),
+        }
+        if (page) {
+            try {
+                result.dom = await page.evaluate(() => {
+                    const visible = selector => [...document.querySelectorAll(selector)].some(element => {
+                        const rect = element.getBoundingClientRect()
+                        const style = getComputedStyle(element)
+                        return rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden'
+                    })
+                    const statusNames = new Map([['未连接', 'DISCONNECTED'], ['连接中', 'CONNECTING'], ['等待主机密钥确认', 'WAITING_HOST_KEY'],
+                        ['认证中', 'AUTHENTICATING'], ['等待认证', 'WAITING_AUTH'], ['已连接', 'READY']])
+                    const noticeNames = new Map([
+                        ['请输入有效主机、端口和用户名。', 'INVALID_ENDPOINT'],
+                        ['原生 SSH 插件不可用。此页面不能在普通浏览器中连接 SSH。', 'PLUGIN_UNAVAILABLE'],
+                        ['无法建立 SSH 连接。请检查地址和网络。', 'START_FAILED'],
+                        ['主机密钥已变化，连接已拒绝。请先通过可信渠道核实。', 'HOST_KEY_CHANGED'],
+                        ['主机密钥已变化，连接已拒绝。', 'HOST_KEY_CHANGED'],
+                        ['SSH 连接失败或认证被拒绝。', 'SSH_FAILED'], ['SSH 连接已关闭。', 'CLOSED'],
+                        ['主机密钥信息不完整。', 'HOST_KEY_INCOMPLETE'], ['主机密钥尚未验证，认证已停止。', 'HOST_KEY_NOT_VERIFIED'],
+                        ['认证已取消或凭据已释放。请重新连接。', 'AUTH_RELEASED'],
+                    ])
+                    const events = window.__tabbyCloudObservation?.events || []
+                    const eventTypes = new Set(['hostKey', 'auth', 'state', 'data'])
+                    const eventStates = new Set(['ready', 'error', 'closed'])
+                    const eventHostStates = new Set(['known', 'unknown', 'changed'])
+                    const notice = document.querySelector('.notice')?.textContent || ''
+                    return {
+                        documentReady: ['loading', 'interactive', 'complete'].includes(document.readyState) ? document.readyState : 'unknown',
+                        status: statusNames.get(document.querySelector('header .status')?.textContent) || 'UNRECOGNIZED',
+                        notice: notice ? noticeNames.get(notice) || 'OTHER_FIXED_UI_NOTICE' : 'NONE',
+                        formVisible: visible('.connect-panel form'),
+                        hostInputCount: document.querySelectorAll('input[name="host"]').length,
+                        portInputCount: document.querySelectorAll('input[name="port"]').length,
+                        usernameInputCount: document.querySelectorAll('input[name="username"]').length,
+                        authSelectCount: document.querySelectorAll('select[name="authMode"]').length,
+                        passwordInputCount: document.querySelectorAll('input[name="password"]').length,
+                        submitVisible: visible('.connect-panel button[type="submit"]'),
+                        hostDialogVisible: visible('[role="dialog"][aria-label="确认主机密钥"]'),
+                        authDialogVisible: visible('[role="dialog"][aria-label="SSH 交互认证"]'),
+                        terminalInputEnabled: !!document.querySelector('textarea[aria-label="终端输入"]:enabled'),
+                        viewport: { width: Math.round(innerWidth), height: Math.round(innerHeight),
+                            visualHeight: Math.round(window.visualViewport?.height || 0) },
+                        events: events.slice(-12).map(event => ({
+                            type: eventTypes.has(event.type) ? event.type : 'other',
+                            ...(event.type === 'state' ? { state: eventStates.has(event.state) ? event.state : 'other' } : {}),
+                            ...(event.type === 'hostKey' ? { status: eventHostStates.has(event.status) ? event.status : 'other' } : {}),
+                        })),
+                    }
+                })
+            } catch { result.domUnavailable = true }
+        }
+        return result
+    }
     async function quiet () {
         await until(() => ['clients', 'sessions', 'ptys', 'timers', 'pendingAuth'].every(key => fixture.stats()[key] === 0), 'ANDROID_FIXTURE_RESOURCES_NOT_RELEASED')
     }
@@ -90,29 +159,35 @@ export async function webviewAcceptance (android, fixture) {
     async function endHarness () {
         await android.privateFile(DONE, '')
         const result = await harness.result
-        check(instrumentationResult(result).tests === 1, 'ANDROID_HARNESS_RESULT_INVALID')
+        instrumentationResult(result, 1)
         harness = undefined
         await quiet()
     }
     async function connect (known, mode = 'password') {
         const authenticatedBefore = fixture.stats().authenticated
-        await page.getByLabel('主机', { exact: true }).fill('127.0.0.1')
-        await page.getByLabel('端口', { exact: true }).fill(String(fixture.metadata.port))
-        await page.getByLabel('用户名', { exact: true }).fill(fixture.metadata.username)
-        await page.getByLabel('认证方式', { exact: true }).selectOption(mode)
-        if (mode === 'password') { await page.getByLabel('密码', { exact: true }).fill(fixture.metadata.password) }
-        await plugin('hideKeyboard')
-        await until(async () => !(await viewport()).visible, 'ANDROID_FORM_IME_DID_NOT_HIDE')
-        await nativeTouch(page.getByRole('button', { name: '连接', exact: true }))
+        await step('form-host', () => page.getByLabel('主机', { exact: true }).fill('127.0.0.1'))
+        await step('form-port', () => page.getByLabel('端口', { exact: true }).fill(String(fixture.metadata.port)))
+        await step('form-username', () => page.getByLabel('用户名', { exact: true }).fill(fixture.metadata.username))
+        // A wrapping select label includes its option text in the accessible
+        // name. Match the actual form control instead of an exact short label.
+        await step('form-auth-mode', () => page.locator('select[name="authMode"]').selectOption(mode))
+        if (mode === 'password') {
+            await step('form-password', () => page.getByLabel('密码', { exact: true }).fill(fixture.metadata.password))
+        }
+        await step('form-hide-ime', () => plugin('hideKeyboard'))
+        await step('form-ime-hidden', () => until(async () => !(await viewport()).visible, 'ANDROID_FORM_IME_DID_NOT_HIDE'))
+        await step('form-native-submit', () => nativeTouch(page.getByRole('button', { name: '连接', exact: true })))
         if (!known) {
-            await page.getByRole('dialog', { name: '确认主机密钥' }).waitFor()
+            await step('host-key-dialog', () => page.getByRole('dialog', { name: '确认主机密钥' }).waitFor())
+            substage = 'host-key-fingerprint'
             const fingerprint = await page.locator('.modal-card code').textContent()
             check(fingerprint === fixture.metadata.fingerprint, 'ANDROID_HOST_KEY_FINGERPRINT_MISMATCH')
             check(fixture.stats().authenticated === authenticatedBefore, 'ANDROID_AUTH_BEFORE_HOST_APPROVAL')
-            await nativeTouch(page.getByRole('button', { name: '核对后信任', exact: true }))
+            await step('host-key-native-trust', () => nativeTouch(page.getByRole('button', { name: '核对后信任', exact: true })))
         }
         if (mode === 'password') {
-            await until(async () => await page.locator('header .status').textContent() === '已连接', 'ANDROID_WEBVIEW_SSH_NOT_READY')
+            await step('ssh-ready', () => until(async () => await page.locator('header .status').textContent() === '已连接', 'ANDROID_WEBVIEW_SSH_NOT_READY'))
+            substage = 'web-storage-password-absence'
             check(await page.evaluate(password => {
                 const saved = [localStorage, sessionStorage].flatMap(storage => Object.keys(storage).map(key => storage.getItem(key) || ''))
                 return saved.every(value => !value.includes(password))
@@ -280,7 +355,30 @@ export async function webviewAcceptance (android, fixture) {
         check(authRejected, 'ANDROID_PLUGIN_ACCEPTED_OLD_AUTH_RESPONSE')
         await fixture.command({ type: 'configure', authMode: 'all' })
         await connect(true)
+        stage = 'network-loss-and-explicit-reconnect'
+        substage = 'drop-real-tcp'
+        const lostConnection = await page.evaluate(() => window.__tabbyCloudObservation.events.findLast(event => event.type === 'state' && event.state === 'ready'))
+        const connectionsBeforeLoss = fixture.stats().connections
+        await fixture.command({ type: 'dropConnections' })
+        await step('network-loss-ui-closed', () => until(async () =>
+            await page.getByRole('button', { name: '连接', exact: true }).count() === 1
+            && await page.locator('header .status').textContent() === '未连接'
+            && await page.locator('textarea[aria-label="终端输入"]:enabled').count() === 0,
+        'ANDROID_NETWORK_LOSS_DID_NOT_FAIL_CLOSED'))
+        await quiet()
+        const lostRejected = await page.evaluate(async event => {
+            try { await window.Capacitor.Plugins.TabbySSH.command({ connectionId: event.connectionId,
+                command: { type: 'write', generation: event.generation, data: 'YQ==' } }); return false }
+            catch { return true }
+        }, lostConnection)
+        check(lostRejected, 'ANDROID_PLUGIN_ACCEPTED_LOST_CONNECTION')
+        await pause(500)
+        check(fixture.stats().connections === connectionsBeforeLoss, 'ANDROID_NETWORK_LOSS_IMPLICITLY_RECONNECTED')
+        await connect(true)
+        await sendLine("printf '%s%s\\n' 'W_NETWORK_' 'RECONNECTED'")
+        await output('W_NETWORK_RECONNECTED')
         await disconnect()
+        verify('real TCP loss closes Android UI/resources, rejects old writes and permits explicit reconnect')
         verify('actual Activity background closes resources; canceled auth rejects old responses and reconnects')
         await endHarness()
 
@@ -304,8 +402,10 @@ export async function webviewAcceptance (android, fixture) {
         return { passed: true, cases: passed, skipped: 0, inputEvidence: 'Actual Android InputConnection; specific Chinese IME candidate UI unverified.',
             touchEvidence: 'Android instrumentation MotionEvent injection, not synthetic DOM touch.' }
     } catch (error) {
-        if (error instanceof TestFailure) { throw error }
-        throw new TestFailure(`ANDROID_WEBVIEW_${stage.toUpperCase().replaceAll('-', '_')}_FAILED`)
+        const failure = error instanceof TestFailure ? error
+            : new TestFailure(`ANDROID_WEBVIEW_${stage.toUpperCase().replaceAll('-', '_')}_${substage.toUpperCase().replaceAll('-', '_')}_FAILED`)
+        failure.diagnostics = await diagnostics(error)
+        throw failure
     } finally {
         if (harness) {
             try { await android.privateFile(DONE, ''); await harness.result } catch { harness.terminate() }

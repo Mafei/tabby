@@ -148,10 +148,13 @@ export class Android {
     }
 }
 
-export function instrumentationResult (result) {
+export function instrumentationResult (result, expectedTests) {
     check(result.code === 0, 'INSTRUMENTATION_PROCESS_FAILED')
     check(!/INSTRUMENTATION_STATUS_CODE:\s*-/.test(result.stdout), 'INSTRUMENTATION_FAILED_OR_SKIPPED')
     const tests = result.stdout.match(/OK \((\d+) tests?\)/)
     check(!!tests && Number(tests[1]) > 0, 'INSTRUMENTATION_DID_NOT_PASS')
+    if (expectedTests !== undefined) {
+        check(Number(tests[1]) === expectedTests, 'INSTRUMENTATION_TEST_COUNT_MISMATCH')
+    }
     return { tests: Number(tests[1]), passed: true, skipped: 0 }
 }
