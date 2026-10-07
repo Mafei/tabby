@@ -144,6 +144,19 @@ changes. Focus diagnostics contain only fixed categories, booleans and bounded
 display IDs. Window focus is read from the matching display's `mCurrentFocus`,
 not inferred from a missing field in the windows subdump. Raw window, input and
 Activity dumps stay in memory and never enter logs or artifacts.
+Failure-only ANR observations read the verified disposable emulator's last-ANR
+window/activity summaries and latest traces in parallel with the existing
+window/focus/DOM observations. They share one five-second deadline capped by
+the current harness deadline. Summary inputs are limited to 256 KiB each and
+traces to 1 MiB, measured as UTF-8 bytes; malformed, oversized or unavailable
+data remains unknown. Public results contain fixed process/reason/thread
+categories and an optional same-process boolean, never names, PIDs, timestamps
+or stack frames. Main-thread classification requires one closed first ART
+process with the exact application identity and one main-thread header. A
+latest trace or matching PID does not establish the same ANR episode, so that
+relationship remains unknown. Cancellation or expiration prevents new
+diagnostic reads. No ANR dialog is dismissed and no gesture or focus gate is
+bypassed.
 Each shell-command setup through the real clipboard also waits for the native
 IME to be hidden and the native/WebView geometry to stabilize, then waits for
 the clipboard preview to disappear naturally before touching Paste and Enter.

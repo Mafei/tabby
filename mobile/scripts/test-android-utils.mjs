@@ -55,6 +55,17 @@ export async function observeUntil (promise, deadline, code) {
     } finally { clearTimeout(timer) }
 }
 
+/** Do not start a readback after its existing absolute deadline. */
+export async function observeReadUntil (read, deadline, code) {
+    check(!cancelled, 'ANDROID_TEST_CANCELLED')
+    check(Number.isSafeInteger(deadline) && Date.now() < deadline, code)
+    return observeUntil(Promise.resolve().then(() => {
+        check(!cancelled, 'ANDROID_TEST_CANCELLED')
+        check(Date.now() < deadline, code)
+        return read()
+    }), deadline, code)
+}
+
 /** Only generated fixture values are supplied; never user credentials. */
 export function checkNoSecrets (output, secrets) {
     for (const secret of secrets) {
@@ -207,6 +218,130 @@ export function windowState (dump, displays = '') {
     }
 }
 
+function anrProcessCategory (value) {
+    if (value === undefined) { return 'UNKNOWN' }
+    const text = value.trim()
+    if (text === APP) { return 'APP' }
+    if (text === `${APP}.test`) { return 'TEST_HELPER' }
+    if (text === 'system_server') { return 'SYSTEM_SERVER' }
+    if (text === 'com.android.systemui') { return 'SYSTEM_UI' }
+    if (text === 'com.android.launcher3') { return 'LAUNCHER' }
+    if (text === 'com.android.inputmethod.latin') { return 'IME' }
+    return text ? 'OTHER' : 'UNKNOWN'
+}
+
+function anrReasonCategory (value) {
+    if (typeof value !== 'string' || value.length > 4096) { return 'UNKNOWN' }
+    if (/^Input dispatching timed out \([^\r\n]+ does not have a focused window\.?\)$/.test(value)
+        || /^(?:ActivityRecord\{[^\r\n{}]+\}|Application) does not have a focused window\.?$/.test(value)) { return 'INPUT_NO_FOCUSED_WINDOW' }
+    if (/^Input dispatching timed out\b/.test(value) || / is not responding\. Waited \d+ms for /.test(value)) { return 'INPUT_DISPATCH_TIMEOUT' }
+    if (/^executing service /.test(value)) { return 'SERVICE_EXECUTION_TIMEOUT' }
+    if (/^Broadcast of /.test(value)) { return 'BROADCAST_TIMEOUT' }
+    if (/^ContentProvider not responding/.test(value)) { return 'CONTENT_PROVIDER_TIMEOUT' }
+    if (/^App startup timeout/.test(value)) { return 'APP_START_TIMEOUT' }
+    return 'UNKNOWN'
+}
+
+function anrDumpBody (dump, header, limit) {
+    if (typeof dump !== 'string' || Buffer.byteLength(dump, 'utf8') > limit) { return undefined }
+    const text = dump.replaceAll('\r\n', '\n')
+    const lines = text.split('\n')
+    if (lines[0] !== header || lines.filter(line => line === header).length !== 1) { return undefined }
+    return lines.slice(1).join('\n')
+}
+
+function anrHeader (dump, kind) {
+    const header = kind === 'window' ? 'WINDOW MANAGER LAST ANR (dumpsys window lastanr)'
+        : 'ACTIVITY MANAGER LAST ANR (dumpsys activity lastanr)'
+    const body = anrDumpBody(dump, header, 256 * 1024)
+    if (body === undefined) { return { status: 'UNKNOWN' } }
+    if (body.trim() === '<no ANR has occurred since boot>') { return { status: 'NONE' } }
+    const lines = body.split(/\n[ \t]*\n/, 1)[0].split('\n')
+    const fields = new Map()
+    for (const line of lines) {
+        const match = /^[ \t]+(ANR time|Application at fault|Window at fault|Reason): ([^\n]+)$/.exec(line)
+        if (!match || fields.has(match[1]) || (kind === 'activity' && ['Application at fault', 'Window at fault'].includes(match[1]))) {
+            return { status: 'UNKNOWN' }
+        }
+        fields.set(match[1], match[2])
+    }
+    if (!fields.has('ANR time')) { return { status: 'UNKNOWN' } }
+    return { status: 'PRESENT', application: fields.get('Application at fault'), window: fields.get('Window at fault'), reason: fields.get('Reason') }
+}
+
+function ownMainThread (block) {
+    const headers = [...block.matchAll(/^"main"(?: daemon)? prio=-?\d+ tid=\d+ ([A-Za-z]+)(?: \(still starting up\))?[ \t]*$/gm)]
+    if (headers.length !== 1 || [...block.matchAll(/^"main"[^\n]*$/gm)].length !== 1) { return { state: 'UNKNOWN', category: 'UNKNOWN' } }
+    const header = headers[0]
+    const tail = block.slice(header.index + header[0].length)
+    // ART can also list native/unattached threads. A new quoted heading must
+    // never let a foreign thread's frames be classified as our main thread.
+    const next = tail.search(/^"/m)
+    const main = next < 0 ? tail : tail.slice(0, next)
+    const state = new Map([['Native', 'NATIVE'], ['Runnable', 'RUNNABLE'], ['Blocked', 'BLOCKED'],
+        ['Waiting', 'WAITING'], ['TimedWaiting', 'WAITING']]).get(header[1]) || 'UNKNOWN'
+    if (state === 'UNKNOWN') { return { state, category: 'UNKNOWN' } }
+    const frames = [...main.matchAll(/^[ \t]+at ([A-Za-z0-9_.$]+)\([^\n]*\)[ \t]*$/gm)].map(match => match[1])
+    const first = frames[0]
+    let category = first === undefined ? 'UNKNOWN' : 'OTHER'
+    if (first === 'android.os.MessageQueue.nativePollOnce') { category = 'IDLE_LOOP' }
+    else if (/^android\.os\.BinderProxy\.transact(?:Native)?$/.test(first || '')) { category = 'BINDER_WAIT' }
+    else if (/^org\.tabby\.android\.ssh\.NativeSSH\.(?:start|command|poll|destroy)$/.test(first || '')) { category = 'SSH_JNI' }
+    else if (/^(?:android\.view\.(?:ViewRootImpl|View|ViewGroup)|org\.tabby\.android\.prototype\.MainActivity)\./.test(first || '')) { category = 'VIEW_LAYOUT_INSETS' }
+    else if (/^(?:android\.webkit|org\.chromium)\./.test(first || '')) { category = 'WEBVIEW' }
+    else if (/^org\.tabby\.android\.prototype\.TabbySSHPlugin\./.test(first || '')) { category = 'APP_BRIDGE' }
+    else if (/^(?:java\.lang\.Object\.wait|java\.util\.concurrent\.[A-Za-z0-9_.$]+\.(?:await|get|park))$/.test(first || '')) { category = 'JAVA_WAIT' }
+    return { state, category }
+}
+
+/** AOSP last-ANR summaries; no identities, messages or stack frames escape. */
+export function anrStateResult (windowDump, activityDump, traceDump, harnessPID) {
+    const window = anrHeader(windowDump, 'window')
+    const activity = anrHeader(activityDump, 'activity')
+    const result = {
+        windowStatus: window.status, applicationCategory: window.application === undefined ? 'UNKNOWN' : focusCategory(window.application),
+        windowCategory: window.window === undefined ? 'UNKNOWN' : focusCategory(window.window), windowReasonCategory: anrReasonCategory(window.reason),
+        activityStatus: activity.status, activityReasonCategory: anrReasonCategory(activity.reason),
+        traceStatus: 'UNKNOWN', traceProcessCategory: 'UNKNOWN', traceReasonCategory: 'UNKNOWN', tracePIDMatchesHarness: null,
+        // A latest file and a matching PID do not establish the same ANR episode.
+        traceEpisodeRelation: 'UNKNOWN', ownMainThreadState: 'UNKNOWN', ownMainStackCategory: 'UNKNOWN',
+    }
+    const body = anrDumpBody(traceDump, 'ACTIVITY MANAGER LAST ANR TRACES (dumpsys activity lastanr-traces)', 1024 * 1024)
+    if (body === undefined) { return result }
+    if (body.trim() === '<no ANR has occurred since boot>') { result.traceStatus = 'NONE'; return result }
+    const first = /^----- pid (\d+) at [^\n]+ -----[ \t]*$/m.exec(body)
+    if (!first) { return result }
+    const pid = Number(first[1])
+    if (!Number.isSafeInteger(pid) || pid <= 0 || pid > 2147483647) { return result }
+    const after = body.slice(first.index + first[0].length)
+    const end = new RegExp(`^----- end ${first[1]} -----[ \\t]*$`, 'm').exec(after)
+    if (!end) { return result }
+    const block = after.slice(0, end.index)
+    if (/^----- (?:pid |dumping pid: |end )/m.test(block)) { return result }
+    const commands = [...block.matchAll(/^Cmd line: ([^\n]+)$/gm)]
+    if (commands.length !== 1 || [...block.matchAll(/^Cmd line:[^\n]*$/gm)].length !== 1) { return result }
+    const prefix = body.slice(0, first.index)
+    const files = [...prefix.matchAll(/^File: ([^\n]+)$/gm)]
+    const subjects = [...prefix.matchAll(/^Subject: ([^\n]*)$/gm)]
+    const dumping = [...prefix.matchAll(/^----- dumping pid: (\d+) at \d+$/gm)]
+    if (files.length !== 1 || [...body.matchAll(/^File:[^\n]*$/gm)].length !== 1
+        || !body.startsWith(files[0][0] + '\n') || subjects.length > 1
+        || (subjects.length === 1 && !subjects[0][1]) || /^----- (?:pid |end )/m.test(prefix)
+        || dumping.length > 1 || (dumping.length === 1 && Number(dumping[0][1]) !== pid)
+        || [...prefix.matchAll(/^----- dumping pid:[^\n]*$/gm)].length !== dumping.length
+        || [...body.matchAll(new RegExp(`^----- pid ${first[1]} at [^\\n]+ -----[ \\t]*$`, 'gm'))].length !== 1) { return result }
+    result.traceStatus = 'PRESENT'
+    result.traceProcessCategory = anrProcessCategory(commands[0][1])
+    result.traceReasonCategory = subjects.length === 1 ? anrReasonCategory(subjects[0][1]) : 'UNKNOWN'
+    if (result.traceProcessCategory === 'APP') {
+        result.tracePIDMatchesHarness = Number.isSafeInteger(harnessPID) && harnessPID > 0 ? pid === harnessPID : null
+        const main = ownMainThread(block)
+        result.ownMainThreadState = main.state
+        result.ownMainStackCategory = main.category
+    }
+    return result
+}
+
 /** Select fixed public state fields; never return the native response object. */
 export function deviceStateResult (state) {
     check(state && typeof state === 'object' && !Array.isArray(state), 'ANDROID_DEVICE_STATE_INVALID_RESULT')
@@ -231,7 +366,8 @@ export function deviceStateResult (state) {
     return result
 }
 
-export function processResult (executable, args, { input, timeout = 60000, secrets = [] } = {}) {
+export function processResult (executable, args, { input, timeout = 60000, secrets = [], maxOutputBytes = 4 * 1024 * 1024 } = {}) {
+    check(Number.isSafeInteger(maxOutputBytes) && maxOutputBytes > 0 && maxOutputBytes <= 4 * 1024 * 1024, 'TEST_COMMAND_INVALID_OUTPUT_LIMIT')
     let child
     const result = new Promise((resolve, reject) => {
         child = spawn(executable, args, { stdio: ['pipe', 'pipe', 'pipe'], detached: process.platform !== 'win32' })
@@ -239,6 +375,7 @@ export function processResult (executable, args, { input, timeout = 60000, secre
         let stdout = ''
         let stderr = ''
         let exceeded = false
+        let outputBytes = 0
         const kill = () => {
             try {
                 if (process.platform === 'win32') { child.kill('SIGKILL') }
@@ -247,8 +384,9 @@ export function processResult (executable, args, { input, timeout = 60000, secre
         }
         const timer = setTimeout(() => { exceeded = true; kill() }, timeout)
         const collect = (data, error) => {
+            outputBytes += Buffer.byteLength(data, 'utf8')
+            if (outputBytes > maxOutputBytes) { exceeded = true; kill(); return }
             if (error) { stderr += data } else { stdout += data }
-            if (stdout.length + stderr.length > 4 * 1024 * 1024) { exceeded = true; kill() }
         }
         child.stdout.setEncoding('utf8').on('data', data => collect(data, false))
         child.stderr.setEncoding('utf8').on('data', data => collect(data, true))
@@ -293,10 +431,12 @@ export class Android {
         check(await this.command(['get-state']) === 'device', 'EMULATOR_NOT_CONNECTED')
         const qemu = await this.shell('getprop ro.boot.qemu') || await this.shell('getprop ro.kernel.qemu')
         check(qemu === '1', 'RUNNER_REQUIRES_AN_EMULATOR')
-        return {
+        const metadata = {
             api: Number(await this.shell('getprop ro.build.version.sdk')),
             abi: await this.shell('getprop ro.product.cpu.abi'),
         }
+        this.emulatorVerified = true
+        return metadata
     }
 
     async privateFile (filename, content, options) {
@@ -318,12 +458,13 @@ export class Android {
         return result.code === 0 ? result.stdout.trim() : undefined
     }
 
-    async windows (timeout = 5000) {
+    async windows (timeout = 5000, absoluteDeadline) {
         // This is the explicitly selected disposable emulator. The raw dump
         // stays in memory and is never included in output or artifacts.
-        const deadline = Date.now() + timeout
+        const deadline = Math.min(Date.now() + timeout, absoluteDeadline ?? Infinity)
+        check(Number.isSafeInteger(deadline) && Date.now() < deadline, 'ANDROID_WINDOW_STATE_DEADLINE_EXCEEDED')
         const [windows, displays] = await Promise.all([
-            this.shell('dumpsys window windows', { timeout }), this.shell('dumpsys window displays', { timeout }),
+            this.readonlyDump('dumpsys window windows', deadline), this.readonlyDump('dumpsys window displays', deadline),
         ])
         check(Date.now() < deadline, 'ANDROID_WINDOW_STATE_DEADLINE_EXCEEDED')
         return windowState(windows, displays)
@@ -331,13 +472,36 @@ export class Android {
 
     async focusState ({ deadline = Date.now() + 5000 } = {}) {
         check(Number.isSafeInteger(deadline) && Date.now() < deadline, 'ANDROID_FOCUS_STATE_DEADLINE_EXCEEDED')
-        const timeout = Math.max(1, Math.min(5000, deadline - Date.now()))
+        const limit = Math.min(deadline, Date.now() + 5000)
         const [displays, input, activities, windows] = await Promise.all([
-            this.shell('dumpsys window displays', { timeout }), this.shell('dumpsys input', { timeout }),
-            this.shell('dumpsys activity activities', { timeout }), this.shell('dumpsys window windows', { timeout }),
+            this.readonlyDump('dumpsys window displays', limit), this.readonlyDump('dumpsys input', limit),
+            this.readonlyDump('dumpsys activity activities', limit), this.readonlyDump('dumpsys window windows', limit),
         ])
-        check(Date.now() < deadline, 'ANDROID_FOCUS_STATE_DEADLINE_EXCEEDED')
+        check(Date.now() < limit, 'ANDROID_FOCUS_STATE_DEADLINE_EXCEEDED')
         return focusStateResult(displays, input, activities, windows)
+    }
+
+    async readonlyDump (command, deadline, options = {}) {
+        check(!cancelled, 'ANDROID_TEST_CANCELLED')
+        check(Number.isSafeInteger(deadline), 'ANDROID_DIAGNOSTICS_DEADLINE_EXCEEDED')
+        const remaining = deadline - Date.now()
+        check(remaining > 0, 'ANDROID_DIAGNOSTICS_DEADLINE_EXCEEDED')
+        return this.shell(command, { ...options, timeout: Math.min(5000, remaining) })
+    }
+
+    async anrState ({ deadline = Date.now() + 5000, harnessPID } = {}) {
+        check(!cancelled, 'ANDROID_TEST_CANCELLED')
+        check(this.emulatorVerified === true, 'ANDROID_ANR_REQUIRES_VERIFIED_EMULATOR')
+        check(Number.isSafeInteger(deadline) && Date.now() < deadline, 'ANDROID_ANR_STATE_DEADLINE_EXCEEDED')
+        const limit = Math.min(deadline, Date.now() + 5000)
+        const readings = await Promise.allSettled([
+            this.readonlyDump('dumpsys window lastanr', limit, { maxOutputBytes: 256 * 1024 }),
+            this.readonlyDump('dumpsys activity lastanr', limit, { maxOutputBytes: 256 * 1024 }),
+            this.readonlyDump('dumpsys activity lastanr-traces', limit, { maxOutputBytes: 1024 * 1024 }),
+        ])
+        check(Date.now() < limit, 'ANDROID_ANR_STATE_DEADLINE_EXCEEDED')
+        const [window, activity, trace] = readings.map(reading => reading.status === 'fulfilled' ? reading.value : undefined)
+        return anrStateResult(window, activity, trace, harnessPID)
     }
 
     async input (command, { deadline } = {}) {

@@ -1,5 +1,5 @@
 import { createRequire } from 'node:module'
-import { APP, RUNNER, DONE, INPUT, METADATA, check, until, pause, TestFailure, instrumentationResult, observeUntil } from './test-android-utils.mjs'
+import { APP, RUNNER, DONE, INPUT, METADATA, check, until, pause, TestFailure, instrumentationResult, observeUntil, observeReadUntil } from './test-android-utils.mjs'
 
 const require = createRequire(import.meta.url)
 const quote = value => `'${value.replace(/'/g, `'"'"'`)}'`
@@ -21,6 +21,7 @@ export async function webviewAcceptance (android, fixture) {
     const deviceStates = []
     let harness
     let harnessDeadline
+    let harnessPID
     let page
     let stage = 'harness-start'
     let substage = 'initializing'
@@ -44,17 +45,17 @@ export async function webviewAcceptance (android, fixture) {
                     : String(error?.message || '').includes('strict mode violation') ? 'LOCATOR_AMBIGUOUS' : 'UNEXPECTED',
             fixture: Object.fromEntries(Object.entries(fixture.stats()).filter(([name, value]) => counterNames.has(name) && Number.isSafeInteger(value) && value >= 0)),
         }
-        try {
-            const remaining = Math.min(5000, (harnessDeadline ?? Date.now() + 5000) - Date.now())
-            check(remaining > 0, 'ANDROID_WINDOW_STATE_DEADLINE_EXCEEDED')
-            result.androidWindows = await android.windows(remaining)
-        } catch { result.windowStateUnavailable = true }
-        try {
-            result.focusState = await android.focusState({ deadline: Math.min(harnessDeadline ?? Date.now() + 5000, Date.now() + 5000) })
-        } catch { result.focusStateUnavailable = true }
+        // Failure-only readbacks share the original five-second observation
+        // horizon and the current harness deadline; none extend its budget.
+        const deadline = Math.min(harnessDeadline ?? Date.now() + 5000, Date.now() + 5000)
+        const states = Promise.allSettled([
+            observeReadUntil(() => android.windows(5000, deadline), deadline, 'ANDROID_WINDOW_STATE_DEADLINE_EXCEEDED'),
+            observeReadUntil(() => android.focusState({ deadline }), deadline, 'ANDROID_FOCUS_STATE_DEADLINE_EXCEEDED'),
+            observeReadUntil(() => android.anrState({ deadline, harnessPID }), deadline, 'ANDROID_ANR_STATE_DEADLINE_EXCEEDED'),
+        ])
         if (page) {
             try {
-                result.dom = await page.evaluate(() => {
+                result.dom = await observeReadUntil(() => page.evaluate(() => {
                     const visible = selector => [...document.querySelectorAll(selector)].some(element => {
                         const rect = element.getBoundingClientRect()
                         const style = getComputedStyle(element)
@@ -148,8 +149,14 @@ export async function webviewAcceptance (android, fixture) {
                                     converged: value.converged === true }]
                             })),
                     }
-                })
+                }), deadline, 'ANDROID_DOM_DIAGNOSTICS_DEADLINE_EXCEEDED')
             } catch { result.domUnavailable = true }
+        }
+        const snapshots = await states
+        for (const [index, [field, unavailable]] of [['androidWindows', 'windowStateUnavailable'],
+            ['focusState', 'focusStateUnavailable'], ['anrState', 'anrStateUnavailable']].entries()) {
+            if (snapshots[index].status === 'fulfilled') { result[field] = snapshots[index].value }
+            else { result[unavailable] = true }
         }
         return result
     }
@@ -340,6 +347,7 @@ export async function webviewAcceptance (android, fixture) {
             view = device.webViews().find(view => view.pkg() === APP && view.pid() !== previousPID)
             return !!view
         }, 'ANDROID_TEST_HARNESS_WEBVIEW_NOT_AVAILABLE', 45000)
+        harnessPID = view.pid()
         const preparation = { harness: previousPID === undefined ? 'first' : 'fresh-process', actions: [] }
         deviceStates.push(preparation)
         preparation.beforeCDP = await step('focus-before-cdp-attach', () => focusSample())
