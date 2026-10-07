@@ -41,6 +41,7 @@ export async function webviewAcceptance (android, fixture) {
                     : String(error?.message || '').includes('strict mode violation') ? 'LOCATOR_AMBIGUOUS' : 'UNEXPECTED',
             fixture: Object.fromEntries(Object.entries(fixture.stats()).filter(([name, value]) => counterNames.has(name) && Number.isSafeInteger(value) && value >= 0)),
         }
+        try { result.androidWindows = await android.windows() } catch { result.windowStateUnavailable = true }
         if (page) {
             try {
                 result.dom = await page.evaluate(() => {
@@ -123,9 +124,27 @@ export async function webviewAcceptance (android, fixture) {
         await until(() => ['clients', 'sessions', 'ptys', 'timers', 'pendingAuth'].every(key => fixture.stats()[key] === 0), 'ANDROID_FIXTURE_RESOURCES_NOT_RELEASED')
     }
     async function nativeTouch (locator, durationMs = 100) {
-        const box = await locator.boundingBox()
-        check(!!box && box.width > 0 && box.height > 0, 'ANDROID_TOUCH_TARGET_NOT_VISIBLE')
-        await page.evaluate(value => { window.__tabbyCloudObservation.lastNativeTouch = value }, box)
+        let box
+        let previous
+        let stableSince = Date.now()
+        await until(async () => {
+            const [bounds, native, visual] = await Promise.all([
+                locator.boundingBox(), viewport(),
+                page.evaluate(() => ({ viewportWidth: innerWidth, viewportHeight: innerHeight,
+                    visualHeight: window.visualViewport?.height || innerHeight })),
+            ])
+            if (!bounds || bounds.width <= 0 || bounds.height <= 0) { previous = undefined; stableSince = Date.now(); return false }
+            const state = { ...bounds, ...visual, nativeViewportWidth: native.viewportWidth,
+                nativeViewportHeight: native.viewportHeight, nativeKeyboardVisible: native.visible }
+            await page.evaluate(value => { window.__tabbyCloudObservation.lastNativeTouch = value }, state)
+            const serialized = JSON.stringify(state)
+            const centerX = bounds.x + bounds.width / 2
+            const centerY = bounds.y + bounds.height / 2
+            const inside = centerX >= 0 && centerY >= 0 && centerX < native.viewportWidth && centerY < native.viewportHeight
+            if (!inside || serialized !== previous) { previous = serialized; stableSince = Date.now(); return false }
+            box = bounds
+            return Date.now() - stableSince >= 350
+        }, 'ANDROID_TOUCH_TARGET_DID_NOT_STABILIZE', 10000)
         await android.input({ type: 'touch', x: box.x + box.width / 2, y: box.y + box.height / 2, durationMs })
     }
     async function output (needle) {

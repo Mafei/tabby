@@ -51,6 +51,22 @@ export function checkNoSecrets (output, secrets) {
     check(!/-----BEGIN (?:OPENSSH |RSA |EC |ENCRYPTED )?PRIVATE KEY-----/.test(output), 'TEST_OUTPUT_CONTAINED_PRIVATE_KEY')
 }
 
+/** Parse only fixed window categories; never return titles or dump contents. */
+export function windowState (dump) {
+    const windows = [...dump.matchAll(/\n\s*Window #\d+ (Window\{[^\n]*\}):([\s\S]*?)(?=\n\s*Window #\d+ |$)/g)]
+    const shown = body => /mHasSurface=true/.test(body) && /mViewVisibility=0x0/.test(body)
+        && /\bisOnScreen=true\b|\bisVisible=true\b/.test(body)
+    const any = category => windows.some(([, title, body]) => category(title) && shown(body))
+    const focus = dump.match(/\bmCurrentFocus=(.*)/)?.[1] || ''
+    return {
+        appWindowFound: windows.some(([, title]) => title.includes(APP)),
+        appWindowVisible: any(title => title.includes(APP)),
+        appWindowFocused: focus.includes(APP),
+        clipboardOverlayVisible: any(title => /\bClipboardOverlay\b/.test(title)),
+        imeWindowVisible: any(title => /\bInputMethod\b/.test(title)),
+    }
+}
+
 export function processResult (executable, args, { input, timeout = 60000, secrets = [] } = {}) {
     let child
     const result = new Promise((resolve, reject) => {
@@ -138,6 +154,12 @@ export class Android {
         return result.code === 0 ? result.stdout.trim() : undefined
     }
 
+    async windows () {
+        // This is the explicitly selected disposable emulator. The raw dump
+        // stays in memory and is never included in output or artifacts.
+        return windowState(await this.shell('dumpsys window windows', { timeout: 5000 }))
+    }
+
     async input (command) {
         const commandNames = new Map([['touch', 'TOUCH'], ['swipe', 'SWIPE'], ['compose', 'COMPOSE'], ['commit', 'COMMIT'],
             ['composeStart', 'COMPOSE_START'], ['composeUpdate', 'COMPOSE_UPDATE'], ['composeFinish', 'COMPOSE_FINISH'], ['deleteBackward', 'DELETE_BACKWARD']])
@@ -154,6 +176,19 @@ export class Android {
             try { response = JSON.parse(result) } catch { throw new TestFailure('ANDROID_NATIVE_INPUT_INVALID_RESULT') }
             check(response && response.command === command.type && reasons.has(response.reason) && typeof response.ok === 'boolean', 'ANDROID_NATIVE_INPUT_INVALID_RESULT')
             this.lastInput = { command: commandNames.get(command.type), reason: response.reason.toUpperCase() }
+            const gesture = response.gesture
+            if (gesture && typeof gesture === 'object') {
+                const actions = new Set(['down', 'move', 'up', 'none'])
+                const exceptionKinds = new Set(['SecurityException', 'IllegalArgumentException', 'IllegalStateException', 'AssertionError', 'Other', 'none'])
+                this.lastInput.gesture = {
+                    action: actions.has(gesture.action) ? gesture.action : 'none',
+                    exceptionKind: exceptionKinds.has(gesture.exceptionKind) ? gesture.exceptionKind : 'Other',
+                    ...Object.fromEntries(['windowFocused', 'webViewFocused', 'attached', 'shown', 'imeVisible']
+                        .filter(key => typeof gesture[key] === 'boolean').map(key => [key, gesture[key]])),
+                    ...Object.fromEntries(['width', 'height', 'originX', 'originY', 'density', 'imeBottom']
+                        .filter(key => Number.isFinite(gesture[key])).map(key => [key, gesture[key]])),
+                }
+            }
             check(response.ok && response.reason === 'ok', `ANDROID_NATIVE_INPUT_${commandNames.get(command.type)}_${response.reason.toUpperCase()}`)
         } finally { await this.removeFile(INPUT_RESULT) }
     }

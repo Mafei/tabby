@@ -6,6 +6,8 @@ import android.view.inputmethod.EditorInfo
 import android.view.InputDevice
 import android.view.MotionEvent
 import android.os.SystemClock
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
@@ -29,6 +31,26 @@ class CloudWebViewHarness {
         FINISH_COMPOSING_REJECTED("finish_composing_rejected"),
         COMMIT_REJECTED("commit_rejected"),
         DELETE_REJECTED("delete_rejected"),
+    }
+
+    private class GestureDiagnostic {
+        var action = "none"
+        var exceptionKind = "none"
+        var windowState = JSONObject()
+
+        fun recordFailure(error: Throwable) {
+            // Keep the first failure: cleanup UP must not replace a failed MOVE.
+            if (exceptionKind != "none") return
+            exceptionKind = when (error) {
+                is SecurityException -> "SecurityException"
+                is IllegalArgumentException -> "IllegalArgumentException"
+                is IllegalStateException -> "IllegalStateException"
+                is AssertionError -> "AssertionError"
+                else -> "Other"
+            }
+        }
+
+        fun json(): JSONObject = windowState.put("action", action).put("exceptionKind", exceptionKind)
     }
 
     @Test fun holdTheRealAppForCloudInteraction() {
@@ -55,6 +77,7 @@ class CloudWebViewHarness {
                         var ok = false
                         var commandType = "unknown"
                         var reason = InputReason.INVALID_COMMAND
+                        val gesture = GestureDiagnostic()
                         try {
                             require(input.length() in 1..8192)
                             val command = JSONObject(input.readText())
@@ -64,7 +87,7 @@ class CloudWebViewHarness {
                             commandType = type
                             if (type in setOf("touch", "swipe")) {
                                 reason = InputReason.GESTURE_VALIDATION
-                                executeGesture(scenario, command) { reason = InputReason.GESTURE_DISPATCH }
+                                executeGesture(scenario, command, gesture) { reason = InputReason.GESTURE_DISPATCH }
                                 ok = true
                             } else {
                                 reason = InputReason.INPUT_DISPATCH
@@ -113,14 +136,16 @@ class CloudWebViewHarness {
                                 }
                             }
                             if (ok) reason = InputReason.OK
-                        } catch (_: Throwable) {
+                        } catch (error: Throwable) {
                             // No text, credential, or dependency message leaves
                             // the test-only input boundary.
+                            if (commandType in setOf("touch", "swipe")) gesture.recordFailure(error)
                             ok = false
                         }
                         input.delete()
-                        resultTemporary.writeText(JSONObject().put("ok", ok)
-                            .put("command", commandType).put("reason", reason.code).toString())
+                        val response = JSONObject().put("ok", ok).put("command", commandType).put("reason", reason.code)
+                        if (commandType in setOf("touch", "swipe")) response.put("gesture", gesture.json())
+                        resultTemporary.writeText(response.toString())
                         check(resultTemporary.renameTo(result)) { "Cannot publish input result" }
                     }
                     Thread.sleep(50)
@@ -138,7 +163,10 @@ class CloudWebViewHarness {
         }
     }
 
-    private fun executeGesture(scenario: ActivityScenario<MainActivity>, command: JSONObject, onValidated: () -> Unit) {
+    private fun executeGesture(
+        scenario: ActivityScenario<MainActivity>, command: JSONObject,
+        diagnostic: GestureDiagnostic, onValidated: () -> Unit,
+    ) {
         val type = command.getString("type")
         val duration = command.optInt("durationMs", if (type == "touch") 60 else 300)
         require(duration in 1..1500)
@@ -166,31 +194,64 @@ class CloudWebViewHarness {
         val downTime = SystemClock.uptimeMillis()
         var current = from
         fun send(action: Int) {
-            // The short obtain overload leaves toolType UNKNOWN. WebView uses
-            // both source and toolType to classify pointer events, so emulate
-            // a finger explicitly while keeping Android's real input pipeline.
-            val pointer = MotionEvent.PointerProperties().apply {
-                id = 0
-                toolType = MotionEvent.TOOL_TYPE_FINGER
+            var event: MotionEvent? = null
+            if (diagnostic.exceptionKind == "none") {
+                diagnostic.action = when (action) {
+                    MotionEvent.ACTION_DOWN -> "down"
+                    MotionEvent.ACTION_MOVE -> "move"
+                    MotionEvent.ACTION_UP -> "up"
+                    else -> "none"
+                }
             }
-            val coords = MotionEvent.PointerCoords().apply {
-                x = current.first
-                y = current.second
-                pressure = 1f
-                size = 1f
-            }
-            val event = MotionEvent.obtain(
-                downTime, SystemClock.uptimeMillis(), action, 1,
-                arrayOf(pointer), arrayOf(coords), 0, 0, 1f, 1f, 0, 0,
-                InputDevice.SOURCE_TOUCHSCREEN, 0,
-            )
             try {
+                if (diagnostic.exceptionKind == "none") {
+                    scenario.onActivity { activity ->
+                        val webView = activity.bridge.webView
+                        val location = IntArray(2)
+                        webView.getLocationOnScreen(location)
+                        val insets = ViewCompat.getRootWindowInsets(activity.window.decorView)
+                        val ime = insets?.getInsets(WindowInsetsCompat.Type.ime())
+                        val nativeDensity = activity.resources.displayMetrics.density
+                        diagnostic.windowState = JSONObject()
+                            .put("windowFocused", activity.window.decorView.hasWindowFocus())
+                            .put("webViewFocused", webView.hasFocus())
+                            .put("attached", webView.isAttachedToWindow)
+                            .put("shown", webView.isShown)
+                            .put("width", webView.width).put("height", webView.height)
+                            .put("originX", location[0]).put("originY", location[1])
+                            .put("density", if (nativeDensity.isFinite()) nativeDensity else 0f)
+                            .put("imeVisible", insets?.isVisible(WindowInsetsCompat.Type.ime()) ?: false)
+                            .put("imeBottom", ime?.bottom ?: 0)
+                    }
+                }
+                // The short obtain overload leaves toolType UNKNOWN. WebView uses
+                // both source and toolType to classify pointer events, so emulate
+                // a finger explicitly while keeping Android's real input pipeline.
+                val pointer = MotionEvent.PointerProperties().apply {
+                    id = 0
+                    toolType = MotionEvent.TOOL_TYPE_FINGER
+                }
+                val coords = MotionEvent.PointerCoords().apply {
+                    x = current.first
+                    y = current.second
+                    pressure = 1f
+                    size = 1f
+                }
+                event = MotionEvent.obtain(
+                    downTime, SystemClock.uptimeMillis(), action, 1,
+                    arrayOf(pointer), arrayOf(coords), 0, 0, 1f, 1f, 0, 0,
+                    InputDevice.SOURCE_TOUCHSCREEN, 0,
+                )
                 check(event.getToolType(0) == MotionEvent.TOOL_TYPE_FINGER)
                 check(event.isFromSource(InputDevice.SOURCE_TOUCHSCREEN))
                 instrumentation.sendPointerSync(event)
-            } finally { event.recycle() }
+            } catch (error: Throwable) {
+                diagnostic.recordFailure(error)
+                throw error
+            } finally { event?.recycle() }
         }
         send(MotionEvent.ACTION_DOWN)
+        var firstFailure: Throwable? = null
         try {
             val steps = if (type == "touch") 1 else 12
             for (step in 1..steps) {
@@ -199,6 +260,16 @@ class CloudWebViewHarness {
                 current = Pair(from.first + (to.first - from.first) * progress, from.second + (to.second - from.second) * progress)
                 if (type == "swipe") send(MotionEvent.ACTION_MOVE)
             }
-        } finally { send(MotionEvent.ACTION_UP) }
+        } catch (error: Throwable) {
+            diagnostic.recordFailure(error)
+            firstFailure = error
+        } finally {
+            try {
+                send(MotionEvent.ACTION_UP)
+            } catch (error: Throwable) {
+                if (firstFailure == null) firstFailure = error
+            }
+        }
+        firstFailure?.let { throw it }
     }
 }
