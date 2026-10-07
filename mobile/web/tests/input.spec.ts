@@ -23,7 +23,20 @@ async function waitForTerminalFit(page: Page): Promise<void> {
     // Native SSH authentication takes time; the fake bridge can become ready
     // before the debounced initial fit. Observe the fitted DOM geometry before
     // sending fixture output, rather than racing the default 80-column screen.
-    await expect.poll(() => page.evaluate(() => {
+    const requestedViewport = page.viewportSize()
+    await expect.poll(() => page.evaluate(requestedViewport => {
+        const visualWidth = window.visualViewport?.width ?? innerWidth
+        const visualHeight = window.visualViewport?.height ?? innerHeight
+        const shell = document.querySelector('.app-shell')!.getBoundingClientRect()
+        // setViewportSize can finish before resize/visualViewport listeners
+        // update Angular's explicit shell height. The old one-row terminal can
+        // still fit its old host perfectly, so require the new viewport too.
+        const viewportApplied = !requestedViewport || (
+            Math.abs(innerWidth - requestedViewport.width) < 1 &&
+            Math.abs(innerHeight - requestedViewport.height) < 1 &&
+            Math.abs(visualWidth - requestedViewport.width) < 1 &&
+            Math.abs(visualHeight - requestedViewport.height) < 1)
+        if (!viewportApplied || Math.abs(shell.height - Math.round(visualHeight)) >= 1) { return false }
         const host = document.querySelector<HTMLElement>('.terminal-host')!
         const screen = document.querySelector<HTMLElement>('.xterm-screen')!
         const rows = document.querySelector('.xterm-rows')!
@@ -35,7 +48,7 @@ async function waitForTerminalFit(page: Page): Promise<void> {
         return Number.isFinite(cellHeight) && cellHeight > 0 && width > 0 &&
             availableHeight - height >= -1 && availableHeight - height < cellHeight + 1 &&
             availableWidth - width >= -1 && availableWidth - width < 30
-    })).toBe(true)
+    }, requestedViewport)).toBe(true)
 }
 
 async function ready(page: Page, known = false, options: { fitBeforeReady?: boolean } = {}): Promise<void> {
