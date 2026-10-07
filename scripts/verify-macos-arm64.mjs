@@ -23,14 +23,16 @@ const digest = data => createHash('sha256').update(data).digest('hex')
 const report = { sourceSHA: process.env.TABBY_SOURCE_SHA, runnerArch: process.arch, signing: 'adhoc', developerID: false, notarized: false, gatekeeperTrusted: false, archives: [] }
 const exec = (command, args) => execFileSync(command, args, { encoding: 'utf8' }).trim()
 
-function verifyBinary (data, relativePath, temporaryFile, thin = false) {
+function verifyBinary (data, relativePath, temporaryFile, thin = false, signatureFile = temporaryFile) {
     fs.writeFileSync(temporaryFile, data)
     const architectures = exec('/usr/bin/lipo', ['-archs', temporaryFile]).split(/\s+/).sort()
     assert(architectures.includes('arm64'), `${relativePath}: no arm64 slice (${architectures})`)
     if (thin) {
         assert.deepEqual(architectures, ['arm64'], `${relativePath}: expected an arm64-only executable`)
     }
-    const result = { path: relativePath, architectures, sha256: digest(data), signature: verifyMacSignature(temporaryFile) }
+    // Bundle executables seal their Info.plist/resources; verify them in their
+    // original bundle context. Standalone addons can be verified from raw bytes.
+    const result = { path: relativePath, architectures, sha256: digest(data), signature: verifyMacSignature(signatureFile) }
     console.info(JSON.stringify(result))
     return result
 }
@@ -39,7 +41,7 @@ function verifyApp (app) {
     const binaries = []
     const temporaryFile = path.join(scratch, 'binary')
     const checkFile = file => binaries.push(verifyBinary(
-        fs.readFileSync(file), path.relative(app, file), temporaryFile, true,
+        fs.readFileSync(file), path.relative(app, file), temporaryFile, true, file,
     ))
     checkFile(path.join(app, 'Contents/MacOS/Tabby'))
     checkFile(path.join(app, 'Contents/Frameworks/Electron Framework.framework/Electron Framework'))
