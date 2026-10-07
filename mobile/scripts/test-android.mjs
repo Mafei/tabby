@@ -56,7 +56,7 @@ try {
         const classes = ['RealSSHBridgeTest', 'AndroidHostKeyStoreTest', 'ViewportLifecycleTest'].map(name => `${APP}.${name}`).join(',')
         const command = `am instrument -w -r -e fixtureMetadata ${METADATA} -e class ${classes} ${RUNNER}`
         const result = await android.launch(['shell', '-T', command], { timeout: 180000 }).result
-        report.instrumentation = instrumentationResult(result, 6)
+        report.instrumentation = instrumentationResult(result, 7)
         console.log(`PASS Android instrumentation: ${report.instrumentation.tests} tests, no skips.`)
     }
     if (!process.argv.includes('--native-only')) {

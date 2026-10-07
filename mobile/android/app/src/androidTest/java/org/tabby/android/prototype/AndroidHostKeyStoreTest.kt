@@ -7,10 +7,31 @@ import org.junit.Assert.*
 import org.junit.Test
 import org.junit.runner.RunWith
 import java.util.UUID
+import com.getcapacitor.JSObject
+import com.getcapacitor.PluginCall
 
 /** Exercises policy using actual Android SharedPreferences, with failure injection. */
 @RunWith(AndroidJUnit4::class)
 class AndroidHostKeyStoreTest {
+    @Test fun realCapacitorCallPreservesSmallAndLargeJavaScriptGenerations() {
+        fun read(json: String): Long {
+            val call = PluginCall(null, "TabbySSH", "test", "start", JSObject(json))
+            return BridgeNumbers.generation(call.data.opt("generation"))
+        }
+        assertEquals(1L, read("{\"generation\":1}"))
+        assertEquals(2_147_483_648L, read("{\"generation\":2147483648}"))
+        assertEquals(1L, read("{\"generation\":1.0}"))
+        assertEquals(BridgeNumbers.MAX_SAFE_INTEGER, read("{\"generation\":9007199254740991}"))
+        for (json in listOf("{}", "{\"generation\":null}", "{\"generation\":true}",
+            "{\"generation\":\"1\"}", "{\"generation\":1.5}", "{\"generation\":-1}",
+            "{\"generation\":9007199254740992}")) {
+            try {
+                read(json)
+                fail("Malformed JS generation reached the native transport")
+            } catch (_: IllegalArgumentException) { }
+        }
+    }
+
     @Test fun savedPinCannotBeReplacedAndPortsRemainSeparate() {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val prefs = context.getSharedPreferences("test-public-pins-${UUID.randomUUID()}", Context.MODE_PRIVATE)

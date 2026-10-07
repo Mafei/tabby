@@ -131,4 +131,18 @@ class SecurityPolicyTest {
         assertTrue(bytes.all { it == 0.toByte() })
         assertTrue(vault.snapshot().isEmpty())
     }
+
+    @Test fun bridgeGenerationAcceptsJSONIntegerRepresentationsWithoutCoercingOtherTypes() {
+        assertEquals(1L, BridgeNumbers.generation(1))
+        assertEquals(2_147_483_648L, BridgeNumbers.generation(2_147_483_648L))
+        assertEquals(1L, BridgeNumbers.generation(1.0))
+        assertEquals(BridgeNumbers.MAX_SAFE_INTEGER, BridgeNumbers.generation(BridgeNumbers.MAX_SAFE_INTEGER))
+        for (invalid in listOf(null, true, "1", 1.5, -1, Double.NaN, Double.POSITIVE_INFINITY,
+            BridgeNumbers.MAX_SAFE_INTEGER + 1, (BridgeNumbers.MAX_SAFE_INTEGER + 1).toDouble())) {
+            try {
+                BridgeNumbers.generation(invalid)
+                fail("An invalid numeric representation was accepted")
+            } catch (_: IllegalArgumentException) { }
+        }
+    }
 }

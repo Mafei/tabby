@@ -32,10 +32,11 @@ accidental skips of a cloud harness:
 - `RealSSHBridgeTest`: actual Android JNI/SSH Unicode, resize, auth cancellation
   and changed-pin rejection.
 - `AndroidHostKeyStoreTest`: Android SharedPreferences-backed public-key
-  storage, including the injected commit-failure fail-closed path.
+  storage, including the injected commit-failure fail-closed path, plus real
+  Capacitor `PluginCall` JSON number conversion and invalid-type rejection.
 - `ViewportLifecycleTest`: actual Activity/WebView rotation and dimensions.
 
-All six selected instrumentation tests must pass with zero skips. Each of the
+All seven selected instrumentation tests must pass with zero skips. Each of the
 two explicit WebView harness invocations must separately report exactly one
 passing test; partial test discovery fails the runner.
 

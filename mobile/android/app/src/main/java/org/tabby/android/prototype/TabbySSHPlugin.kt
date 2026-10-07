@@ -71,15 +71,15 @@ class TabbySSHPlugin : Plugin() {
             require(foreground && !destroyed) { "background" }
             val host = call.getString("host")?.trim() ?: error("host")
             val username = call.getString("username") ?: error("username")
-            val port = call.getInt("port", 22) ?: 22
-            val generation = call.getLong("generation") ?: error("generation")
+            val port = if (call.data.has("port")) BridgeNumbers.integer(call.data.opt("port"), 1, 65535).toInt() else 22
+            val generation = BridgeNumbers.generation(call.data.opt("generation"))
             val authMode = call.getString("authMode", "password") ?: "password"
             require(host.isNotEmpty() && host.length <= 255 && !host.any { it.isWhitespace() || it == '\u0000' || it == '/' })
             require(username.isNotEmpty() && username.length <= 256 && !username.contains('\u0000'))
             require(port in 1..65535 && generation in 0..9_007_199_254_740_991L)
             require(authMode in setOf("password", "privateKey", "keyboardInteractive"))
-            val cols = call.getInt("cols", 80) ?: 80
-            val rows = call.getInt("rows", 24) ?: 24
+            val cols = if (call.data.has("cols")) BridgeNumbers.integer(call.data.opt("cols"), 1, 1000).toInt() else 80
+            val rows = if (call.data.has("rows")) BridgeNumbers.integer(call.data.opt("rows"), 1, 1000).toInt() else 24
             require(cols in 1..1000 && rows in 1..1000)
             // Build from an allowlist: Web code cannot supply its own trusted pin
             // or credentials in start, even if a modified caller adds fields.
@@ -126,7 +126,7 @@ class TabbySSHPlugin : Plugin() {
             require(session.gate.isActive() && foreground && !destroyed)
             val input = command ?: error("command")
             val type = input.optString("type")
-            val generation = if (input.has("generation")) input.getLong("generation") else session.gate.generation
+            val generation = if (input.has("generation")) BridgeNumbers.generation(input.opt("generation")) else session.gate.generation
             require(generation == session.gate.generation)
             val output = JSONObject().put("type", type).put("generation", generation)
             when (type) {
@@ -156,13 +156,13 @@ class TabbySSHPlugin : Plugin() {
                     output.put("data", data)
                 }
                 "resize" -> {
-                    val cols = input.getInt("cols")
-                    val rows = input.getInt("rows")
+                    val cols = BridgeNumbers.integer(input.opt("cols"), 1, 1000).toInt()
+                    val rows = BridgeNumbers.integer(input.opt("rows"), 1, 1000).toInt()
                     require(cols in 1..1000 && rows in 1..1000)
                     output.put("cols", cols).put("rows", rows)
                 }
                 "outputAck" -> {
-                    require(session.outputWindow.acknowledge(input.getLong("sequence")))
+                    require(session.outputWindow.acknowledge(BridgeNumbers.integer(input.opt("sequence"), 1, BridgeNumbers.MAX_SAFE_INTEGER)))
                     call.resolve()
                     return
                 }
