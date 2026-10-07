@@ -122,6 +122,8 @@ export function bindingKey (binding: TmuxBinding): string {
 }
 
 export function assertBinding (binding: TmuxBinding, endpoint: { host: string; port: number; account: string|null; hostKey: string|null }): void {
+    // Recovery tokens are untrusted JSON at runtime despite the static literal type.
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
     if (binding.version !== 1 || !binding.hostKey || !endpoint.hostKey || binding.host !== endpoint.host ||
         binding.port !== endpoint.port || binding.account !== endpoint.account || binding.hostKey !== endpoint.hostKey) {
         throw new TmuxError('The authenticated server/account differs from the saved tmux identity')
@@ -186,7 +188,9 @@ export async function framedExec (
                     return
                 }
                 settled = true
+                // eslint-disable-next-line @typescript-eslint/no-use-before-define
                 clearTimeout(timer)
+                // eslint-disable-next-line @typescript-eslint/no-use-before-define
                 signal.removeEventListener('abort', abort)
                 if (error) {
                     reject(error)
@@ -269,7 +273,9 @@ export async function runSSHExec (open: () => Promise<ExecChannel>, script: stri
         const finish = (error?: Error, acquired?: ExecChannel) => {
             if (settled) { acquired?.close().catch(() => undefined); return }
             settled = true
+            // eslint-disable-next-line @typescript-eslint/no-use-before-define
             clearTimeout(timer)
+            // eslint-disable-next-line @typescript-eslint/no-use-before-define
             signal.removeEventListener('abort', abort)
             if (error) { reject(error) } else { resolve(acquired!) }
         }

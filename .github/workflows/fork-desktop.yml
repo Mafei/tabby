@@ -53,17 +53,6 @@ jobs:
         if: always() && steps.install.outcome == 'success'
       - run: yarn build
         if: always() && steps.typings.outcome == 'success'
-      - name: Collect fixable lint diagnostics (not validation)
-        if: failure() && steps.lint.outcome == 'failure'
-        run: |
-          yarn eslint --fix tabby-ssh/src/components/sshTab.component.ts tabby-ssh/src/components/tmuxSelectModal.component.ts tabby-ssh/src/session/tmux.ts tabby-ssh/src/session/reconnect.ts tabby-ssh/src/session/shell.ts tabby-ssh/src/session/ssh.ts tabby-ssh/src/services/tmuxTabs.service.ts || true
-          git diff --binary > lint-fixes.patch
-      - uses: actions/upload-artifact@v4
-        if: failure() && steps.lint.outcome == 'failure'
-        with:
-          name: lint-fixes
-          path: lint-fixes.patch
-          retention-days: 3
   desktop:
     if: github.repository == 'Mafei/tabby'
     needs: checks

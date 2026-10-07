@@ -5,7 +5,7 @@ import stripAnsi from 'strip-ansi'
 import * as shellQuote from 'shell-quote'
 import { marker as _ } from '@biesbjerg/ngx-translate-extract-marker'
 import { Injector } from '@angular/core'
-import { NgbModal } from '@ng-bootstrap/ng-bootstrap'
+import { NgbModal, NgbModalRef } from '@ng-bootstrap/ng-bootstrap'
 import { ConfigService, FileProvidersService, NotificationsService, PromptModalComponent, LogService, Logger, TranslateService, Platform, HostAppService } from 'tabby-core'
 import { Socket } from 'net'
 import { Subject, Observable } from 'rxjs'
@@ -118,6 +118,7 @@ export class SSHSession {
     transportLost = false
     verifiedHostKey: string|null = null
     private locallyDestroyed = false
+    private prompts = new Set<NgbModalRef>()
 
     private logger: Logger
     private refCount = 0
@@ -158,6 +159,23 @@ export class SSHSession {
                 port.stopLocalListener()
             }
         })
+    }
+
+    private ensureActive (): void {
+        // Called after awaits because cancellation can mutate state during acquisition/auth.
+        if (this.locallyDestroyed) {
+            // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+            this.ssh?.disconnect()
+            throw new Error('Connection cancelled')
+        }
+    }
+
+    private openPrompt (component: any): NgbModalRef {
+        if (this.locallyDestroyed) { throw new Error('SSH connection cancelled') }
+        const modal = this.ngbModal.open(component)
+        this.prompts.add(modal)
+        modal.result.then(() => this.prompts.delete(modal), () => this.prompts.delete(modal))
+        return modal
     }
 
     private addPublicKeyAuthMethod (name: string, contents: Buffer) {
@@ -383,7 +401,7 @@ export class SSHSession {
 
     async start (): Promise<void> {
         await this.init()
-        if (this.locallyDestroyed) { throw new Error('Connection cancelled') }
+        this.ensureActive()
 
         const algorithms = {}
         for (const key of Object.values(SSHAlgorithmType)) {
@@ -401,6 +419,7 @@ export class SSHSession {
             // would turn "a && b" into "a b", so refuse instead.
             const argv = shellQuote.parse(this.profile.options.proxyCommand)
             if (!argv.every((x): x is string => typeof x === 'string')) {
+                this.connectStage = 'configuration'
                 throw new Error('Proxy command contains shell operators, which are not supported')
             }
             transport = await russh.SshTransport.newCommand(argv[0], argv.slice(1))
@@ -452,7 +471,7 @@ export class SSHSession {
             },
         )
 
-        if (this.locallyDestroyed) { this.ssh.disconnect(); throw new Error('Connection cancelled') }
+        this.ensureActive()
         this.ssh.banner$.subscribe(banner => {
             if (!this.profile.options.skipBanner) {
                 this.emitServiceMessage(banner)
@@ -478,7 +497,7 @@ export class SSHSession {
 
         this.authUsername ??= this.profile.options.user
         if (!this.authUsername) {
-            const modal = this.ngbModal.open(PromptModalComponent)
+            const modal = this.openPrompt(PromptModalComponent)
             modal.componentInstance.prompt = `Username for ${this.profile.options.host}`
             try {
                 const result = await modal.result.catch(() => null)
@@ -509,7 +528,7 @@ export class SSHSession {
             throw new Error('Authentication rejected')
         }
 
-        if (this.locallyDestroyed) { this.ssh.disconnect(); throw new Error('Connection cancelled') }
+        this.ensureActive()
         this.connectStage = 'ready'
         // auth success
 
@@ -631,7 +650,7 @@ export class SSHSession {
 
         const knownHost = this.profile.options.host ? this.knownHosts.getFor(selector) : null
         if (!knownHost || knownHost.digest !== keyDigest) {
-            const modal = this.ngbModal.open(HostKeyPromptModalComponent)
+            const modal = this.openPrompt(HostKeyPromptModalComponent)
             modal.componentInstance.selector = selector
             modal.componentInstance.digest = keyDigest
             return modal.result.catch(() => false)
@@ -722,7 +741,7 @@ export class SSHSession {
                 updateAuthPlan(result)
             }
             if (method.type === 'prompt-password') {
-                const modal = this.ngbModal.open(PromptModalComponent)
+                const modal = this.openPrompt(PromptModalComponent)
                 modal.componentInstance.prompt = `Password for ${this.authUsername}@${this.profile.options.host}`
                 modal.componentInstance.password = true
                 modal.componentInstance.showRememberCheckbox = true
@@ -892,11 +911,15 @@ export class SSHSession {
     async destroy (): Promise<void> {
         if (this.locallyDestroyed) { return }
         this.locallyDestroyed = true
+        for (const modal of this.prompts) { modal.dismiss('SSH connection cancelled') }
+        this.prompts.clear()
         this.open = false
         this.logger.info('Destroying')
         this.willDestroy.next()
         this.willDestroy.complete()
         this.serviceMessage.complete()
+        // SSH is not assigned yet when transport acquisition is cancelled.
+        // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
         this.ssh?.disconnect()
     }
 
@@ -1013,7 +1036,7 @@ export class SSHSession {
                 ].includes(e.toString())) {
                     await this.passwordStorage.deletePrivateKeyPassword(keyHash)
 
-                    const modal = this.ngbModal.open(PromptModalComponent)
+                    const modal = this.openPrompt(PromptModalComponent)
                     modal.componentInstance.prompt = 'Private key passphrase'
                     modal.componentInstance.password = true
                     modal.componentInstance.showRememberCheckbox = true

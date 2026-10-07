@@ -90,7 +90,7 @@ export class SSHTabComponent extends ConnectableTerminalTabComponent<SSHProfile>
     async setupOneSession (injector: Injector, profile: SSHProfile, multiplex = true, signal?: AbortSignal): Promise<SSHSession> {
         const generation = this.connection.epoch
         let session = await this.sshMultiplexer.getSession(profile)
-        if (!multiplex || !session || !profile.options.reuseSession) {
+        if (!multiplex || !session?.open || session.transportLost || !profile.options.reuseSession) {
             session = new SSHSession(injector, profile)
 
             if (profile.options.jumpHost) {
@@ -103,6 +103,8 @@ export class SSHTabComponent extends ConnectableTerminalTabComponent<SSHProfile>
                 const jumpSession = await this.setupOneSession(
                     this.injector,
                     this.profilesService.getConfigProxyForProfile<SSHProfile>(jumpConnection),
+                    true,
+                    signal,
                 )
 
                 jumpSession.ref()
@@ -161,10 +163,11 @@ export class SSHTabComponent extends ConnectableTerminalTabComponent<SSHProfile>
             const connectingSession = session
             const abort = () => { connectingSession.destroy() }
             signal?.addEventListener('abort', abort, { once: true })
-            if (signal?.aborted) { throw new TmuxError('Connection cancelled') }
             try {
+                if (signal?.aborted) { throw new TmuxError('Connection cancelled') }
                 await session.start()
             } catch (error) {
+                await session.destroy()
                 if (session.connectStage === 'transport' && !session.hostKeyRejected) {
                     throw new SSHTransportError(String(error))
                 }
@@ -263,8 +266,8 @@ export class SSHTabComponent extends ConnectableTerminalTabComponent<SSHProfile>
             }
             this.tmuxBinding = {
                 ...selection.session, version: 1, host: this.profile.options.host,
-                port: this.profile.options.port ?? 22, hostKey: ssh.verifiedHostKey,
-                account: ssh.authUsername, selector: { ...ui.socket }, mode: selection.mode, tabID: this.tabID,
+                port: this.profile.options.port, hostKey: ssh.verifiedHostKey,
+                account: ssh.authUsername, selector: { kind: 'path', value: selection.session.socket }, mode: selection.mode, tabID: this.tabID,
             }
             return { takeover: selection.takeover, allowOccupied: selection.session.clients > 0 }
         } finally {
@@ -284,7 +287,7 @@ export class SSHTabComponent extends ConnectableTerminalTabComponent<SSHProfile>
             let selection = { takeover: false, allowOccupied: false }
             if (this.tmuxBinding) {
                 assertBinding(this.tmuxBinding, {
-                    host: this.profile.options.host, port: this.profile.options.port ?? 22,
+                    host: this.profile.options.host, port: this.profile.options.port,
                     account: ssh.authUsername, hostKey: ssh.verifiedHostKey,
                 })
                 const owner = this.tmuxTabs.claim(this.tmuxBinding, this)
@@ -333,7 +336,13 @@ export class SSHTabComponent extends ConnectableTerminalTabComponent<SSHProfile>
             this.connectedAt = Date.now()
             await this.tabRecovery.saveTabs(this.app.tabs)
         } catch (error) {
-            if (shell) { await shell.destroy() }
+            if (shell) {
+                await shell.destroy()
+                if (this.session === shell) { this.setSession(null) }
+            }
+            if (ssh.transportLost && this.tmuxBinding && !signal.aborted) {
+                throw new SSHTransportError(String(error))
+            }
             throw error
         } finally {
             ssh.unref()
@@ -348,9 +357,9 @@ export class SSHTabComponent extends ConnectableTerminalTabComponent<SSHProfile>
             } catch (error) {
                 if (!this.connection.current(generation)) { return }
                 this.write(colors.black.bgRed(' X ') + ' ' + colors.red(String(error)) + '\r\n')
-                // Only an already bound tmux session can retry transient connect failures.
-                // Auth and host-key failures are always manual, never a fallback second auth.
-                if (automatic && error instanceof SSHTransportError) {
+                // Typed transport failures retry; authentication/host-key rejection and
+                // uncertain creation outcomes stop and require a manual choice.
+                if (error instanceof SSHTransportError) {
                     this.connection.schedule(() => { this.initializeSession(true) })
                 } else {
                     this.offerReconnection()

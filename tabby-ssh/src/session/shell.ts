@@ -58,6 +58,10 @@ export class SSHShellSession extends BaseSession {
             throw new Error(`Remote rejected opening a shell channel: ${err}`)
         }
 
+        if (this.shellDestroying) {
+            await this.shell.close()
+            throw new Error('Shell channel cancelled')
+        }
         this.open = true
         this.logger.debug('Shell open')
 
@@ -89,12 +93,13 @@ export class SSHShellSession extends BaseSession {
             await this.shell.requestExec(`sh -c ${shellQuote(attachCommand(this.binding, this.takeover, this.allowOccupied))}`)
         } else {
             await this.shell.requestShell()
+            if (!this.open || this.shellDestroying) { return }
             this.loginScriptProcessor?.executeUnconditionalScripts()
         }
 
         // Must run after the output subscriptions above are wired, otherwise the
         // command echo and anything the remote prints in response is dropped.
-        if (!this.binding && this.profile.options.cwd) {
+        if (this.open && !this.binding && this.profile.options.cwd) {
             this.changeInitialDirectory(this.profile.options.cwd)
         }
     }
