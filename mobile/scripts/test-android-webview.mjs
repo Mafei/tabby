@@ -64,6 +64,12 @@ export async function webviewAcceptance (android, fixture) {
                     const eventTypes = new Set(['hostKey', 'auth', 'state', 'data'])
                     const eventStates = new Set(['ready', 'error', 'closed'])
                     const eventHostStates = new Set(['known', 'unknown', 'changed'])
+                    const pointerTypes = new Set(['touch', 'mouse', 'pen'])
+                    const pointerEvents = new Set(['pointerdown', 'pointermove', 'pointerup', 'pointercancel'])
+                    const pointerTargets = new Set(['terminal', 'auxiliary', 'terminal-input', 'form', 'modal', 'other'])
+                    const geometry = values => Object.fromEntries(['sliderCount', 'sliderTop', 'legacyViewportCount', 'legacyScrollTop',
+                        'x', 'y', 'width', 'height', 'fromX', 'fromY', 'toX', 'toY'].filter(key => Number.isFinite(values?.[key]))
+                        .map(key => [key, values[key]]))
                     const notice = document.querySelector('.notice')?.textContent || ''
                     return {
                         documentReady: ['loading', 'interactive', 'complete'].includes(document.readyState) ? document.readyState : 'unknown',
@@ -79,6 +85,8 @@ export async function webviewAcceptance (android, fixture) {
                         hostDialogVisible: visible('[role="dialog"][aria-label="确认主机密钥"]'),
                         authDialogVisible: visible('[role="dialog"][aria-label="SSH 交互认证"]'),
                         terminalInputEnabled: !!document.querySelector('textarea[aria-label="终端输入"]:enabled'),
+                        selectionActive: !!document.querySelector('.terminal-area.selection-active'),
+                        mouseActive: !!document.querySelector('.terminal-area.mouse-active'),
                         viewport: { width: Math.round(innerWidth), height: Math.round(innerHeight),
                             visualHeight: Math.round(window.visualViewport?.height || 0) },
                         events: events.slice(-12).map(event => ({
@@ -86,6 +94,18 @@ export async function webviewAcceptance (android, fixture) {
                             ...(event.type === 'state' ? { state: eventStates.has(event.state) ? event.state : 'other' } : {}),
                             ...(event.type === 'hostKey' ? { status: eventHostStates.has(event.status) ? event.status : 'other' } : {}),
                         })),
+                        nativePointers: (window.__tabbyCloudObservation?.pointers || []).slice(-16).map(event => ({
+                            type: pointerEvents.has(event.type) ? event.type : 'other',
+                            pointerType: pointerTypes.has(event.pointerType) ? event.pointerType : 'other',
+                            target: pointerTargets.has(event.target) ? event.target : 'other',
+                            trusted: event.trusted === true,
+                            ...geometry(event),
+                        })),
+                        scroll: { before: geometry(window.__tabbyCloudObservation?.scroll?.before),
+                            after: geometry(window.__tabbyCloudObservation?.scroll?.after),
+                            requested: geometry(window.__tabbyCloudObservation?.scroll?.requested),
+                            renderedReady: window.__tabbyCloudObservation?.scroll?.renderedReady === true,
+                            renderedChanged: window.__tabbyCloudObservation?.scroll?.renderedChanged === true },
                     }
                 })
             } catch { result.domUnavailable = true }
@@ -115,7 +135,7 @@ export async function webviewAcceptance (android, fixture) {
     async function observe () {
         await page.waitForSelector('tabby-mobile')
         await page.evaluate(async () => {
-            const observation = { output: '', events: [], inputEvents: [] }
+            const observation = { output: '', events: [], inputEvents: [], pointers: [], scroll: {} }
             window.__tabbyCloudObservation = observation
             const decoder = new TextDecoder()
             await window.Capacitor.Plugins.TabbySSH.addListener('sshEvent', event => {
@@ -133,6 +153,27 @@ export async function webviewAcceptance (android, fixture) {
                         observation.inputEvents.push({ type, inputType: event.inputType, isComposing: !!event.isComposing })
                     }
                 }, true)
+            }
+            for (const type of ['pointerdown', 'pointermove', 'pointerup', 'pointercancel']) {
+                document.addEventListener(type, event => {
+                    if (observation.pointers.length < 128) {
+                        const target = event.target?.closest?.('.terminal-area') ? 'terminal'
+                            : event.target?.closest?.('.tools,.actions') ? 'auxiliary'
+                                : event.target?.closest?.('.input-strip') ? 'terminal-input'
+                                    : event.target?.closest?.('.connect-panel') ? 'form'
+                                        : event.target?.closest?.('[role="dialog"]') ? 'modal' : 'other'
+                        observation.pointers.push({ type, pointerType: ['touch', 'mouse', 'pen'].includes(event.pointerType) ? event.pointerType : 'other',
+                            target, trusted: event.isTrusted, x: Math.round(event.clientX), y: Math.round(event.clientY) })
+                    }
+                }, true)
+            }
+            observation.readScroll = () => {
+                const selector = '.xterm-scrollable-element > .scrollbar.vertical > .slider'
+                const slider = document.querySelector(selector)
+                const top = Number.parseFloat(slider?.style.top || '')
+                const viewport = document.querySelector('.xterm-viewport')
+                return { sliderCount: document.querySelectorAll(selector).length, sliderTop: Number.isFinite(top) ? top : null,
+                    legacyViewportCount: document.querySelectorAll('.xterm-viewport').length, legacyScrollTop: viewport?.scrollTop || 0 }
             }
         })
     }
@@ -260,22 +301,49 @@ export async function webviewAcceptance (android, fixture) {
         verify('Android InputConnection preedit/commit/delete and native-touch auxiliary keys reach exact PTY bytes')
 
         stage = 'native-touch-scroll-selection-clipboard'
+        substage = 'fill-terminal-history'
         await plugin('hideKeyboard')
-        await sendLine("printf '%s\\n' ANDROIDCLIPBOARDTOKEN; seq 1 80")
-        await output('80')
+        await resetOutput()
+        await sendLine("printf '%s\\n' ANDROIDCLIPBOARDTOKEN; seq 1 80; printf '%s%s\\n' 'W_SCROLL_' 'HISTORY_READY'")
+        await output('W_SCROLL_HISTORY_READY')
         await plugin('hideKeyboard')
-        await pause(150)
-        const scrollPosition = () => page.evaluate(() => {
-            const viewport = document.querySelector('.xterm-viewport')
-            const slider = document.querySelector('.xterm-scrollable-element > .scrollbar.vertical > .slider')
-            return `${viewport?.scrollTop || 0}:${slider?.style.top || ''}`
-        })
+        await step('parsed-terminal-history-ready', () => until(() => page.evaluate(() => {
+            const rows = document.querySelector('.xterm-rows')?.textContent || ''
+            const scroll = window.__tabbyCloudObservation.readScroll()
+            return rows.includes('W_SCROLL_HISTORY_READY') && scroll.sliderCount === 1 && scroll.sliderTop > 0
+        }), 'ANDROID_TERMINAL_HISTORY_NOT_RENDERED'))
+        const scrollPosition = () => page.evaluate(() => window.__tabbyCloudObservation.readScroll())
         const beforeScroll = await scrollPosition()
+        check(beforeScroll.sliderCount === 1 && Number.isFinite(beforeScroll.sliderTop), 'ANDROID_TERMINAL_SCROLLBAR_NOT_AVAILABLE')
         const terminal = await page.locator('.terminal-area').boundingBox()
         check(!!terminal, 'ANDROID_TERMINAL_BOUNDS_MISSING')
-        await android.input({ type: 'swipe', fromX: terminal.x + terminal.width / 2, fromY: terminal.y + terminal.height / 4,
-            toX: terminal.x + terminal.width / 2, toY: terminal.y + terminal.height * 3 / 4, durationMs: 300 })
-        await until(async () => await scrollPosition() !== beforeScroll, 'ANDROID_TOUCH_DID_NOT_SCROLL_TERMINAL')
+        const gesture = { type: 'swipe', fromX: terminal.x + terminal.width / 2, fromY: terminal.y + terminal.height / 4,
+            toX: terminal.x + terminal.width / 2, toY: terminal.y + terminal.height * 3 / 4, durationMs: 300 }
+        await page.evaluate(({ before, requested }) => {
+            window.__tabbyCloudObservation.scroll = { before, requested, renderedReady: true }
+            // Keep rendered contents only in the WebView to compare equality.
+            // No terminal contents are returned to reports or diagnostics.
+            window.__tabbyCloudObservation.renderedBefore = document.querySelector('.xterm-rows')?.textContent || ''
+            window.__tabbyCloudObservation.pointers = []
+        }, { before: beforeScroll, requested: { ...terminal, fromX: gesture.fromX, fromY: gesture.fromY, toX: gesture.toX, toY: gesture.toY } })
+        await step('native-terminal-swipe', () => android.input(gesture))
+        await page.evaluate(() => { window.__tabbyCloudObservation.scroll.after = window.__tabbyCloudObservation.readScroll() })
+        await step('native-trusted-touch-observed', () => until(() => page.evaluate(() => {
+            const pointers = window.__tabbyCloudObservation.pointers
+            return pointers.some(event => event.type === 'pointerdown' && event.pointerType === 'touch' && event.target === 'terminal' && event.trusted)
+                && pointers.some(event => event.type === 'pointermove' && event.pointerType === 'touch' && event.target === 'terminal' && event.trusted)
+        }), 'ANDROID_NATIVE_GESTURE_WAS_NOT_TOUCH', 3000))
+        await step('terminal-scroll-position-changed', () => until(async () => {
+            const after = await scrollPosition()
+            const renderedChanged = await page.evaluate(after => {
+                const observation = window.__tabbyCloudObservation
+                observation.scroll.after = after
+                observation.scroll.renderedChanged = (document.querySelector('.xterm-rows')?.textContent || '') !== observation.renderedBefore
+                return observation.scroll.renderedChanged
+            }, after)
+            return after.sliderCount === 1 && Number.isFinite(after.sliderTop) && after.sliderTop < beforeScroll.sliderTop && renderedChanged
+        }, 'ANDROID_TOUCH_DID_NOT_SCROLL_TERMINAL'))
+        substage = 'native-selection-and-clipboard'
         await rawProbe('W_CLIP', undefined)
         await plugin('hideKeyboard')
         await nativeTouch(page.locator('.terminal-area'), 700)

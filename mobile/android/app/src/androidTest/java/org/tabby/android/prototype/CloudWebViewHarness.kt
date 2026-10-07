@@ -125,9 +125,27 @@ class CloudWebViewHarness {
         val downTime = SystemClock.uptimeMillis()
         var current = from
         fun send(action: Int) {
-            val event = MotionEvent.obtain(downTime, SystemClock.uptimeMillis(), action, current.first, current.second, 0)
+            // The short obtain overload leaves toolType UNKNOWN. WebView uses
+            // both source and toolType to classify pointer events, so emulate
+            // a finger explicitly while keeping Android's real input pipeline.
+            val pointer = MotionEvent.PointerProperties().apply {
+                id = 0
+                toolType = MotionEvent.TOOL_TYPE_FINGER
+            }
+            val coords = MotionEvent.PointerCoords().apply {
+                x = current.first
+                y = current.second
+                pressure = 1f
+                size = 1f
+            }
+            val event = MotionEvent.obtain(
+                downTime, SystemClock.uptimeMillis(), action, 1,
+                arrayOf(pointer), arrayOf(coords), 0, 0, 1f, 1f, 0, 0,
+                InputDevice.SOURCE_TOUCHSCREEN, 0,
+            )
             try {
-                event.source = InputDevice.SOURCE_TOUCHSCREEN
+                check(event.getToolType(0) == MotionEvent.TOOL_TYPE_FINGER)
+                check(event.isFromSource(InputDevice.SOURCE_TOUCHSCREEN))
                 instrumentation.sendPointerSync(event)
             } finally { event.recycle() }
         }

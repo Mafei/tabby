@@ -436,3 +436,28 @@ test('adversarial terminal snapshot and clipboard stay plain text with only requ
     expect(await count()).toBe(baseline + 2)
     await assertInert(page, '.app-shell')
 })
+
+test('browser-engine touch swipe scrolls real xterm 6 history and changes visible rows', async ({ page }) => {
+    await ready(page)
+    const lines = Array.from({ length: 100 }, (_, index) => `TOUCH_HISTORY_${String(index + 1).padStart(3, '0')}`).join('\r\n')
+    await emit(page, { type: 'data', data: Buffer.from(lines).toString('base64') })
+    await expect.poll(() => page.evaluate(() => window.testBridge.commands.filter(item => item.command.type === 'outputAck').length)).toBe(1)
+    const slider = page.locator('.xterm-scrollable-element > .scrollbar.vertical > .slider')
+    await expect.poll(() => slider.evaluate(element => Number.parseFloat((element as HTMLElement).style.top))).toBeGreaterThan(0)
+    const beforeTop = await slider.evaluate(element => Number.parseFloat((element as HTMLElement).style.top))
+    const beforeRows = await page.locator('.xterm-rows').textContent()
+    const bounds = await page.locator('.terminal-area').boundingBox()
+    expect(bounds).not.toBeNull()
+    const client = await page.context().newCDPSession(page)
+    const x = bounds!.x + bounds!.width / 2
+    const startY = bounds!.y + bounds!.height / 4
+    await client.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y: startY }] })
+    for (let index = 1; index <= 10; index++) {
+        await client.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x, y: startY + bounds!.height * index / 20 }] })
+    }
+    await client.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
+    await expect.poll(() => slider.evaluate(element => Number.parseFloat((element as HTMLElement).style.top))).toBeLessThan(beforeTop)
+    await expect.poll(() => page.locator('.xterm-rows').textContent()).not.toBe(beforeRows)
+    await expect(page.locator('.selection-layer')).toHaveCount(0)
+    await client.detach()
+})

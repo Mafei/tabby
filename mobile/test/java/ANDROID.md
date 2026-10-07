@@ -71,6 +71,12 @@ DOM state, control counts, viewport dimensions, event types and fixture resource
 counts. It never includes input values, raw Playwright errors, authentication
 prompts, terminal output, HTML or screenshots. Form-control selection uses the
 actual select element because its wrapping label also contains the option text.
+The swipe gate waits for a fresh unique marker in both SSH output and parsed
+visible rows, with nonzero scrollback. It requires trusted WebView pointer
+events identified as touch, an actual xterm scrollbar-position change toward
+history and changed visible rows. Its failure diagnostics contain only pointer
+type, trust flag, numeric coordinates, scrollbar geometry and readiness/change
+booleans; visible terminal contents remain inside the WebView for comparison.
 
 `--native-only` and `--webview-only` support focused reruns, and explicitly mark
 their partial scope in the report. The default runs both phases.
