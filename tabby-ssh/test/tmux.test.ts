@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict'
-import { execFileSync } from 'node:child_process'
+import { execFile, execFileSync } from 'node:child_process'
+import { promisify } from 'node:util'
 import { test } from 'node:test'
-import { assertBinding, attachCommand, bindingKey, createCommand, framedExec, listCommand, parseSessionList, sameSession, shellQuote, tmuxCommand, validateSessionName } from '../src/session/tmux.ts'
+import { assertBinding, attachCommand, bindingKey, createCommand, framedExec, listCommand, parseSessionList, sameSession, shellQuote, tmuxCommand, validateSessionName, TmuxTabRegistry, tmuxRecoveryState } from '../src/session/tmux.ts'
 import type { ExecChannel, ExecObservable, TmuxBinding, TmuxSocket } from '../src/session/tmux.ts'
-import { SSHReconnectController } from '../src/session/reconnect.ts'
+import { SSHReconnectController, shouldRetrySSH } from '../src/session/reconnect.ts'
 
 const hex = (value: string) => Buffer.from(value + '\n').toString('hex')
 const row = `1000:7:100:$1:101:0:${hex('/tmp/tmux-1000/default')}:${hex("name\n'$(echo attack)")}`
@@ -165,18 +166,22 @@ test('backoff has bounded jitter and cancellation removes pending retry', async 
 })
 
 // Opt-in only: dedicated local sockets, no external SSH or production servers.
-test('local tmux create/list/rename/replacement/duplicate and independent sockets', { skip: process.env.TABBY_TEST_TMUX !== '1' }, () => {
+test('local tmux create/list/rename/replacement/duplicate and independent sockets', { skip: process.env.TABBY_TEST_TMUX !== '1' }, async () => {
     const socket: TmuxSocket = { kind: 'name', value: `tabby-test-${process.pid}` }
     const other: TmuxSocket = { kind: 'name', value: `tabby-test-${process.pid}-other` }
     const sh = (command: string) => execFileSync('sh', ['-c', command], { encoding: 'utf8' })
     try {
         assert.deepEqual(parseSessionList(sh(listCommand(socket))), [])
+        const execute = promisify(execFile)
+        const competing = await Promise.allSettled([execute('sh', ['-c', createCommand(socket, 'race')]), execute('sh', ['-c', createCommand(socket, 'race')])])
+        assert.equal(competing.filter(r => r.status === 'fulfilled').length, 1)
+        assert.equal(competing.filter(r => r.status === 'rejected').length, 1)
         sh(createCommand(socket, "name' $(echo literal)"))
-        const before = parseSessionList(sh(listCommand(socket)))[0]
+        const before = parseSessionList(sh(listCommand(socket))).find(s => s.name !== 'race')!
         assert.equal(before.name, "name' $(echo literal)")
         assert.throws(() => sh(createCommand(socket, before.name)))
         sh(`${tmuxCommand(socket)} rename-session -t ${shellQuote(before.sessionID)} renamed`)
-        const renamed = parseSessionList(sh(listCommand(socket)))[0]
+        const renamed = parseSessionList(sh(listCommand(socket))).find(s => s.name === 'renamed')!
         assert.equal(sameSession(before, renamed), true)
         sh(createCommand(socket, 'keep-server-alive'))
         sh(`${tmuxCommand(socket)} kill-session -t ${shellQuote(before.sessionID)}`)
@@ -188,4 +193,34 @@ test('local tmux create/list/rename/replacement/duplicate and independent socket
     } finally {
         for (const s of [socket, other]) { try { sh(`${tmuxCommand(s)} kill-server`) } catch { /* already stopped */ } }
     }
+})
+
+
+test('deduplication includes account/socket/server and release permits reopening', () => {
+    const registry = new TmuxTabRegistry<object>()
+    const owner = {}, duplicate = {}
+    assert.equal(registry.claim(binding, owner), owner)
+    assert.equal(registry.claim({ ...binding, tabID: 'copy' }, duplicate), owner)
+    assert.equal(registry.claim({ ...binding, account: 'other' }, duplicate), duplicate)
+    registry.release(owner)
+    assert.equal(registry.claim(binding, duplicate), duplicate)
+})
+
+test('stateful app restore carries identity; Duplicate starts new selection', () => {
+    assert.equal(tmuxRecoveryState(binding, false, true).tmuxBinding, binding)
+    assert.deepEqual(tmuxRecoveryState(binding, false), {})
+    assert.deepEqual(tmuxRecoveryState(null, true, true), { tmuxBinding: null, ordinarySSH: true })
+})
+
+test('only transport failure retries; detach/takeover, EOF, local unref and user disconnect stop', () => {
+    assert.equal(shouldRetrySSH(false, true, 'transport'), true)
+    assert.equal(shouldRetrySSH(false, true, 'channel'), true)
+    assert.equal(shouldRetrySSH(false, false, 'channel'), false)
+    assert.equal(shouldRetrySSH(false, true, 'local'), false)
+    assert.equal(shouldRetrySSH(true, true, 'transport'), false)
+})
+
+test('missing tmux produces explicit unavailable status through the exec protocol', async () => {
+    const mock = fakeChannel(executeLocal)
+    assert.equal((await framedExec(mock.channel, `PATH=/nonexistent; ${listCommand(binding.selector)}`, new AbortController().signal)).status, 127)
 })

@@ -14,7 +14,7 @@ export class SSHShellSession extends BaseSession {
     get serviceMessage$ (): Observable<string> { return this.serviceMessage }
     private serviceMessage = new Subject<string>()
     endReason: 'channel'|'transport'|'local' = 'local'
-    private destroying = false
+    private shellDestroying = false
     private subscriptions: Subscription[] = []
     private ssh: SSHSession|null
 
@@ -124,8 +124,8 @@ export class SSHShellSession extends BaseSession {
     }
 
     async destroy (): Promise<void> {
-        if (this.destroying) { return }
-        this.destroying = true
+        if (this.shellDestroying) { return }
+        this.shellDestroying = true
         this.subscriptions.forEach(subscription => subscription.unsubscribe())
         this.logger.debug('Closing shell')
         this.serviceMessage.complete()

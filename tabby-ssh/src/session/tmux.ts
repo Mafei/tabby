@@ -46,6 +46,9 @@ export function validateSessionName (name: string): void {
 }
 
 export function tmuxCommand (socket: TmuxSocket): string {
+    if (!['default', 'name', 'path'].includes(socket.kind)) {
+        throw new TmuxError('Invalid tmux socket selector')
+    }
     if (socket.kind === 'default') {
         return 'tmux'
     }
@@ -137,12 +140,13 @@ export function attachCommand (binding: TmuxBinding, takeover = false, allowOccu
     const t = tmuxCommand(binding.selector)
     const id = shellQuote(binding.sessionID)
     const expected = `${binding.serverPID}:${binding.serverStarted}:${binding.sessionID}:${binding.sessionCreated}`
-    return `test "$(id -u)" = ${shellQuote(binding.uid)} || exit 41
-actual=$(${t} display-message -p -t ${id} '#{pid}:#{start_time}:#{session_id}:#{session_created}') || exit 42
-test "$actual" = ${shellQuote(expected)} || exit 43
-sock=$(${t} display-message -p -t ${id} '#{socket_path}') || exit 42
-test "$sock" = ${shellQuote(binding.socket)} || exit 43
-${allowOccupied ? '' : `clients=$(${t} display-message -p -t ${id} '#{session_attached}') || exit 42\ntest "$clients" = 0 || exit 44`}
+    return `tabby_fail () { printf '\nTabby tmux: %s\n' "$1"; exit "$2"; }
+test "$(id -u)" = ${shellQuote(binding.uid)} || tabby_fail 'Authenticated Unix account changed' 41
+actual=$(${t} display-message -p -t ${id} '#{pid}:#{start_time}:#{session_id}:#{session_created}') || tabby_fail 'Saved session is missing (or tmux unavailable)' 42
+test "$actual" = ${shellQuote(expected)} || tabby_fail 'Saved server/session identity was replaced' 43
+sock=$(${t} display-message -p -t ${id} '#{socket_path}') || tabby_fail 'Saved session is missing (or tmux unavailable)' 42
+test "$sock" = ${shellQuote(binding.socket)} || tabby_fail 'Saved server/session identity was replaced' 43
+${allowOccupied ? '' : `clients=$(${t} display-message -p -t ${id} '#{session_attached}') || tabby_fail 'Saved session is missing (or tmux unavailable)' 42\ntest "$clients" = 0 || tabby_fail 'Session is occupied; reconnect manually to choose access mode' 44`}
 exec ${t} attach-session${takeover ? ' -d' : ''}${binding.mode === 'readonly' ? ' -r' : ''} -t ${id}`
 }
 
@@ -171,7 +175,7 @@ export async function framedExec (
     const nonce = randomBytes(24).toString('hex')
     const start = `TABBY:${nonce}:BEGIN\n`
     const end = `\nTABBY:${nonce}:END:`
-    let data = Buffer.alloc(0)
+    let data: Buffer = Buffer.alloc(0)
     let bytes = 0
     const subscriptions: ExecSubscription[] = []
     try {
@@ -233,4 +237,27 @@ export async function framedExec (
         subscriptions.forEach(subscription => subscription.unsubscribe())
         await channel.close().catch(() => undefined)
     }
+}
+
+/** Per-window binding reservations; caller handles focus and tab lifecycle. */
+export class TmuxTabRegistry<T> {
+    private owners = new Map<string, T>()
+
+    claim (binding: TmuxBinding, tab: T): T {
+        const key = bindingKey(binding)
+        const owner = this.owners.get(key)
+        if (owner !== undefined) { return owner }
+        this.owners.set(key, tab)
+        return tab
+    }
+
+    release (tab: T): void {
+        for (const [key, owner] of this.owners) {
+            if (owner === tab) { this.owners.delete(key) }
+        }
+    }
+}
+
+export function tmuxRecoveryState (binding: TmuxBinding|null, ordinarySSH: boolean, includeState = false): { tmuxBinding?: TmuxBinding|null; ordinarySSH?: boolean } {
+    return includeState ? { tmuxBinding: binding, ordinarySSH } : {}
 }

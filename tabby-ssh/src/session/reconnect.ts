@@ -33,6 +33,7 @@ export class SSHReconnectController {
             const requested = this.generation
             return this.flight.then(() => {
                 if (this.current(requested)) { return this.run(connect) }
+                return undefined
             })
         }
         const generation = this.generation
@@ -58,4 +59,8 @@ export class SSHReconnectController {
         }, delay)
         return delay
     }
+}
+
+export function shouldRetrySSH (intentional: boolean, transportLost: boolean, reason: 'local'|'channel'|'transport'): boolean {
+    return !intentional && transportLost && reason !== 'local'
 }

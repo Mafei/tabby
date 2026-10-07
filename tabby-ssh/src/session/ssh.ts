@@ -509,6 +509,7 @@ export class SSHSession {
             throw new Error('Authentication rejected')
         }
 
+        if (this.locallyDestroyed) { this.ssh.disconnect(); throw new Error('Connection cancelled') }
         this.connectStage = 'ready'
         // auth success
 
