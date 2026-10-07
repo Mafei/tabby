@@ -6,6 +6,8 @@ def selectedAbis = providers.gradleProperty('tabbyAbis').getOrElse('arm64-v8a,x8
 android {
     namespace = 'org.tabby.android.prototype'
     compileSdk = rootProject.ext.compileSdkVersion
+    buildToolsVersion = '36.0.0'
+    ndkVersion = '27.3.13750724'
     defaultConfig {
         applicationId = 'org.tabby.android.prototype'
         minSdk = rootProject.ext.minSdkVersion
@@ -48,6 +50,7 @@ dependencies {
     implementation 'androidx.appcompat:appcompat:1.7.1'
     testImplementation 'junit:junit:4.13.2'
     androidTestImplementation 'androidx.test:runner:1.7.0'
+    androidTestImplementation 'androidx.test:core:1.7.0'
     androidTestImplementation 'androidx.test.ext:junit:1.3.0'
     androidTestImplementation 'androidx.test.espresso:espresso-core:3.7.0'
 }

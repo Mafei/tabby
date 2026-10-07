@@ -22,8 +22,8 @@ Tabby's palette generator is reused from `tabby-terminal/src/generatePalette.ts`
   queues and generation checks. Backgrounding closes the connection; reconnect
   is an explicit new connection.
 
-The configured minimum is Android 8 / API 26; compile/target SDK is 36. This
-configuration has not yet been built or tested on Android. Modern WebView
+The configured minimum is Android 8 / API 26; compile/target SDK is 36. The
+complete application builds with SDK 36 and NDK 27.3 for ARM64 and x86_64. Modern WebView
 compatibility on the oldest supported devices remains an acceptance item.
 This first prototype does not implement mobile tmux recovery, multi-tab
 management, jump hosts, SSH agents, X11, host certificates or background SSH.
@@ -67,15 +67,17 @@ deleted during cleanup. Do not print or upload metadata or generated key files.
 See [fixture commands and test semantics](test/README.md) and
 [web input behavior and test limits](web/README.md).
 
-## Android build gate
+## Android build and verification
 
-The cloud environment initially had no Android SDK, NDK or emulator. Download
-and use require the user's approval of the
-[Android SDK License Agreement](https://developer.android.com/studio#terms).
-That approval is pending. No SDK license has been accepted, and no APK or
-Android emulator result is available yet.
+The cloud environment initially had no Android SDK, NDK or emulator. The user
+approved the
+[Android SDK License Agreement](https://developer.android.com/studio#terms)
+on 2026-10-07 at 09:12 UTC. Installation accepted only `android-sdk-license`
+(agreement dated January 16, 2019). Installed tools include SDK/Build Tools 36,
+NDK 27.3.13750724 and a stable emulator with an AOSP API 35 x86_64 image.
+No preview, Google Play, store, billing or personal signing agreement was accepted.
 
-After approval, use official SDK packages, JDK 21 and a license-approved NDK.
+Use official SDK packages, JDK 21 and a license-approved NDK.
 The Rust build script downloads nothing and does not accept licenses:
 
 ```sh
@@ -88,7 +90,7 @@ cp mobile/android-ssh/target/x86_64-linux-android/release/libtabby_ssh.so mobile
 npm run build --prefix mobile
 npm run sync:android --prefix mobile
 cd mobile/android
-./gradlew testDebugUnitTest assembleDebug
+./gradlew --no-daemon testDebugUnitTest lintDebug assembleDebug assembleDebugAndroidTest
 ```
 
 `ANDROID_HOME` must identify the approved SDK; Gradle has a SHA256-pinned
@@ -96,8 +98,35 @@ cd mobile/android
 under `app/build/signing/`, not a personal release credential. The expected APK
 path is `mobile/android/app/build/outputs/apk/debug/app-debug.apk`; its existence,
 signature, native ABIs, permissions and SHA256 must be verified before delivery.
-No publishing, release signing, store account or paid device service is part of
-this work.
+The build pins Build Tools 36 and NDK 27.3 for application and Capacitor modules;
+implicit SDK downloads are disabled. No publishing, release signing, store
+account or paid device service is part of this work.
+
+From a clean, committed checkout, verify the actual APK before delivery:
+
+```sh
+ANDROID_HOME=/path/to/approved/sdk python3 mobile/scripts/verify-android-apk.py \
+  --apk mobile/android/app/build/outputs/apk/debug/app-debug.apk \
+  --report mobile/artifacts/android-apk-verification.json
+```
+
+The receipt records source commit/tree, APK and public test certificate hashes,
+packaged permissions, native ABIs, JNI exports and 16 KiB ZIP/ELF alignment.
+`--allow-dirty` is only for preliminary inspection and marks the receipt dirty.
+Debug keystores and disposable fixture credentials must never be uploaded.
+
+The dedicated fork-guarded Android workflow builds the exact requested head,
+keeps `contents: read`, and uploads only the verified APK and public receipts.
+Its fresh SDK installer checks the already-approved agreement text and package
+license references; additional or changed agreements stop installation.
+Android runtime tests use a disposable AOSP emulator, generated loopback SSH
+credentials injected through stdin into app-private files, and a test-APK-only
+WebView harness. Run them with:
+
+```sh
+node mobile/scripts/test-android.mjs --serial emulator-5554 \
+  --report mobile/artifacts/android-runtime-report.json
+```
 
 ## Required Android acceptance
 
@@ -117,9 +146,14 @@ this work.
   the visible terminal, and verify editor/TUI redraw after resize.
 
 Browser tests use synthetic input/touch events and a fake bridge. Linux Rust/JNI
-tests prove real SSH and PTY behavior. Neither establishes system IME, WebView,
-device touch behavior or GUI acceptance; building an APK also does not establish
-those behaviors. Cloud KVM was absent at the initial environment check.
+tests prove real SSH and PTY behavior. Android instrumentation and WebView tests
+exercise the actual application and native plugin on an emulator; InputConnection
+composition is still synthetic. These checks do not establish a real Chinese
+IME's candidates, physical touch behavior, ARM64 hardware, Android API 26 WebView
+compatibility or a 16 KiB page-size device. Building an APK also does not establish
+GUI acceptance. Local cloud KVM is absent, and ADB requires a read-only home path;
+Android runtime verification uses the supported GitHub runner rather than changing
+that workspace boundary. Inspect the runtime receipt and CI conclusion for results.
 
 Angular 15 was retained for reuse with the desktop code. The production dependency
 audit reports 5 affected packages (3 high, 2 moderate). The prototype does not

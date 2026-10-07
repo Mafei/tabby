@@ -37,7 +37,7 @@ class TabbySSHPlugin : Plugin() {
     )
 
     private val sessions = ConcurrentHashMap<Long, Session>()
-    private val privateKeys = ConcurrentHashMap<String, ByteArray>()
+    private val privateKeys = PrivateKeyVault()
     private val worker = Executors.newSingleThreadScheduledExecutor()
     @Volatile private var foreground = true
     @Volatile private var destroyed = false
@@ -64,6 +64,9 @@ class TabbySSHPlugin : Plugin() {
 
     @PluginMethod
     fun start(call: PluginCall) {
+        val startingKeys = privateKeys.snapshot()
+        var allocatedId: Long? = null
+        var allocatedSession: Session? = null
         try {
             require(foreground && !destroyed) { "background" }
             val host = call.getString("host")?.trim() ?: error("host")
@@ -85,10 +88,12 @@ class TabbySSHPlugin : Plugin() {
                 .put("generation", generation).put("authMode", authMode)
                 .put("cols", cols).put("rows", rows).put("term", "xterm-256color")
             hostKeyStore.read(endpoint)?.let { options.put("expectedHostKey", it) }
-            if (authMode != "privateKey") clearPrivateKeys()
+            if (authMode != "privateKey") discardPrivateKeys(startingKeys)
             closeAll("replaced", clearKeys = false)
             val id = NativeSSH.start(options.toString())
+            allocatedId = id
             val session = Session(id, endpoint, ConnectionGate(generation))
+            allocatedSession = session
             sessions[id] = session
             if (!foreground || destroyed) {
                 closeSession(session, "background")
@@ -97,6 +102,16 @@ class TabbySSHPlugin : Plugin() {
             }
             call.resolve(JSObject().put("connectionId", id.toString()))
         } catch (_: Throwable) {
+            val session = allocatedSession
+            if (session != null) {
+                closeSession(session, "start_failed", notify = false, clearUnusedKeys = false)
+            }
+            // If allocation succeeded but creating/registering Session failed,
+            // there is still a native ID/socket to release.
+            allocatedId?.let { try { NativeSSH.destroy(it) } catch (_: Throwable) { } }
+            // A later picker owns a different nonce; an older failed start must
+            // not erase that new import while cleaning its own preconnect keys.
+            discardPrivateKeys(startingKeys)
             // Never forward native exception text: it may contain auth material.
             call.reject("Cannot start the SSH connection", "SSH_START_FAILED")
         }
@@ -130,14 +145,13 @@ class TabbySSHPlugin : Plugin() {
                         if (input.has(field)) output.put(field, input.get(field))
                     }
                     if (input.has("keyId")) {
-                        val bytes = synchronized(privateKeys) { privateKeys.remove(input.getString("keyId")) } ?: error("key")
-                        try { output.put("privateKey", bytes.toString(Charsets.UTF_8)) } finally { bytes.fill(0) }
+                        privateKeys.consumeText(input.getString("keyId") ?: error("key")) { output.put("privateKey", it) }
                     }
                     // Do not accept raw key content from Web code; the SAF picker
                     // owns import and the key remains in this process only.
                 }
                 "write" -> {
-                    val data = input.getString("data")
+                    val data = input.getString("data") ?: error("data")
                     require(data.length <= 1_398_104)
                     output.put("data", data)
                 }
@@ -294,10 +308,11 @@ class TabbySSHPlugin : Plugin() {
     }
 
     private fun clearPrivateKeys() {
-        synchronized(privateKeys) {
-            privateKeys.values.forEach { it.fill(0) }
-            privateKeys.clear()
-        }
+        privateKeys.clear()
+    }
+
+    private fun discardPrivateKeys(ids: Set<String>) {
+        privateKeys.discard(ids)
     }
 
     override fun handleOnPause() {
@@ -391,7 +406,7 @@ class TabbySSHPlugin : Plugin() {
 
     @PluginMethod
     fun discardPrivateKey(call: PluginCall) {
-        call.getString("keyId")?.let { synchronized(privateKeys) { privateKeys.remove(it)?.fill(0) } }
+        call.getString("keyId")?.let { privateKeys.discard(setOf(it)) }
         call.resolve()
     }
 
@@ -431,10 +446,7 @@ class TabbySSHPlugin : Plugin() {
                 if (cursor.moveToFirst()) cursor.getString(0) else "Private key"
             } ?: "Private key"
             val keyId = UUID.randomUUID().toString()
-            synchronized(privateKeys) {
-                clearPrivateKeys()
-                privateKeys[keyId] = bytes
-            }
+            privateKeys.replace(keyId, bytes)
             imported = null // Ownership is transferred to the native-memory vault.
             call.resolve(JSObject().put("keyId", keyId).put("label", label.take(256)))
         } catch (_: Throwable) {

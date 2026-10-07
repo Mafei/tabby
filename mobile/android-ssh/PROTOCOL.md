@@ -131,7 +131,14 @@ for NDK r27 and below and keeps alignment explicit on newer NDKs. Existing
 encoded, global, or target environment Rust flags retain Cargo's precedence;
 their contents are not evaluated as shell code.
 
-**Android ELF/APK alignment remains unverified until the actual Android build.**
+The local API 26 release builds for `arm64-v8a` and `x86_64` have passed actual
+ELF checks: four LOAD segments per library have 16 KiB alignment, GNU_RELRO ends
+on a 16 KiB boundary, the Android note identifies API 26 / NDK r27d 13750724,
+and each library exports all four JNI methods. Dependencies are only Android's
+`libdl.so`, `libm.so`, and `libc.so`. This establishes cross-compilation and ELF
+layout; it does not establish Android JNI execution or 16 KiB runtime behavior.
+
+**Final APK ZIP alignment and 16 KiB Android runtime remain unverified here.**
 Before accepting an APK, inspect every shipped ABI's `.so` with the NDK's
 `llvm-readelf -lW`/`llvm-objdump -p`: all LOAD segments must be at least 16 KiB
 aligned, and verify GNU_RELRO page layout. Check the actual final APK with

@@ -105,4 +105,30 @@ class SecurityPolicyTest {
         assertTrue(window.canPoll())
         assertFalse(window.acknowledge(first))
     }
+
+    @Test fun oldStartFailureCleanupCannotDiscardALaterPickerImport() {
+        val vault = PrivateKeyVault()
+        val oldBytes = "test-key-old".toByteArray()
+        vault.replace("old-picker", oldBytes)
+        val failedStartKeys = vault.snapshot()
+        val currentBytes = "test-key-current".toByteArray()
+        vault.replace("current-picker", currentBytes)
+        vault.discard(failedStartKeys)
+        assertTrue(oldBytes.all { it == 0.toByte() })
+        assertEquals(setOf("current-picker"), vault.snapshot())
+        assertEquals("test-key-current", vault.consumeText("current-picker") { it })
+        assertTrue(currentBytes.all { it == 0.toByte() })
+    }
+
+    @Test fun authenticationPayloadFailureStillConsumesAndZeroesTheKey() {
+        val vault = PrivateKeyVault()
+        val bytes = "test-key".toByteArray()
+        vault.replace("picker", bytes)
+        try {
+            vault.consumeText<Unit>("picker") { throw IllegalStateException("test payload failure") }
+            fail("The payload failure should propagate")
+        } catch (_: IllegalStateException) { }
+        assertTrue(bytes.all { it == 0.toByte() })
+        assertTrue(vault.snapshot().isEmpty())
+    }
 }

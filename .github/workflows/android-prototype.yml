@@ -1,4 +1,4 @@
-name: Android prototype SDK-independent checks
+name: Android prototype checks and APK
 on:
   push:
     branches: [prototype/android-direct-ssh]
@@ -14,13 +14,14 @@ concurrency:
   cancel-in-progress: true
 jobs:
   checks:
-    if: github.repository == 'Mafei/tabby'
+    if: github.repository == 'Mafei/tabby' && ((github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == 'Mafei/tabby' && github.event.pull_request.head.ref == 'prototype/android-direct-ssh') || (github.event_name != 'pull_request' && github.ref == 'refs/heads/prototype/android-direct-ssh'))
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -59,3 +60,105 @@ jobs:
       - name: JVM host-key, generation and backpressure policies
         if: always() && steps.install.outcome == 'success'
         run: node mobile/scripts/test-jvm-policy.mjs
+  android:
+    if: github.repository == 'Mafei/tabby' && ((github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == 'Mafei/tabby' && github.event.pull_request.head.ref == 'prototype/android-direct-ssh') || (github.event_name != 'pull_request' && github.ref == 'refs/heads/prototype/android-direct-ssh'))
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      ANDROID_HOME: ${{ runner.temp }}/tabby-android-sdk
+      ANDROID_SDK_ROOT: ${{ runner.temp }}/tabby-android-sdk
+      ANDROID_USER_HOME: ${{ runner.temp }}/tabby-android-user
+      ANDROID_AVD_HOME: ${{ runner.temp }}/tabby-android-avd
+      GRADLE_USER_HOME: ${{ runner.temp }}/tabby-android-gradle
+      # Explicit user approval: 2026-10-07 09:12 UTC, Android SDK agreement.
+      # A changed or additional agreement fails closed; no --licenses command.
+      TABBY_ANDROID_SDK_LICENSE_APPROVED_SHA256: 1f8729233617b193fd619213792ae16a41b95d2bbbf525dfe66998252ba68b16
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - name: Install approved stable Android SDK packages
+        run: python3 mobile/scripts/install-android-ci.py
+      - name: Pinned Rust Android toolchain
+        run: |
+          rustup toolchain install 1.90.0 --profile minimal
+          rustup default 1.90.0
+          rustup target add aarch64-linux-android x86_64-linux-android
+      - name: Build real SSH native libraries
+        env:
+          ANDROID_NDK_HOME: ${{ runner.temp }}/tabby-android-sdk/ndk/27.3.13750724
+        run: |
+          mobile/android-ssh/build-android.sh arm64-v8a
+          mobile/android-ssh/build-android.sh x86_64
+          mkdir -p mobile/android/app/src/main/jniLibs/arm64-v8a mobile/android/app/src/main/jniLibs/x86_64
+          cp mobile/android-ssh/target/aarch64-linux-android/release/libtabby_ssh.so mobile/android/app/src/main/jniLibs/arm64-v8a/
+          cp mobile/android-ssh/target/x86_64-linux-android/release/libtabby_ssh.so mobile/android/app/src/main/jniLibs/x86_64/
+      - name: Build web assets and synchronize Capacitor
+        run: |
+          npm ci --ignore-scripts --prefix mobile
+          npm run check --prefix mobile
+          npm run build --prefix mobile
+          npm run sync:android --prefix mobile
+      - name: Android compilation, unit tests, lint and test APKs
+        working-directory: mobile/android
+        run: ./gradlew --no-daemon testDebugUnitTest lintDebug assembleDebug assembleDebugAndroidTest
+      - name: Inspect the actual APK
+        id: inspect
+        run: |
+          mkdir -p mobile/artifacts
+          cp mobile/android/app/build/outputs/apk/debug/app-debug.apk mobile/artifacts/Tabby-Android-Prototype.apk
+          python3 mobile/scripts/verify-android-apk.py --apk mobile/artifacts/Tabby-Android-Prototype.apk --report mobile/artifacts/android-apk-verification.json
+      - name: Start disposable AOSP emulator with KVM
+        run: |
+          test -c /dev/kvm
+          tabby_runner_uid="$(id -u)"
+          sudo setfacl -m "u:${tabby_runner_uid}:rw" /dev/kvm
+          mkdir -p "$ANDROID_USER_HOME" "$ANDROID_AVD_HOME"
+          printf 'no\n' | "$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager" create avd --force --name tabby-prototype-api35 --package 'system-images;android-35;default;x86_64' --device pixel_7
+          test -f "$ANDROID_AVD_HOME/tabby-prototype-api35.avd/config.ini"
+          "$ANDROID_HOME/emulator/emulator" -avd tabby-prototype-api35 -no-window -no-audio -no-snapshot -no-boot-anim -gpu swiftshader -accel on -memory 2048 -cores 2 -port 5554 > "$RUNNER_TEMP/tabby-emulator.log" 2>&1 &
+          "$ANDROID_HOME/platform-tools/adb" start-server
+          python3 - <<'PY'
+          import os, subprocess, time
+          adb = os.environ['ANDROID_HOME'] + '/platform-tools/adb'
+          deadline = time.monotonic() + 240
+          while time.monotonic() < deadline:
+              result = subprocess.run([adb, '-s', 'emulator-5554', 'shell', 'getprop', 'sys.boot_completed'], capture_output=True, text=True, timeout=15)
+              if result.returncode == 0 and result.stdout.strip() == '1':
+                  print('AOSP API 35 emulator booted with KVM')
+                  break
+              time.sleep(5)
+          else:
+              raise SystemExit('Emulator did not boot within four minutes')
+          PY
+          "$ANDROID_HOME/platform-tools/adb" -s emulator-5554 shell input keyevent 82
+      - name: Actual Android JNI, host keys, lifecycle and WebView SSH tests
+        run: node mobile/scripts/test-android.mjs --serial emulator-5554 --report mobile/artifacts/android-runtime-report.json
+      - name: Stop only the disposable emulator
+        if: always()
+        run: |
+          if [ -x "$ANDROID_HOME/platform-tools/adb" ]; then
+            "$ANDROID_HOME/platform-tools/adb" -s emulator-5554 emu kill || true
+          fi
+      - name: Upload verified prototype and public receipts
+        if: always() && steps.inspect.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: Tabby-Android-Prototype-${{ github.event.pull_request.head.sha || github.sha }}
+          path: |
+            mobile/artifacts/Tabby-Android-Prototype.apk
+            mobile/artifacts/Tabby-Android-Prototype.apk.sha256
+            mobile/artifacts/android-apk-verification.json
+            mobile/artifacts/android-runtime-report.json
+          if-no-files-found: error
+          retention-days: 14

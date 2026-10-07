@@ -354,3 +354,85 @@ test('late old start rejection cannot discard a newly imported private key', asy
         .toEqual({ type: 'authResponse', requestId: 22, keyId: 'new-key', passphrase: '' })
     expect(await page.evaluate(() => window.testBridge.discardedKeys)).toEqual(['test-key'])
 })
+
+const adversarialText = [
+    '<svg xmlns="http://www.w3.org/2000/svg"><animate onbegin="window.attackMarker.push(1)"></animate><script>window.attackMarker.push(2)</script></svg>',
+    '<math><annotation-xml encoding="text/html"><img src=x onerror="window.attackMarker.push(3)"></annotation-xml></math>',
+    '<svg><a xlink:href="javascript:window.attackMarker.push(4)">tap</a><g xmlns:custom="http://www.w3.org/1999/xhtml" custom:onload="window.attackMarker.push(5)"></g></svg>',
+    '<iframe srcdoc="<script>window.attackMarker.push(6)</script>"></iframe>',
+    '{{constructor.constructor("window.attackMarker.push(7)")()}} {count, plural, other {<img src=x onerror=window.attackMarker.push(8)>}}',
+].join(' ')
+
+async function assertInert(page: Page, scope: string): Promise<void> {
+    await expect(page.locator(scope).locator('svg, math, script, img, iframe, animate, foreignObject')).toHaveCount(0)
+    await expect(page.locator(scope).locator('[onerror], [onload], [onbegin]')).toHaveCount(0)
+    expect(await page.evaluate(() => window.attackMarker)).toEqual([])
+}
+
+test('remote keyboard-interactive instructions and prompts render adversarial markup as text', async ({ page }) => {
+    await page.getByLabel('认证方式').selectOption('keyboardInteractive')
+    await start(page)
+    await emit(page, { type: 'hostKey', requestId: 31, status: 'unknown', algorithm: 'ssh-ed25519', fingerprint: 'SHA256:test' })
+    await page.getByRole('button', { name: '核对后信任' }).click()
+    await expect.poll(() => page.evaluate(() => window.testBridge.commands.length)).toBe(1)
+    await emit(page, { type: 'auth', requestId: 32, mode: 'keyboardInteractive', instructions: adversarialText,
+        prompts: [{ prompt: adversarialText, echo: false }, { prompt: '{{response}} <input onfocus="window.attackMarker.push(9)">', echo: true }] })
+    await expect(page.locator('.modal-card p')).toHaveText(adversarialText)
+    await expect(page.locator('.modal-card label').first()).toContainText(adversarialText)
+    await expect(page.locator('.modal-card input')).toHaveCount(2)
+    await assertInert(page, '.modal-card')
+    expect(await page.evaluate(() => window.testBridge.commands)).toMatchObject([
+        { command: { type: 'hostKeyResponse', requestId: 31, accept: true } },
+    ])
+    await page.locator('.modal-card input').nth(0).fill('typed-secret')
+    await page.locator('.modal-card input').nth(1).fill('typed-public')
+    await page.getByRole('button', { name: '继续', exact: true }).click()
+    await expect.poll(() => page.evaluate(() => window.testBridge.commands.length)).toBe(2)
+    expect(await page.evaluate(() => window.testBridge.commands.at(-1)!.command)).toEqual({
+        type: 'authResponse', requestId: 32, responses: ['typed-secret', 'typed-public'],
+    })
+    expect(await page.evaluate(() => window.attackMarker)).toEqual([])
+})
+
+test('untrusted private-key filename is literal text and cannot create DOM or SSH commands', async ({ page }) => {
+    await page.getByLabel('认证方式').selectOption('privateKey')
+    await page.evaluate(value => { window.testBridge.pickerLabel = value }, adversarialText)
+    await page.getByRole('button', { name: '选择私钥文件' }).click()
+    await expect(page.locator('.connect-panel')).toContainText(adversarialText)
+    await assertInert(page, '.connect-panel')
+    expect(await page.evaluate(() => window.testBridge.starts)).toEqual([])
+    expect(await page.evaluate(() => window.testBridge.commands)).toEqual([])
+    expect(await page.evaluate(() => window.testBridge.discardedKeys)).toEqual([])
+})
+
+test('adversarial terminal snapshot and clipboard stay plain text with only requested writes', async ({ page }) => {
+    await ready(page)
+    // Copy feedback can legitimately change terminal height and request resize.
+    // Verify all remaining commands exactly, independently of that layout work.
+    const count = () => page.evaluate(() => window.testBridge.commands.filter(item => item.command.type !== 'resize').length)
+    const baseline = await count()
+    await emit(page, { type: 'data', data: Buffer.from(adversarialText).toString('base64') })
+    await expect.poll(count).toBe(baseline + 1)
+    expect(await page.evaluate(() => window.testBridge.commands.filter(item => item.command.type !== 'resize').at(-1)!.command.type)).toBe('outputAck')
+    await page.getByRole('button', { name: '选择文字', exact: true }).click()
+    const snapshot = page.locator('.selection-layer pre')
+    await expect(snapshot).toContainText(adversarialText)
+    await assertInert(page, '.selection-layer')
+    const selectedText = await snapshot.evaluate(element => {
+        const range = document.createRange(); range.selectNodeContents(element)
+        window.getSelection()?.removeAllRanges(); window.getSelection()?.addRange(range)
+        return window.getSelection()?.toString() ?? ''
+    })
+    expect(selectedText).toContain(adversarialText)
+    await page.getByRole('button', { name: '复制', exact: true }).click()
+    await expect.poll(() => page.evaluate(() => window.testBridge.clipboard)).toBe(selectedText)
+    expect(await page.evaluate(() => window.testBridge.clipboardWrites)).toBe(1)
+    expect(await count()).toBe(baseline + 1)
+    await page.getByRole('button', { name: '结束选择', exact: true }).click()
+    await page.evaluate(value => { window.testBridge.clipboard = value }, adversarialText)
+    await page.getByRole('button', { name: '粘贴', exact: true }).click()
+    await expect.poll(() => writes(page)).toEqual([adversarialText])
+    expect(await page.evaluate(() => window.testBridge.clipboardReads)).toBe(1)
+    expect(await count()).toBe(baseline + 2)
+    await assertInert(page, '.app-shell')
+})

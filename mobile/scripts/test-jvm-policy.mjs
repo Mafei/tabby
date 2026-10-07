@@ -75,6 +75,7 @@ try {
         source('app/src/main/java/org/tabby/android/prototype/HostKeyPolicy.kt'),
         source('app/src/main/java/org/tabby/android/prototype/ConnectionGate.kt'),
         source('app/src/main/java/org/tabby/android/prototype/OutputWindow.kt'),
+        source('app/src/main/java/org/tabby/android/prototype/PrivateKeyVault.kt'),
         source('app/src/test/java/org/tabby/android/prototype/SecurityPolicyTest.kt')])
     await run(java, ['-cp', `${classes}${delimiter}${classpath}`, 'org.junit.runner.JUnitCore',
         'org.tabby.android.prototype.SecurityPolicyTest'])

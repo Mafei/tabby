@@ -12,26 +12,34 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.tabby.android.ssh.NativeSSH
 import java.util.ArrayDeque
+import java.io.File
 
 /** Uses the isolated repository fixture, never a user's SSH server or secret. */
 @RunWith(AndroidJUnit4::class)
 class RealSSHBridgeTest {
     private val args get() = InstrumentationRegistry.getArguments()
     private val pending = ArrayDeque<JSONObject>()
+    private lateinit var metadata: JSONObject
 
     @Before fun requireFixture() {
         // A normal test invocation must visibly skip these tests without fixture
-        // arguments. Delivery runs supply them from a private metadata file.
-        assumeTrue("Start the isolated fixture and provide fixturePort", args.containsKey("fixturePort"))
-        require(args.getString("fixtureUsername") == "tabby-fixture")
-        require(args.containsKey("fixturePassword"))
+        // arguments. Credentials are injected over adb stdin to this temporary
+        // app-private test file, never command-line arguments or build logs.
+        assumeTrue("Start the isolated fixture and provide fixtureMetadata", args.containsKey("fixtureMetadata"))
+        val name = args.getString("fixtureMetadata")
+        require(name == "tabby-ssh-test-fixture.json")
+        val file = File(InstrumentationRegistry.getInstrumentation().targetContext.filesDir, name!!)
+        require(file.length() in 1..131_072)
+        metadata = JSONObject(file.readText())
+        require(metadata.optString("username") == "tabby-fixture")
+        require(metadata.has("password"))
         pending.clear()
     }
 
     private fun start(generation: Long, expectedKey: String? = null): Long {
-        val options = JSONObject().put("host", args.getString("fixtureHost", "10.0.2.2"))
-            .put("port", args.getString("fixturePort")!!.toInt())
-            .put("username", args.getString("fixtureUsername"))
+        val options = JSONObject().put("host", metadata.optString("host", "127.0.0.1"))
+            .put("port", metadata.getInt("port"))
+            .put("username", metadata.getString("username"))
             .put("generation", generation).put("authMode", "password")
             .put("cols", 80).put("rows", 24)
         expectedKey?.let { options.put("expectedHostKey", it) }
@@ -76,7 +84,7 @@ class RealSSHBridgeTest {
         }
         val auth = event(id) { it.optString("type") == "auth" }
         send(id, generation, JSONObject().put("type", "authResponse").put("requestId", auth.get("requestId"))
-            .put("password", args.getString("fixturePassword")))
+            .put("password", metadata.getString("password")))
         event(id) { it.optString("type") == "state" && it.optString("state") == "ready" }
         return hostKey
     }
@@ -113,7 +121,7 @@ class RealSSHBridgeTest {
         NativeSSH.destroy(oldId)
         try {
             send(oldId, 201, JSONObject().put("type", "authResponse").put("requestId", oldAuth.get("requestId"))
-                .put("password", args.getString("fixturePassword")))
+                .put("password", metadata.getString("password")))
             fail("Destroyed connection accepted an old authentication response")
         } catch (_: IllegalStateException) { /* Expected stable JNI rejection. */ }
         pending.clear()

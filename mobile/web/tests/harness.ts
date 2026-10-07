@@ -13,6 +13,9 @@ export class TestBridge implements SSHBridge {
     readonly commands: { connectionId: string, command: SSHCommand }[] = []
     readonly closed: string[] = []
     clipboard = ''
+    clipboardReads = 0
+    clipboardWrites = 0
+    pickerLabel = 'test.pem'
     holdStart = false
     rejectStart = false
     holdCommand = false
@@ -49,14 +52,15 @@ export class TestBridge implements SSHBridge {
     resolveCommands(): void { this.commandResolvers.splice(0).forEach(resolve => resolve()) }
     resolveClipboards(text: string): void { this.clipboardResolvers.splice(0).forEach(resolve => resolve({ text })) }
     resolvePickers(keyId: string): void { this.pickerResolvers.splice(0).forEach(resolve => resolve({ keyId, label: 'picked.pem' })) }
-    async writeClipboard({ text }: { text: string }): Promise<void> { this.clipboard = text }
+    async writeClipboard({ text }: { text: string }): Promise<void> { this.clipboardWrites++; this.clipboard = text }
     async readClipboard(): Promise<{ text: string }> {
+        this.clipboardReads++
         if (this.holdClipboard) { return new Promise(resolve => this.clipboardResolvers.push(resolve)) }
         return { text: this.clipboard }
     }
     async selectPrivateKey(): Promise<{ keyId: string, label: string }> {
         if (this.holdPicker) { return new Promise(resolve => this.pickerResolvers.push(resolve)) }
-        return { keyId: 'test-key', label: 'test.pem' }
+        return { keyId: 'test-key', label: this.pickerLabel }
     }
     async discardPrivateKey({ keyId }: { keyId: string }): Promise<void> { this.discardedKeys.push(keyId) }
     async showKeyboard(): Promise<void> {}
@@ -64,8 +68,9 @@ export class TestBridge implements SSHBridge {
     async getViewport() { return { visible: false, height: 0, viewportWidth: innerWidth, viewportHeight: innerHeight } }
 }
 
-declare global { interface Window { testBridge: TestBridge } }
+declare global { interface Window { testBridge: TestBridge, attackMarker: number[] } }
 window.testBridge = new TestBridge()
+window.attackMarker = []
 enableProdMode()
 bootstrapApplication(AppComponent, { providers: [{ provide: SSH_BRIDGE, useValue: window.testBridge }] })
     .catch(error => { document.body.textContent = `Test harness failed: ${error.message}` })
