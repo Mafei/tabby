@@ -94,6 +94,12 @@ Saved cloud environment: Node 22 and 24, the installed russh 0.1.38 native clien
 dependencies and a tmux 3.5a binary unpacked in a temporary directory are usable.
 Desktop native development libraries and a GUI are absent. The fork CI uses Node 22
 and installs its own native build dependencies; it also runs `test:ssh-integration`.
+Windows and Linux artifacts target x64; macOS targets only Apple Silicon arm64 on
+the standard `macos-15` ARM runner. CI extracts the delivered ZIP and mounts the DMG
+read-only, then uses `lipo` on the actual app, Electron framework/helpers and selected
+Darwin native addon/PTY helper bytes. Both archives must contain identical verified
+binaries. The artifact includes a JSON report with source SHA, architectures and
+binary/archive SHA-256 digests. This checks architecture and packaging, not GUI execution.
 
 Node integration tests import the actual SSHSession, SSHShellSession, SSHTabComponent,
 connectable tab lifecycle and terminal middleware. Angular/Electron rendering and
