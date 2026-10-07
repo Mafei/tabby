@@ -1,11 +1,13 @@
 #!/usr/bin/env node
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
-import { execFileSync } from 'node:child_process'
+import { execFileSync, spawnSync } from 'node:child_process'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { extractFile, listPackage } from '@electron/asar'
+import { extractFile, listPackage, statFile } from '@electron/asar'
+import { verifyMacSignature, verifyMacArtifactApp, readSafetyFuses } from './macos-artifact.mjs'
+import { smokeMacStartup } from './macos-startup-smoke.mjs'
 
 // Inspect the delivered archives, including native code stored in app.asar or
 // app.asar.unpacked. Foreign-platform prebuilds bundled by vendors are dormant;
@@ -18,7 +20,7 @@ assert.match(process.env.TABBY_SOURCE_SHA ?? '', /^[a-f0-9]{40}$/)
 const dist = path.resolve('dist')
 const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'tabby-arm64-'))
 const digest = data => createHash('sha256').update(data).digest('hex')
-const report = { sourceSHA: process.env.TABBY_SOURCE_SHA, runnerArch: process.arch, archives: [] }
+const report = { sourceSHA: process.env.TABBY_SOURCE_SHA, runnerArch: process.arch, signing: 'adhoc', developerID: false, notarized: false, gatekeeperTrusted: false, archives: [] }
 const exec = (command, args) => execFileSync(command, args, { encoding: 'utf8' }).trim()
 
 function verifyBinary (data, relativePath, temporaryFile, thin = false) {
@@ -28,7 +30,7 @@ function verifyBinary (data, relativePath, temporaryFile, thin = false) {
     if (thin) {
         assert.deepEqual(architectures, ['arm64'], `${relativePath}: expected an arm64-only executable`)
     }
-    const result = { path: relativePath, architectures, sha256: digest(data) }
+    const result = { path: relativePath, architectures, sha256: digest(data), signature: verifyMacSignature(temporaryFile) }
     console.info(JSON.stringify(result))
     return result
 }
@@ -56,7 +58,10 @@ function verifyApp (app) {
     const entries = new Set(listPackage(archive).map(entry => entry.replace(/^\//, '')))
     const checkEntry = entry => {
         assert(entries.has(entry), `Packaged native dependency missing: ${entry}`)
-        binaries.push(verifyBinary(extractFile(archive, entry), `Contents/Resources/app.asar/${entry}`, temporaryFile))
+        const bytes = extractFile(archive, entry)
+        const integrity = statFile(archive, entry).integrity
+        assert.equal(integrity?.hash, digest(bytes), `ASAR native integrity mismatch: ${entry}`)
+        binaries.push(verifyBinary(bytes, `Contents/Resources/app.asar/${entry}`, temporaryFile))
     }
     checkEntry('node_modules/keytar/build/Release/keytar.node')
     checkEntry('node_modules/fontmanager-redux/build/Release/fontmanager.node')
@@ -100,12 +105,41 @@ try {
         let mounted = false
         try {
             if (extension === 'zip') {
+                exec('/usr/bin/unzip', ['-tq', archive])
                 exec('/usr/bin/ditto', ['-x', '-k', archive, directory])
             } else {
+                exec('/usr/bin/hdiutil', ['verify', archive])
                 exec('/usr/bin/hdiutil', ['attach', archive, '-readonly', '-nobrowse', '-mountpoint', directory])
                 mounted = true
             }
-            report.archives.push({ file: archives[0], sha256: digest(fs.readFileSync(archive)), binaries: verifyApp(findApp(directory)) })
+            const app = findApp(directory)
+            const result = { file: archives[0], sha256: digest(fs.readFileSync(archive)), archiveIntegrity: true,
+                binaries: verifyApp(app), code: verifyMacArtifactApp(app), fuses: readSafetyFuses(app) }
+            report.archives.push(result)
+            const assessment = spawnSync('/usr/sbin/spctl', ['--assess', '--type', 'execute', '--verbose=4', app], { encoding: 'utf8', timeout: 30000 })
+            result.gatekeeper = { exitCode: assessment.status, signal: assessment.signal, output: (assessment.stdout ?? '') + (assessment.stderr ?? ''), error: assessment.error?.message }
+            console.info('Gatekeeper policy assessment (separate from signature integrity):', JSON.stringify(result.gatekeeper))
+            result.startup = await smokeMacStartup(app, scratch, extension)
+            if (extension === 'zip') {
+                // Regression: corrupt the actual verified framework's fuse page in
+                // this temporary extracted copy. Strict validation must reject it.
+                const framework = path.join(app, 'Contents/Frameworks/Electron Framework.framework/Electron Framework')
+                const original = fs.readFileSync(framework)
+                const damaged = Buffer.from(original)
+                const sentinel = 'dL7pKGdnNz796PbbjQWNKmHXBZaB9tsX'
+                const sentinelOffset = damaged.indexOf(sentinel)
+                assert(sentinelOffset >= 0)
+                const fuse = sentinelOffset + sentinel.length + 2
+                damaged[fuse] = damaged[fuse] === 48 ? 49 : 48
+                try {
+                    fs.writeFileSync(framework, damaged)
+                    assert.throws(() => verifyMacSignature(app), 'Tampered fuse signature must be rejected')
+                    result.tamperRegression = { passed: true, rejected: true }
+                } finally {
+                    fs.writeFileSync(framework, original)
+                }
+                verifyMacSignature(app)
+            }
         } finally {
             if (mounted) {
                 exec('/usr/bin/hdiutil', ['detach', directory])
@@ -115,8 +149,10 @@ try {
     }
     const zipBinaries = report.archives[0].binaries
     assert.deepEqual(report.archives[1].binaries, zipBinaries, 'DMG and ZIP must contain the same verified binaries')
-    fs.writeFileSync(path.join(dist, 'macos-arm64-verification.json'), JSON.stringify(report, null, 2) + '\n')
-    console.info(`Verified both archives: ${zipBinaries.length} ARM-compatible binaries each; source ${report.sourceSHA}`)
+    assert.deepEqual(report.archives[1].code, report.archives[0].code, 'DMG and ZIP must contain the same complete signed code')
+    report.passed = true
+    console.info(`Verified both archives: ${zipBinaries.length} ARM-compatible binaries each; ${report.archives[0].code.length} signed code/bundle components; both startup smokes passed; source ${report.sourceSHA}`)
 } finally {
+    fs.writeFileSync(path.join(dist, 'macos-arm64-verification.json'), JSON.stringify(report, null, 2) + '\n')
     fs.rmSync(scratch, { recursive: true, force: true })
 }
