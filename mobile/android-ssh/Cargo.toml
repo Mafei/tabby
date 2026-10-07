@@ -1,0 +1,32 @@
+[package]
+name = "tabby-android-ssh"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.89"
+license = "Apache-2.0"
+publish = false
+
+[lib]
+name = "tabby_ssh"
+crate-type = ["cdylib", "rlib"]
+
+[features]
+default = []
+jni = ["dep:jni"]
+
+[dependencies]
+base64 = "0.22.1"
+futures-util = "0.3.34"
+jni = { version = "0.21.1", optional = true }
+# Match the Rust transport used by Tabby's existing russh N-API binding.
+russh = { version = "=0.63.3", default-features = false, features = ["ring", "rsa", "flate2"] }
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.145"
+tokio = { version = "1.47.1", features = ["rt-multi-thread", "net", "sync", "time", "macros"] }
+tokio-util = { version = "0.7.16", features = ["rt"] }
+zeroize = "1.8.2"
+
+[profile.release]
+codegen-units = 1
+lto = "thin"
+strip = "debuginfo"

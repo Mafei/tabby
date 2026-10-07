@@ -1,0 +1,61 @@
+name: Android prototype SDK-independent checks
+on:
+  push:
+    branches: [prototype/android-direct-ssh]
+    paths: [mobile/**, .github/workflows/android-prototype.yml]
+  pull_request:
+    branches: [feature/ssh-tmux-recovery]
+    paths: [mobile/**, .github/workflows/android-prototype.yml]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: android-prototype-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+jobs:
+  checks:
+    if: github.repository == 'Mafei/tabby'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - name: Pinned Rust toolchain
+        run: rustup toolchain install 1.90.0 --profile minimal --component rustfmt && rustup default 1.90.0
+      - name: Install isolated mobile dependencies
+        id: install
+        run: npm ci --ignore-scripts --prefix mobile
+      - name: Web typecheck and production build
+        run: |
+          npm run check --prefix mobile
+          npm run build --prefix mobile
+      - name: Synthetic browser input and lifecycle tests
+        env:
+          CHROMIUM_PATH: /usr/bin/google-chrome
+        run: npm run test:web --prefix mobile
+      - name: Disposable real SSH fixture self-tests
+        if: always() && steps.install.outcome == 'success'
+        run: npm run test:fixture --prefix mobile
+      - name: Rust safety and real SSH integration
+        id: native
+        if: always() && steps.install.outcome == 'success'
+        run: |
+          cargo fmt --check --manifest-path mobile/android-ssh/Cargo.toml
+          cargo test --locked --features jni --manifest-path mobile/android-ssh/Cargo.toml
+          cargo build --locked --features jni --manifest-path mobile/android-ssh/Cargo.toml
+      - name: Actual application Kotlin to JNI to SSH smoke
+        if: always() && steps.native.outcome == 'success'
+        run: node mobile/scripts/test-fixture-jni.mjs
+      - name: JVM host-key, generation and backpressure policies
+        if: always() && steps.install.outcome == 'success'
+        run: node mobile/scripts/test-jvm-policy.mjs

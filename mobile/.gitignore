@@ -1,0 +1,15 @@
+node_modules/
+dist/
+www/
+web/dist/
+android/.gradle/
+android/**/build/
+android/local.properties
+android/app/src/main/assets/public/
+android/app/src/main/assets/capacitor.config.json
+android/app/src/main/assets/capacitor.plugins.json
+android/app/src/main/jniLibs/
+android-ssh/target/
+test-results/
+playwright-report/
+!package-lock.json

@@ -1,0 +1,12 @@
+.gradle/
+local.properties
+**/build/
+app/src/main/assets/public/
+app/src/main/assets/capacitor.config.json
+app/src/main/assets/capacitor.plugins.json
+capacitor-cordova-android-plugins/
+capacitor.settings.gradle
+app/capacitor.build.gradle
+app/src/main/jniLibs/
+*.iml
+.idea/
