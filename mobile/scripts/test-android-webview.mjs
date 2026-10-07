@@ -18,6 +18,7 @@ export async function webviewAcceptance (android, fixture) {
     device.setDefaultTimeout(15000)
     const passed = []
     const settings = []
+    const deviceStates = []
     let harness
     let page
     let stage = 'harness-start'
@@ -35,7 +36,7 @@ export async function webviewAcceptance (android, fixture) {
         // auth prompts, terminal data, screenshots or server console output.
         const counterNames = new Set(['clients', 'sessions', 'pendingAuth', 'ptys', 'timers', 'authenticated',
             'authPrompts', 'authAnswers', 'shellStarts', 'resizeRequests', 'connections'])
-        const result = { stage, substage, passedCases: [...passed],
+        const result = { stage, substage, passedCases: [...passed], deviceStates,
             nativeInput: android.lastInput,
             errorKind: error instanceof TestFailure ? 'FIXED_TEST_FAILURE'
                 : error?.name === 'TimeoutError' ? 'PLAYWRIGHT_TIMEOUT'
@@ -322,6 +323,7 @@ export async function webviewAcceptance (android, fixture) {
     async function beginHarness (previousPID) {
         await android.removeFile(DONE)
         const command = `am instrument -w -r -e class ${APP}.CloudWebViewHarness -e fixtureMetadata ${METADATA} -e cloudDoneFile ${DONE} -e cloudInputFile ${INPUT} ${RUNNER}`
+        const harnessDeadline = Date.now() + 180000
         harness = android.launch(['shell', '-T', command], { timeout: 190000 })
         // Keep the promise handled if the test-only harness fails during startup.
         harness.result.catch(() => {})
@@ -337,7 +339,55 @@ export async function webviewAcceptance (android, fixture) {
             if (dialog.type() === 'confirm') { void dialog.accept() } else { void dialog.dismiss() }
         })
         await observe()
+        const preparation = { harness: previousPID === undefined ? 'first' : 'fresh-process', actions: [] }
+        deviceStates.push(preparation)
+        await prepareDevice(preparation, harnessDeadline)
         return view.pid()
+    }
+    async function prepareDevice (preparation, harnessDeadline) {
+        const deadline = Math.min(harnessDeadline, Date.now() + 10000)
+        const inTime = () => check(Date.now() < deadline, 'ANDROID_TEST_DEVICE_PREPARATION_TIMEOUT')
+        const knownAndNonsecure = state => {
+            check(state.secure !== true, 'ANDROID_TEST_DEVICE_SECURE_KEYGUARD')
+            check(state.secure === false, 'ANDROID_TEST_DEVICE_SECURITY_UNKNOWN')
+            check(['interactive', 'keyguardShowing', 'deviceLocked'].every(key => typeof state[key] === 'boolean')
+                && state.displayState !== 'UNKNOWN' && state.scenarioState !== 'UNKNOWN' && state.rotation !== 'UNKNOWN', 'ANDROID_TEST_DEVICE_STATE_UNKNOWN')
+        }
+        async function readState (name) {
+            inTime()
+            const state = await android.input({ type: 'deviceState' }, { deadline })
+            preparation[name] = state
+            inTime()
+            knownAndNonsecure(state)
+            return state
+        }
+        let state = await step('device-state-initial', () => readState('initial'))
+        if (state.interactive === false) {
+            await step('device-observed-asleep-wakeup', async () => {
+                inTime()
+                preparation.actions.push('WAKEUP')
+                await android.shell('input keyevent KEYCODE_WAKEUP', { timeout: Math.max(1, Math.min(5000, deadline - Date.now())) })
+                inTime()
+            })
+            state = await step('device-state-after-wakeup', () => readState('afterWake'))
+        }
+        if (state.keyguardShowing === true) {
+            // The latest native snapshot must prove nonsecure before MENU.
+            knownAndNonsecure(state)
+            await step('device-observed-nonsecure-keyguard-menu', async () => {
+                inTime()
+                preparation.actions.push('MENU')
+                await android.shell('input keyevent 82', { timeout: Math.max(1, Math.min(5000, deadline - Date.now())) })
+                inTime()
+            })
+        }
+        await step('device-state-prepared-awake-unlocked', () => until(async () => {
+            const prepared = await readState('prepared')
+            inTime()
+            return prepared.interactive === true && prepared.displayState === 'ON'
+                && prepared.keyguardShowing === false && prepared.deviceLocked === false
+        }, 'ANDROID_TEST_DEVICE_NOT_AWAKE_AND_UNLOCKED', Math.max(1, deadline - Date.now())))
+        inTime()
     }
     async function endHarness () {
         await android.privateFile(DONE, '')
@@ -707,7 +757,7 @@ export async function webviewAcceptance (android, fixture) {
         await step('replacement-resources-released', () => quiet())
         verify('durable native host-key pin survives a fresh process and rejects same-endpoint replacement')
         await endHarness()
-        return { passed: true, cases: passed, skipped: 0, inputEvidence: 'Actual Android InputConnection; specific Chinese IME candidate UI unverified.',
+        return { passed: true, cases: passed, skipped: 0, deviceStates, inputEvidence: 'Actual Android InputConnection; specific Chinese IME candidate UI unverified.',
             touchEvidence: 'Android instrumentation MotionEvent injection, not synthetic DOM touch.' }
     } catch (error) {
         const failure = error instanceof TestFailure ? error

@@ -57,14 +57,47 @@ export function windowState (dump) {
     const shown = body => /mHasSurface=true/.test(body) && /mViewVisibility=0x0/.test(body)
         && /\bisOnScreen=true\b|\bisVisible=true\b/.test(body)
     const any = category => windows.some(([, title, body]) => category(title) && shown(body))
-    const focus = dump.match(/\bmCurrentFocus=(.*)/)?.[1] || ''
+    const focus = dump.match(/\bmCurrentFocus=(.*)/)?.[1]?.trim()
+    const focusedWindowCategory = focus === undefined || focus === '' ? 'UNKNOWN'
+        : focus === 'null' ? 'NONE'
+            : focus.includes(APP) ? 'APP'
+                : /\bClipboardOverlay\b/.test(focus) ? 'CLIPBOARD'
+                    : /\bInputMethod\b|InputMethodService|inputmethod/i.test(focus) ? 'IME'
+                        : /Keyguard|Bouncer/i.test(focus) ? 'KEYGUARD'
+                            : /com\.android\.systemui|\bStatusBar\b|\bNotificationShade\b/.test(focus) ? 'SYSTEM_UI'
+                                : /\bLauncher\b|com\.android\.launcher3|com\.google\.android\.apps\.nexuslauncher/.test(focus) ? 'LAUNCHER' : 'OTHER'
     return {
         appWindowFound: windows.some(([, title]) => title.includes(APP)),
         appWindowVisible: any(title => title.includes(APP)),
-        appWindowFocused: focus.includes(APP),
+        appWindowFocused: focus?.includes(APP) === true,
         clipboardOverlayVisible: any(title => /\bClipboardOverlay\b/.test(title)),
         imeWindowVisible: any(title => /\bInputMethod\b/.test(title)),
+        focusedWindowCategory,
     }
+}
+
+/** Select fixed public state fields; never return the native response object. */
+export function deviceStateResult (state) {
+    check(state && typeof state === 'object' && !Array.isArray(state), 'ANDROID_DEVICE_STATE_INVALID_RESULT')
+    const result = {}
+    for (const key of ['interactive', 'keyguardShowing', 'deviceLocked', 'secure']) {
+        check(Object.hasOwn(state, key) && (typeof state[key] === 'boolean' || state[key] === null), 'ANDROID_DEVICE_STATE_INVALID_RESULT')
+        result[key] = state[key]
+    }
+    for (const key of ['windowFocusable', 'windowFocused', 'activityFinishing', 'activityDestroyed']) {
+        check(typeof state[key] === 'boolean', 'ANDROID_DEVICE_STATE_INVALID_RESULT')
+        result[key] = state[key]
+    }
+    const enums = {
+        displayState: ['ON', 'OFF', 'DOZE', 'DOZE_SUSPEND', 'ON_SUSPEND', 'VR', 'UNKNOWN'],
+        scenarioState: ['RESUMED', 'STARTED', 'CREATED', 'DESTROYED', 'INITIALIZED', 'UNKNOWN'],
+        rotation: ['ROTATION_0', 'ROTATION_90', 'ROTATION_180', 'ROTATION_270', 'UNKNOWN'],
+    }
+    for (const [key, values] of Object.entries(enums)) {
+        check(values.includes(state[key]), 'ANDROID_DEVICE_STATE_INVALID_RESULT')
+        result[key] = state[key]
+    }
+    return result
 }
 
 export function processResult (executable, args, { input, timeout = 60000, secrets = [] } = {}) {
@@ -135,22 +168,22 @@ export class Android {
         }
     }
 
-    async privateFile (filename, content) {
+    async privateFile (filename, content, options) {
         check(/^[a-z0-9.-]+$/.test(filename), 'UNSAFE_TEST_FILENAME')
         const path = `files/${filename}`
         // Raw stdin, no PTY and no credential in shell text or command arguments.
         const script = `umask 077; mkdir -p files && chmod 700 files && cat > ${path}.tmp && chmod 600 ${path}.tmp && mv ${path}.tmp ${path}`
-        await this.shell(`run-as ${APP} sh -c ${shellQuote(script)}`, { input: content })
+        await this.shell(`run-as ${APP} sh -c ${shellQuote(script)}`, { ...options, input: content })
     }
 
-    async removeFile (filename) {
+    async removeFile (filename, options) {
         check(/^[a-z0-9.-]+$/.test(filename), 'UNSAFE_TEST_FILENAME')
-        await this.shell(`run-as ${APP} rm -f files/${filename} files/${filename}.tmp`)
+        await this.shell(`run-as ${APP} rm -f files/${filename} files/${filename}.tmp`, options)
     }
 
-    async readFile (filename) {
+    async readFile (filename, options) {
         check(/^[a-z0-9.-]+$/.test(filename), 'UNSAFE_TEST_FILENAME')
-        const result = await this.launch(['shell', '-T', `run-as ${APP} cat files/${filename}`]).result
+        const result = await this.launch(['shell', '-T', `run-as ${APP} cat files/${filename}`], options).result
         return result.code === 0 ? result.stdout.trim() : undefined
     }
 
@@ -160,17 +193,28 @@ export class Android {
         return windowState(await this.shell('dumpsys window windows', { timeout }))
     }
 
-    async input (command) {
+    async input (command, { deadline } = {}) {
         const commandNames = new Map([['touch', 'TOUCH'], ['swipe', 'SWIPE'], ['compose', 'COMPOSE'], ['commit', 'COMMIT'],
-            ['composeStart', 'COMPOSE_START'], ['composeUpdate', 'COMPOSE_UPDATE'], ['composeFinish', 'COMPOSE_FINISH'], ['deleteBackward', 'DELETE_BACKWARD']])
+            ['composeStart', 'COMPOSE_START'], ['composeUpdate', 'COMPOSE_UPDATE'], ['composeFinish', 'COMPOSE_FINISH'], ['deleteBackward', 'DELETE_BACKWARD'], ['deviceState', 'DEVICE_STATE']])
         const reasons = new Set(['invalid_command', 'gesture_validation', 'gesture_readiness', 'gesture_dispatch', 'input_connection_missing', 'input_dispatch',
             'set_composing_rejected', 'finish_composing_rejected', 'commit_rejected', 'delete_rejected', 'ok'])
         check(commandNames.has(command.type), 'ANDROID_NATIVE_INPUT_UNKNOWN_COMMAND')
+        check(deadline === undefined || Number.isSafeInteger(deadline), 'ANDROID_NATIVE_INPUT_INVALID_DEADLINE')
+        const inTime = () => check(deadline === undefined || Date.now() < deadline, 'ANDROID_NATIVE_INPUT_DEADLINE_EXCEEDED')
+        const options = () => {
+            inTime()
+            return deadline === undefined ? undefined : { timeout: Math.max(1, Math.min(30000, deadline - Date.now())) }
+        }
         this.lastInput = { command: commandNames.get(command.type), reason: 'PENDING' }
-        await this.removeFile(INPUT_RESULT)
-        await this.privateFile(INPUT, JSON.stringify(command))
+        await this.removeFile(INPUT_RESULT, options())
+        inTime()
+        await this.privateFile(INPUT, JSON.stringify(command), options())
+        inTime()
         let result
-        await until(async () => { result = await this.readFile(INPUT_RESULT); return !!result }, 'ANDROID_INPUT_CONNECTION_TIMEOUT')
+        await until(async () => { result = await this.readFile(INPUT_RESULT, options()); inTime(); return !!result },
+            'ANDROID_INPUT_CONNECTION_TIMEOUT', deadline === undefined ? 30000 : Math.max(1, Math.min(30000, deadline - Date.now())))
+        let value
+        let failure
         try {
             let response
             try { response = JSON.parse(result) } catch { throw new TestFailure('ANDROID_NATIVE_INPUT_INVALID_RESULT') }
@@ -188,9 +232,17 @@ export class Android {
                     ...Object.fromEntries(['width', 'height', 'originX', 'originY', 'density', 'imeBottom']
                         .filter(key => Number.isFinite(gesture[key])).map(key => [key, gesture[key]])),
                 }
+                if (gesture.deviceState !== undefined) { this.lastInput.gesture.deviceState = deviceStateResult(gesture.deviceState) }
             }
             check(response.ok && response.reason === 'ok', `ANDROID_NATIVE_INPUT_${commandNames.get(command.type)}_${response.reason.toUpperCase()}`)
-        } finally { await this.removeFile(INPUT_RESULT) }
+            if (command.type === 'deviceState') { value = deviceStateResult(response.deviceState) }
+        } catch (error) { failure = error; throw error } finally {
+            try {
+                await this.removeFile(INPUT_RESULT, deadline === undefined ? undefined : { timeout: Math.max(1, Math.min(30000, deadline - Date.now())) })
+            } catch (error) { if (!failure) { throw error } }
+        }
+        inTime()
+        return value
     }
 }
 

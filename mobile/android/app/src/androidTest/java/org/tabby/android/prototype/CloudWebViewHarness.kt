@@ -1,11 +1,17 @@
 package org.tabby.android.prototype
 
 import android.content.pm.ApplicationInfo
+import android.app.KeyguardManager
 import android.webkit.WebView
 import android.view.inputmethod.EditorInfo
 import android.view.InputDevice
 import android.view.MotionEvent
+import android.view.Display
+import android.view.Surface
+import android.view.WindowManager
 import android.os.SystemClock
+import android.os.PowerManager
+import androidx.lifecycle.Lifecycle
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.test.core.app.ActivityScenario
@@ -38,6 +44,7 @@ class CloudWebViewHarness {
         var action = "none"
         var exceptionKind = "none"
         var windowState = JSONObject()
+        var deviceState: JSONObject? = null
 
         fun recordFailure(error: Throwable) {
             // Keep the first failure: cleanup UP must not replace a failed MOVE.
@@ -51,7 +58,11 @@ class CloudWebViewHarness {
             }
         }
 
-        fun json(): JSONObject = windowState.put("action", action).put("exceptionKind", exceptionKind)
+        fun json(): JSONObject {
+            val response = windowState.put("action", action).put("exceptionKind", exceptionKind)
+            deviceState?.let { response.put("deviceState", it) }
+            return response
+        }
     }
 
     private data class GestureWindow(
@@ -101,22 +112,32 @@ class CloudWebViewHarness {
         resultTemporary.delete()
         try {
             ActivityScenario.launch(MainActivity::class.java).use { scenario ->
-                scenario.onActivity { WebView.setWebContentsDebuggingEnabled(true) }
+                scenario.onActivity {
+                    // Applies only while this test window is visible; no wake
+                    // lock or production Activity flag is introduced.
+                    it.window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                    WebView.setWebContentsDebuggingEnabled(true)
+                }
                 val deadline = System.nanoTime() + 180_000_000_000L
                 while (!done.isFile && System.nanoTime() < deadline) {
                     if (inputEnabled && input.isFile) {
                         var ok = false
                         var commandType = "unknown"
                         var reason = InputReason.INVALID_COMMAND
+                        var deviceState: JSONObject? = null
                         val gesture = GestureDiagnostic()
                         try {
                             require(input.length() in 1..8192)
                             val command = JSONObject(input.readText())
                             val type = command.getString("type")
                             require(type in setOf("touch", "swipe", "compose", "commit", "composeStart",
-                                "composeUpdate", "composeFinish", "deleteBackward"))
+                                "composeUpdate", "composeFinish", "deleteBackward", "deviceState"))
                             commandType = type
-                            if (type in setOf("touch", "swipe")) {
+                            if (type == "deviceState") {
+                                val lifecycle = scenarioState(scenario)
+                                scenario.onActivity { deviceState = captureDeviceState(it, lifecycle) }
+                                ok = true
+                            } else if (type in setOf("touch", "swipe")) {
                                 reason = InputReason.GESTURE_VALIDATION
                                 executeGesture(scenario, command, gesture, deadline) { reason = it }
                                 ok = true
@@ -175,6 +196,7 @@ class CloudWebViewHarness {
                         }
                         input.delete()
                         val response = JSONObject().put("ok", ok).put("command", commandType).put("reason", reason.code)
+                        deviceState?.let { response.put("deviceState", it) }
                         if (commandType in setOf("touch", "swipe")) response.put("gesture", gesture.json())
                         resultTemporary.writeText(response.toString())
                         check(resultTemporary.renameTo(result)) { "Cannot publish input result" }
@@ -194,9 +216,52 @@ class CloudWebViewHarness {
         }
     }
 
-    private fun gestureWindow(scenario: ActivityScenario<MainActivity>): GestureWindow {
+    private fun scenarioState(scenario: ActivityScenario<MainActivity>): String = when (scenario.state) {
+        Lifecycle.State.RESUMED -> "RESUMED"
+        Lifecycle.State.STARTED -> "STARTED"
+        Lifecycle.State.CREATED -> "CREATED"
+        Lifecycle.State.DESTROYED -> "DESTROYED"
+        Lifecycle.State.INITIALIZED -> "INITIALIZED"
+        else -> "UNKNOWN"
+    }
+
+    private fun captureDeviceState(activity: MainActivity, lifecycle: String): JSONObject {
+        val power = activity.getSystemService(PowerManager::class.java)
+        val keyguard = activity.getSystemService(KeyguardManager::class.java)
+        val display = activity.window.decorView.display
+        return JSONObject()
+            .put("interactive", power?.isInteractive ?: JSONObject.NULL)
+            .put("keyguardShowing", keyguard?.isKeyguardLocked ?: JSONObject.NULL)
+            .put("deviceLocked", keyguard?.isDeviceLocked ?: JSONObject.NULL)
+            .put("secure", keyguard?.isKeyguardSecure ?: JSONObject.NULL)
+            .put("displayState", when (display?.state) {
+                Display.STATE_ON -> "ON"
+                Display.STATE_OFF -> "OFF"
+                Display.STATE_DOZE -> "DOZE"
+                Display.STATE_DOZE_SUSPEND -> "DOZE_SUSPEND"
+                Display.STATE_ON_SUSPEND -> "ON_SUSPEND"
+                Display.STATE_VR -> "VR"
+                else -> "UNKNOWN"
+            })
+            .put("scenarioState", lifecycle)
+            .put("windowFocusable", activity.window.attributes.flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE == 0)
+            .put("windowFocused", activity.window.decorView.hasWindowFocus())
+            .put("activityFinishing", activity.isFinishing)
+            .put("activityDestroyed", activity.isDestroyed)
+            .put("rotation", when (display?.rotation) {
+                Surface.ROTATION_0 -> "ROTATION_0"
+                Surface.ROTATION_90 -> "ROTATION_90"
+                Surface.ROTATION_180 -> "ROTATION_180"
+                Surface.ROTATION_270 -> "ROTATION_270"
+                else -> "UNKNOWN"
+            })
+    }
+
+    private fun gestureWindow(scenario: ActivityScenario<MainActivity>, diagnostic: GestureDiagnostic): GestureWindow {
         var window: GestureWindow? = null
+        val lifecycle = scenarioState(scenario)
         scenario.onActivity { activity ->
+            diagnostic.deviceState = captureDeviceState(activity, lifecycle)
             val webView = activity.bridge.webView
             val location = IntArray(2)
             webView.getLocationOnScreen(location)
@@ -215,7 +280,7 @@ class CloudWebViewHarness {
     ): GestureWindow {
         val readiness = GestureReadiness()
         while (System.nanoTime() < deadline) {
-            val window = gestureWindow(scenario)
+            val window = gestureWindow(scenario, diagnostic)
             diagnostic.windowState = window.json()
             val now = System.nanoTime()
             if (now >= deadline) break
@@ -266,7 +331,7 @@ class CloudWebViewHarness {
             }
             try {
                 if (diagnostic.exceptionKind == "none") {
-                    val window = gestureWindow(scenario)
+                    val window = gestureWindow(scenario, diagnostic)
                     diagnostic.windowState = window.json()
                     if (action == MotionEvent.ACTION_DOWN && (!window.isReady() || !window.sameGeometry(readyWindow) ||
                             System.nanoTime() >= readinessDeadline)) {

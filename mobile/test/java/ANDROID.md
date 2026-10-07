@@ -108,6 +108,15 @@ Before any gesture's DOWN, the native harness also requires the app's actual
 window focus, attached/visible WebView and stable geometry for 350 ms. This
 read-only preparation is bounded to 10 s and the existing harness deadline;
 it never requests focus or retries a dispatched gesture.
+Before filling either harness's connection form, the runner reads fixed native
+power, display, keyguard and lifecycle state. Unknown or secure lock state
+fails closed. Only an observed sleeping device receives the normal WAKEUP key,
+and only an observed nonsecure keyguard receives MENU; prepared state must be
+awake, display-on and unlocked within 10 s and the original harness deadline.
+Initial and prepared states enter the success/failure report as fixed values,
+without window titles or raw dumps. The test APK's visible Activity uses
+`FLAG_KEEP_SCREEN_ON` during interaction; it adds no wake-lock permission and
+allows normal screen timeout when backgrounded. The production app is unchanged.
 After real clipboard-copy equality is verified, the runner waits up to 10 s
 for Android's `ClipboardOverlay` window to disappear naturally and remain
 absent for 350 ms before touching EndSelection. It uses the same app-targeted
