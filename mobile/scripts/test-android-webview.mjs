@@ -114,6 +114,8 @@ export async function webviewAcceptance (android, fixture) {
                             geometryStable: window.__tabbyCloudObservation?.scroll?.geometryStable === true,
                             earlierHistory: window.__tabbyCloudObservation?.scroll?.earlierHistory === true },
                         nativeTouch: geometry(window.__tabbyCloudObservation?.lastNativeTouch),
+                        clipboardOverlay: { observed: window.__tabbyCloudObservation?.clipboardOverlay?.observed === true,
+                            cleared: window.__tabbyCloudObservation?.clipboardOverlay?.cleared === true },
                     }
                 })
             } catch { result.domUnavailable = true }
@@ -434,6 +436,29 @@ export async function webviewAcceptance (android, fixture) {
         await step('selection-copy-native-touch', () => nativeTouch(page.getByRole('button', { name: '复制', exact: true })))
         const copied = await step('selection-read-system-clipboard', () => plugin('readClipboard'))
         check(copied.text === selected, 'ANDROID_SYSTEM_CLIPBOARD_COPY_MISMATCH')
+        await step('clipboard-system-overlay-cleared', async () => {
+            // Android's real copy preview temporarily covers EndSelection.
+            // Keep injection confined to the app by waiting for its natural
+            // timeout before the original native touch; never retry dispatch.
+            let observed = false
+            let clearSince
+            const deadline = Date.now() + 10000
+            const inTime = () => check(Date.now() < deadline, 'ANDROID_CLIPBOARD_OVERLAY_DID_NOT_DISAPPEAR')
+            await until(async () => {
+                inTime()
+                let windows
+                try { windows = await android.windows(Math.min(5000, deadline - Date.now())) }
+                catch (error) { inTime(); throw error }
+                inTime()
+                check(windows.appWindowFound && windows.appWindowVisible, 'ANDROID_CLIPBOARD_APP_WINDOW_UNAVAILABLE')
+                if (windows.clipboardOverlayVisible) { observed = true; clearSince = undefined }
+                else if (clearSince === undefined) { clearSince = Date.now() }
+                const cleared = clearSince !== undefined && Date.now() - clearSince >= 350
+                await page.evaluate(value => { window.__tabbyCloudObservation.clipboardOverlay = value }, { observed, cleared })
+                inTime()
+                return cleared
+            }, 'ANDROID_CLIPBOARD_OVERLAY_DID_NOT_DISAPPEAR', 10000)
+        })
         await step('selection-end-native-touch', () => nativeTouch(page.getByRole('button', { name: '结束选择', exact: true })))
         await step('clipboard-paste-native-touch', () => nativeTouch(page.getByRole('button', { name: '粘贴', exact: true })))
         await step('clipboard-focus-input-native-touch', () => nativeTouch(page.getByRole('button', { name: '键盘', exact: true })))

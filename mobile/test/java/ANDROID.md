@@ -80,6 +80,14 @@ must remain stable for at least 350 ms with quiet SSH output; the same geometry
 must hold after the gesture. Its failure diagnostics contain only pointer
 type, trust flag, numeric coordinates, scrollbar geometry and readiness/change
 booleans; visible terminal contents remain inside the WebView for comparison.
+Every native button touch first requires 350 ms of stable target bounds,
+native/browser viewport and IME state, with its tap point inside the WebView.
+After real clipboard-copy equality is verified, the runner waits up to 10 s
+for Android's `ClipboardOverlay` window to disappear naturally and remain
+absent for 350 ms before touching EndSelection. It uses the same app-targeted
+MotionEvent without dispatch retries, system-window injection or permission
+changes. Window diagnostics return fixed booleans; raw window dumps stay in
+memory and never enter logs or artifacts.
 
 `--native-only` and `--webview-only` support focused reruns, and explicitly mark
 their partial scope in the report. The default runs both phases.

@@ -154,10 +154,10 @@ export class Android {
         return result.code === 0 ? result.stdout.trim() : undefined
     }
 
-    async windows () {
+    async windows (timeout = 5000) {
         // This is the explicitly selected disposable emulator. The raw dump
         // stays in memory and is never included in output or artifacts.
-        return windowState(await this.shell('dumpsys window windows', { timeout: 5000 }))
+        return windowState(await this.shell('dumpsys window windows', { timeout }))
     }
 
     async input (command) {
