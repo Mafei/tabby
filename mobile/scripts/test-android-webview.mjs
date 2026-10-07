@@ -116,6 +116,7 @@ export async function webviewAcceptance (android, fixture) {
                             earlierHistory: window.__tabbyCloudObservation?.scroll?.earlierHistory === true },
                         nativeTouch: geometry(window.__tabbyCloudObservation?.lastNativeTouch),
                         nativeTouchHitTarget: window.__tabbyCloudObservation?.nativeTouchHitTarget === true,
+                        nativeTouchDocumentFocused: window.__tabbyCloudObservation?.nativeTouchDocumentFocused === true,
                         clipboardOverlay: { observed: window.__tabbyCloudObservation?.clipboardOverlay?.observed === true,
                             cleared: window.__tabbyCloudObservation?.clipboardOverlay?.cleared === true,
                             phase: ['command', 'selection'].includes(window.__tabbyCloudObservation?.clipboardOverlay?.phase)
@@ -149,7 +150,10 @@ export async function webviewAcceptance (android, fixture) {
     async function nativeTouch (locator, durationMs = 100) {
         const deadline = Date.now() + 10000
         const inTime = () => check(Date.now() < deadline, 'ANDROID_TOUCH_TARGET_DID_NOT_STABILIZE')
-        await page.evaluate(() => { window.__tabbyCloudObservation.nativeTouchHitTarget = false })
+        await page.evaluate(() => {
+            window.__tabbyCloudObservation.nativeTouchHitTarget = false
+            window.__tabbyCloudObservation.nativeTouchDocumentFocused = false
+        })
         inTime()
         // Prepare visibility only. Activation remains the one real native
         // MotionEvent below; a viewport-inside box can still be panel-clipped.
@@ -163,18 +167,22 @@ export async function webviewAcceptance (android, fixture) {
             const [bounds, native, visual] = await Promise.all([
                 locator.boundingBox(), viewport(),
                 page.evaluate(() => ({ viewportWidth: innerWidth, viewportHeight: innerHeight,
-                    visualHeight: window.visualViewport?.height || innerHeight })),
+                    visualHeight: window.visualViewport?.height || innerHeight, documentFocused: document.hasFocus() })),
             ])
             inTime()
             if (!bounds || bounds.width <= 0 || bounds.height <= 0) { previous = undefined; stableSince = Date.now(); return false }
             const state = { ...bounds, ...visual, nativeViewportWidth: native.viewportWidth,
                 nativeViewportHeight: native.viewportHeight, nativeKeyboardVisible: native.visible }
-            await page.evaluate(value => { window.__tabbyCloudObservation.lastNativeTouch = value }, state)
+            await page.evaluate(value => {
+                window.__tabbyCloudObservation.lastNativeTouch = value
+                window.__tabbyCloudObservation.nativeTouchDocumentFocused = value.documentFocused === true
+            }, state)
             const serialized = JSON.stringify(state)
             const centerX = bounds.x + bounds.width / 2
             const centerY = bounds.y + bounds.height / 2
             const inside = centerX >= 0 && centerY >= 0 && centerX < native.viewportWidth && centerY < native.viewportHeight
-            const hitTarget = inside && await locator.evaluate((element, point) => element.contains(document.elementFromPoint(point.x, point.y)), { x: centerX, y: centerY })
+            const hitTarget = inside && visual.documentFocused === true && await locator.evaluate((element, point) =>
+                document.hasFocus() && element.contains(document.elementFromPoint(point.x, point.y)), { x: centerX, y: centerY })
             inTime()
             await page.evaluate(value => { window.__tabbyCloudObservation.nativeTouchHitTarget = value }, hitTarget)
             inTime()

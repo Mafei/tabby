@@ -163,7 +163,7 @@ export class Android {
     async input (command) {
         const commandNames = new Map([['touch', 'TOUCH'], ['swipe', 'SWIPE'], ['compose', 'COMPOSE'], ['commit', 'COMMIT'],
             ['composeStart', 'COMPOSE_START'], ['composeUpdate', 'COMPOSE_UPDATE'], ['composeFinish', 'COMPOSE_FINISH'], ['deleteBackward', 'DELETE_BACKWARD']])
-        const reasons = new Set(['invalid_command', 'gesture_validation', 'gesture_dispatch', 'input_connection_missing', 'input_dispatch',
+        const reasons = new Set(['invalid_command', 'gesture_validation', 'gesture_readiness', 'gesture_dispatch', 'input_connection_missing', 'input_dispatch',
             'set_composing_rejected', 'finish_composing_rejected', 'commit_rejected', 'delete_rejected', 'ok'])
         check(commandNames.has(command.type), 'ANDROID_NATIVE_INPUT_UNKNOWN_COMMAND')
         this.lastInput = { command: commandNames.get(command.type), reason: 'PENDING' }

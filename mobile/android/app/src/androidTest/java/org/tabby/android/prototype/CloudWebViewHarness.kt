@@ -24,6 +24,7 @@ class CloudWebViewHarness {
         OK("ok"),
         INVALID_COMMAND("invalid_command"),
         GESTURE_VALIDATION("gesture_validation"),
+        GESTURE_READINESS("gesture_readiness"),
         GESTURE_DISPATCH("gesture_dispatch"),
         INPUT_CONNECTION_MISSING("input_connection_missing"),
         INPUT_DISPATCH("input_dispatch"),
@@ -51,6 +52,36 @@ class CloudWebViewHarness {
         }
 
         fun json(): JSONObject = windowState.put("action", action).put("exceptionKind", exceptionKind)
+    }
+
+    private data class GestureWindow(
+        val windowFocused: Boolean, val webViewFocused: Boolean, val attached: Boolean, val shown: Boolean,
+        val width: Int, val height: Int, val originX: Int, val originY: Int, val density: Float,
+        val imeVisible: Boolean, val imeBottom: Int,
+    ) {
+        fun isReady(): Boolean = windowFocused && attached && shown && width > 0 && height > 0 &&
+            density.isFinite() && density > 0
+
+        fun sameGeometry(other: GestureWindow): Boolean = width == other.width && height == other.height &&
+            originX == other.originX && originY == other.originY && density == other.density &&
+            imeVisible == other.imeVisible && imeBottom == other.imeBottom
+
+        fun json(): JSONObject = JSONObject().put("windowFocused", windowFocused).put("webViewFocused", webViewFocused)
+            .put("attached", attached).put("shown", shown).put("width", width).put("height", height)
+            .put("originX", originX).put("originY", originY).put("density", if (density.isFinite()) density else 0f)
+            .put("imeVisible", imeVisible).put("imeBottom", imeBottom)
+    }
+
+    private class GestureReadiness {
+        private var previous: GestureWindow? = null
+        private var stableSince = 0L
+
+        fun observe(window: GestureWindow, now: Long): Boolean {
+            val last = previous
+            if (!window.isReady() || last == null || !last.isReady() || !window.sameGeometry(last)) stableSince = now
+            previous = window
+            return window.isReady() && now - stableSince >= 350_000_000L
+        }
     }
 
     @Test fun holdTheRealAppForCloudInteraction() {
@@ -87,7 +118,7 @@ class CloudWebViewHarness {
                             commandType = type
                             if (type in setOf("touch", "swipe")) {
                                 reason = InputReason.GESTURE_VALIDATION
-                                executeGesture(scenario, command, gesture) { reason = InputReason.GESTURE_DISPATCH }
+                                executeGesture(scenario, command, gesture, deadline) { reason = it }
                                 ok = true
                             } else {
                                 reason = InputReason.INPUT_DISPATCH
@@ -163,33 +194,63 @@ class CloudWebViewHarness {
         }
     }
 
+    private fun gestureWindow(scenario: ActivityScenario<MainActivity>): GestureWindow {
+        var window: GestureWindow? = null
+        scenario.onActivity { activity ->
+            val webView = activity.bridge.webView
+            val location = IntArray(2)
+            webView.getLocationOnScreen(location)
+            val insets = ViewCompat.getRootWindowInsets(activity.window.decorView)
+            window = GestureWindow(activity.window.decorView.hasWindowFocus(), webView.hasFocus(),
+                webView.isAttachedToWindow, webView.isShown, webView.width, webView.height,
+                location[0], location[1], activity.resources.displayMetrics.density,
+                insets?.isVisible(WindowInsetsCompat.Type.ime()) ?: false,
+                insets?.getInsets(WindowInsetsCompat.Type.ime())?.bottom ?: 0)
+        }
+        return checkNotNull(window)
+    }
+
+    private fun awaitGestureWindow(
+        scenario: ActivityScenario<MainActivity>, diagnostic: GestureDiagnostic, deadline: Long,
+    ): GestureWindow {
+        val readiness = GestureReadiness()
+        while (System.nanoTime() < deadline) {
+            val window = gestureWindow(scenario)
+            diagnostic.windowState = window.json()
+            val now = System.nanoTime()
+            if (now >= deadline) break
+            if (readiness.observe(window, now)) return window
+            val remaining = deadline - System.nanoTime()
+            if (remaining <= 0) break
+            Thread.sleep(minOf(50L, remaining / 1_000_000L).coerceAtLeast(1L))
+        }
+        error("Gesture window readiness deadline expired")
+    }
+
     private fun executeGesture(
         scenario: ActivityScenario<MainActivity>, command: JSONObject,
-        diagnostic: GestureDiagnostic, onValidated: () -> Unit,
+        diagnostic: GestureDiagnostic, originalDeadline: Long, onPhase: (InputReason) -> Unit,
     ) {
         val type = command.getString("type")
         val duration = command.optInt("durationMs", if (type == "touch") 60 else 300)
         require(duration in 1..1500)
-        var density = 1f
-        var width = 0
-        var height = 0
-        val origin = IntArray(2)
-        scenario.onActivity {
-            density = it.resources.displayMetrics.density
-            width = it.bridge.webView.width
-            height = it.bridge.webView.height
-            it.bridge.webView.getLocationOnScreen(origin)
-        }
+        onPhase(InputReason.GESTURE_READINESS)
+        // Reserve the requested gesture duration inside the unchanged harness
+        // deadline. Waiting observes the real window; it never requests focus.
+        val readinessDeadline = minOf(originalDeadline - duration * 1_000_000L, System.nanoTime() + 10_000_000_000L)
+        val readyWindow = awaitGestureWindow(scenario, diagnostic, readinessDeadline)
+        onPhase(InputReason.GESTURE_VALIDATION)
         fun point(xField: String, yField: String): Pair<Float, Float> {
             val x = command.getDouble(xField)
             val y = command.getDouble(yField)
             require(x.isFinite() && y.isFinite() && x >= 0 && y >= 0)
-            require(x * density < width && y * density < height)
-            return Pair(origin[0] + x.toFloat() * density, origin[1] + y.toFloat() * density)
+            require(x * readyWindow.density < readyWindow.width && y * readyWindow.density < readyWindow.height)
+            return Pair(readyWindow.originX + x.toFloat() * readyWindow.density,
+                readyWindow.originY + y.toFloat() * readyWindow.density)
         }
         val from = if (type == "touch") point("x", "y") else point("fromX", "fromY")
         val to = if (type == "touch") from else point("toX", "toY")
-        onValidated()
+        onPhase(InputReason.GESTURE_DISPATCH)
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val downTime = SystemClock.uptimeMillis()
         var current = from
@@ -205,23 +266,12 @@ class CloudWebViewHarness {
             }
             try {
                 if (diagnostic.exceptionKind == "none") {
-                    scenario.onActivity { activity ->
-                        val webView = activity.bridge.webView
-                        val location = IntArray(2)
-                        webView.getLocationOnScreen(location)
-                        val insets = ViewCompat.getRootWindowInsets(activity.window.decorView)
-                        val ime = insets?.getInsets(WindowInsetsCompat.Type.ime())
-                        val nativeDensity = activity.resources.displayMetrics.density
-                        diagnostic.windowState = JSONObject()
-                            .put("windowFocused", activity.window.decorView.hasWindowFocus())
-                            .put("webViewFocused", webView.hasFocus())
-                            .put("attached", webView.isAttachedToWindow)
-                            .put("shown", webView.isShown)
-                            .put("width", webView.width).put("height", webView.height)
-                            .put("originX", location[0]).put("originY", location[1])
-                            .put("density", if (nativeDensity.isFinite()) nativeDensity else 0f)
-                            .put("imeVisible", insets?.isVisible(WindowInsetsCompat.Type.ime()) ?: false)
-                            .put("imeBottom", ime?.bottom ?: 0)
+                    val window = gestureWindow(scenario)
+                    diagnostic.windowState = window.json()
+                    if (action == MotionEvent.ACTION_DOWN && (!window.isReady() || !window.sameGeometry(readyWindow) ||
+                            System.nanoTime() >= readinessDeadline)) {
+                        onPhase(InputReason.GESTURE_READINESS)
+                        error("Gesture window changed before DOWN")
                     }
                 }
                 // The short obtain overload leaves toolType UNKNOWN. WebView uses
@@ -244,6 +294,10 @@ class CloudWebViewHarness {
                 )
                 check(event.getToolType(0) == MotionEvent.TOOL_TYPE_FINGER)
                 check(event.isFromSource(InputDevice.SOURCE_TOUCHSCREEN))
+                if (action == MotionEvent.ACTION_DOWN && System.nanoTime() >= readinessDeadline) {
+                    onPhase(InputReason.GESTURE_READINESS)
+                    error("Gesture window readiness deadline expired before DOWN")
+                }
                 instrumentation.sendPointerSync(event)
             } catch (error: Throwable) {
                 diagnostic.recordFailure(error)

@@ -97,6 +97,10 @@ it, then requires 350 ms of stable target bounds, native/browser viewport and
 IME state. Its tap point must be inside the WebView and `elementFromPoint`
 must hit the target or its descendant, preventing clipped-form taps. Activation
 uses one actual app-targeted MotionEvent, with no DOM click or dispatch retry.
+Before any gesture's DOWN, the native harness also requires the app's actual
+window focus, attached/visible WebView and stable geometry for 350 ms. This
+read-only preparation is bounded to 10 s and the existing harness deadline;
+it never requests focus or retries a dispatched gesture.
 After real clipboard-copy equality is verified, the runner waits up to 10 s
 for Android's `ClipboardOverlay` window to disappear naturally and remain
 absent for 350 ms before touching EndSelection. It uses the same app-targeted
