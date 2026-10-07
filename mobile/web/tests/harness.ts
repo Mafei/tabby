@@ -14,12 +14,13 @@ export class TestBridge implements SSHBridge {
     readonly closed: string[] = []
     clipboard = ''
     holdStart = false
+    rejectStart = false
     holdCommand = false
     holdClipboard = false
     holdPicker = false
     discardedKeys: string[] = []
     nextDataSequence = 0
-    private startResolvers: (() => void)[] = []
+    private startResolvers: { resolve: () => void, reject: (error: Error) => void }[] = []
     private commandResolvers: (() => void)[] = []
     private clipboardResolvers: ((value: { text: string }) => void)[] = []
     private pickerResolvers: ((value: { keyId: string, label: string }) => void)[] = []
@@ -28,7 +29,8 @@ export class TestBridge implements SSHBridge {
     async start(options: SSHStart): Promise<{ connectionId: string }> {
         const connectionId = `test-${this.starts.length + 1}`
         this.starts.push({ ...options, connectionId })
-        if (this.holdStart) { await new Promise<void>(resolve => this.startResolvers.push(resolve)) }
+        if (this.rejectStart) { throw new Error('Test start rejection') }
+        if (this.holdStart) { await new Promise<void>((resolve, reject) => this.startResolvers.push({ resolve, reject })) }
         return { connectionId }
     }
     async command(options: { connectionId: string, command: SSHCommand }): Promise<void> {
@@ -42,7 +44,8 @@ export class TestBridge implements SSHBridge {
     }
     emit(event: SSHEvent): void { this.listeners.get('sshEvent')?.forEach(listener => listener(event as never)) }
     nativeEvent(name: string, event: unknown): void { this.listeners.get(name)?.forEach(listener => listener(event as never)) }
-    resolveStarts(): void { this.startResolvers.splice(0).forEach(resolve => resolve()) }
+    resolveStarts(): void { this.startResolvers.splice(0).forEach(item => item.resolve()) }
+    rejectStarts(): void { this.startResolvers.splice(0).forEach(item => item.reject(new Error('Delayed start rejection'))) }
     resolveCommands(): void { this.commandResolvers.splice(0).forEach(resolve => resolve()) }
     resolveClipboards(text: string): void { this.clipboardResolvers.splice(0).forEach(resolve => resolve({ text })) }
     resolvePickers(keyId: string): void { this.pickerResolvers.splice(0).forEach(resolve => resolve({ keyId, label: 'picked.pem' })) }

@@ -254,6 +254,7 @@ export class AppComponent implements AfterViewInit, OnDestroy {
         if (invalidatePicker) { ++this.pickerToken }
         ++this.generation
         const connectionId = this.connectionId; this.connectionId = undefined
+        const keyId = this.keyId
         this.auth = undefined; this.password = ''; this.passphrase = ''; this.prompts = []; this.authInstructions = ''; this.events = []
         this.keyId = ''; this.keyLabel = ''; this.requestId = undefined; this.modal = undefined
         this.busy = false; this.connected = false; this.statusText = '未连接'; this.ctrlHeld = false
@@ -262,6 +263,9 @@ export class AppComponent implements AfterViewInit, OnDestroy {
         this.inputElement?.nativeElement.blur()
         this.input?.cancel()
         this.inputEpochs = [this.generation]
+        // start can reject or cancellation can precede its returned connection
+        // ID. Release imported material independently of transport cleanup.
+        if (keyId) { void this.bridge.discardPrivateKey({ keyId }).catch(() => {}) }
         if (connectionId) { void this.bridge.close({ connectionId }).catch(() => {}) }
     }
 
