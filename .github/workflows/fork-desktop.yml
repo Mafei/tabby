@@ -36,6 +36,7 @@ jobs:
       - name: Native and integration dependencies
         run: sudo apt-get update && sudo apt-get install -y libfontconfig1-dev libsecret-1-dev libx11-dev tmux
       - name: Install
+        id: install
         run: |
           npm install -g yarn@1.22.22
           yarn --frozen-lockfile --network-timeout 1000000
@@ -43,9 +44,26 @@ jobs:
         env:
           TABBY_TEST_TMUX: '1'
       - run: yarn test:unit
+        if: always() && steps.install.outcome == 'success'
       - run: yarn build:typings
+        id: typings
+        if: always() && steps.install.outcome == 'success'
       - run: yarn lint
+        id: lint
+        if: always() && steps.install.outcome == 'success'
       - run: yarn build
+        if: always() && steps.typings.outcome == 'success'
+      - name: Collect fixable lint diagnostics (not validation)
+        if: failure() && steps.lint.outcome == 'failure'
+        run: |
+          yarn eslint --fix tabby-ssh/src/components/sshTab.component.ts tabby-ssh/src/components/tmuxSelectModal.component.ts tabby-ssh/src/session/tmux.ts tabby-ssh/src/session/reconnect.ts tabby-ssh/src/session/shell.ts tabby-ssh/src/session/ssh.ts tabby-ssh/src/services/tmuxTabs.service.ts || true
+          git diff --binary > lint-fixes.patch
+      - uses: actions/upload-artifact@v4
+        if: failure() && steps.lint.outcome == 'failure'
+        with:
+          name: lint-fixes
+          path: lint-fixes.patch
+          retention-days: 3
   desktop:
     if: github.repository == 'Mafei/tabby'
     needs: checks

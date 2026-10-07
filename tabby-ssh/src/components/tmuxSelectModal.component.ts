@@ -21,6 +21,7 @@ export interface TmuxSelection {
             <input *ngIf="socket.kind !== 'default'" class="form-control" [(ngModel)]="socket.value" (ngModelChange)="socketChanged()" [disabled]="busy || restoring" placeholder="Socket name or path">
             <button class="btn btn-secondary mt-2" (click)="refresh()" [disabled]="busy">Refresh sessions</button>
             <p *ngIf="error" class="text-danger mt-2">{{error}}</p>
+            <p *ngIf="!canBind">tmux recovery requires host-key verification. Ordinary SSH remains available.</p>
             <p *ngIf="!available">tmux is unavailable. Nothing will be installed on this host.</p>
             <p *ngIf="available && !sessions.length">No sessions on this socket.</p>
             <select *ngIf="sessions.length" class="form-control mt-2" [(ngModel)]="selected" [disabled]="busy">
@@ -30,8 +31,8 @@ export interface TmuxSelection {
             <select class="form-control mt-2" [(ngModel)]="action" [disabled]="busy">
                 <option value="share">Shared</option><option value="readonly">Read-only</option><option value="takeover">Explicit takeover</option>
             </select>
-            <button class="btn btn-primary mt-2" (click)="attach()" [disabled]="busy || !selected">Attach selected session</button>
-            <div *ngIf="available && !restoring" class="mt-3">
+            <button class="btn btn-primary mt-2" (click)="attach()" [disabled]="busy || !selected || !canBind">Attach selected session</button>
+            <div *ngIf="available && canBind && !restoring" class="mt-3">
                 <input class="form-control" [(ngModel)]="name" [disabled]="busy" placeholder="New session name">
                 <button class="btn btn-primary mt-2" (click)="create()" [disabled]="busy || !name">Create new session</button>
             </div>
@@ -49,6 +50,7 @@ export class TmuxSelectModalComponent {
     name = ''
     busy = false
     available = true
+    canBind = true
     restoring = false
     error = ''
     load: () => Promise<TmuxSessionInfo[]>

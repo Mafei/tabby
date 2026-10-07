@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { execFile, execFileSync } from 'node:child_process'
 import { promisify } from 'node:util'
 import { test } from 'node:test'
-import { assertBinding, attachCommand, bindingKey, createCommand, framedExec, listCommand, parseSessionList, sameSession, shellQuote, tmuxCommand, validateSessionName, TmuxTabRegistry, tmuxRecoveryState } from '../src/session/tmux.ts'
+import { assertBinding, attachCommand, bindingKey, createCommand, framedExec, listCommand, parseSessionList, sameSession, shellQuote, tmuxCommand, validateSessionName, runSSHExec, TmuxTabRegistry, tmuxRecoveryState } from '../src/session/tmux.ts'
 import type { ExecChannel, ExecObservable, TmuxBinding, TmuxSocket } from '../src/session/tmux.ts'
 import { SSHReconnectController, shouldRetrySSH } from '../src/session/reconnect.ts'
 
@@ -223,4 +223,19 @@ test('only transport failure retries; detach/takeover, EOF, local unref and user
 test('missing tmux produces explicit unavailable status through the exec protocol', async () => {
     const mock = fakeChannel(executeLocal)
     assert.equal((await framedExec(mock.channel, `PATH=/nonexistent; ${listCommand(binding.selector)}`, new AbortController().signal)).status, 127)
+})
+
+
+test('cancel during channel acquisition closes a late channel without executing', async () => {
+    const controller = new AbortController()
+    let resolve: (channel: ExecChannel) => void = () => undefined
+    let executed = false
+    const mock = fakeChannel(async () => { executed = true })
+    const pending = runSSHExec(() => new Promise(r => { resolve = r }), '', controller.signal)
+    controller.abort()
+    await assert.rejects(pending, /cancelled/u)
+    resolve(mock.channel)
+    await Promise.resolve()
+    assert.equal(mock.closes(), 1)
+    assert.equal(executed, false)
 })

@@ -261,3 +261,23 @@ export class TmuxTabRegistry<T> {
 export function tmuxRecoveryState (binding: TmuxBinding|null, ordinarySSH: boolean, includeState = false): { tmuxBinding?: TmuxBinding|null; ordinarySSH?: boolean } {
     return includeState ? { tmuxBinding: binding, ordinarySSH } : {}
 }
+
+/** Bound acquisition as well as execution; close late channels after timeout/cancel. */
+export async function runSSHExec (open: () => Promise<ExecChannel>, script: string, signal: AbortSignal): Promise<ExecResult> {
+    const channel = await new Promise<ExecChannel>((resolve, reject) => {
+        let settled = false
+        const finish = (error?: Error, acquired?: ExecChannel) => {
+            if (settled) { acquired?.close().catch(() => undefined); return }
+            settled = true
+            clearTimeout(timer)
+            signal.removeEventListener('abort', abort)
+            if (error) { reject(error) } else { resolve(acquired!) }
+        }
+        const abort = () => finish(new TmuxError('SSH command channel cancelled'))
+        const timer = setTimeout(() => finish(new TmuxError('SSH command channel timed out')), 10000)
+        signal.addEventListener('abort', abort, { once: true })
+        if (signal.aborted) { abort(); return }
+        open().then(acquired => finish(undefined, acquired), error => finish(new TmuxError(String(error))))
+    })
+    return framedExec(channel, script, signal)
+}

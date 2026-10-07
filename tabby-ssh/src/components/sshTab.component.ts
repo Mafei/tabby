@@ -3,7 +3,7 @@ import { marker as _ } from '@biesbjerg/ngx-translate-extract-marker'
 import colors from 'ansi-colors'
 import { Component, Injector, HostListener, Input } from '@angular/core'
 import { NgbModal } from '@ng-bootstrap/ng-bootstrap'
-import { AppService, TabRecoveryService, GetRecoveryTokenOptions, Platform, ProfilesService, RecoveryToken } from 'tabby-core'
+import { TabRecoveryService, GetRecoveryTokenOptions, Platform, ProfilesService, RecoveryToken } from 'tabby-core'
 import { BaseTerminalTabComponent, ConnectableTerminalTabComponent } from 'tabby-terminal'
 import { SSHService } from '../services/ssh.service'
 import { KeyboardInteractivePrompt, SSHSession, SSHTransportError } from '../session/ssh'
@@ -12,7 +12,7 @@ import { SSHProfile } from '../api'
 import { SSHShellSession } from '../session/shell'
 import { SSHMultiplexerService } from '../services/sshMultiplexer.service'
 import { randomUUID } from 'node:crypto'
-import { assertBinding, createCommand, framedExec, listCommand, parseSessionList, sameSession, TmuxBinding, TmuxError, TmuxSessionInfo, TmuxSocket, tmuxRecoveryState } from '../session/tmux'
+import { assertBinding, createCommand, runSSHExec, listCommand, parseSessionList, sameSession, TmuxBinding, TmuxError, TmuxSessionInfo, TmuxSocket, tmuxRecoveryState } from '../session/tmux'
 import { SSHReconnectController, shouldRetrySSH } from '../session/reconnect'
 import { TmuxSelectModalComponent, TmuxSelection } from './tmuxSelectModal.component'
 import { TmuxTabsService } from '../services/tmuxTabs.service'
@@ -33,7 +33,7 @@ export class SSHTabComponent extends ConnectableTerminalTabComponent<SSHProfile>
     private connection = new SSHReconnectController()
     private connectedAt = 0
     private closing = false
-    private tabID = randomUUID()
+    private tabID: string = randomUUID()
     Platform = Platform
     sshSession: SSHSession|null = null
     session: SSHShellSession|null = null
@@ -49,7 +49,6 @@ export class SSHTabComponent extends ConnectableTerminalTabComponent<SSHProfile>
         private profilesService: ProfilesService,
         private sshMultiplexer: SSHMultiplexerService,
         private tmuxTabs: TmuxTabsService,
-        private app: AppService,
         private tabRecovery: TabRecoveryService,
     ) {
         super(injector)
@@ -199,6 +198,7 @@ export class SSHTabComponent extends ConnectableTerminalTabComponent<SSHProfile>
             if (intentional || !this.connection.current(generation) || this.closing || this.isDisconnectedByHand) { return }
             if (shouldRetrySSH(intentional, transport?.transportLost ?? false, shell?.endReason ?? 'local')) {
                 if (Date.now() - this.connectedAt > 30000) { this.connection.reset() }
+                if (this.ordinarySSH) { this.write('Ordinary SSH reconnect starts a new shell; it cannot recover the old process.\r\n') }
                 const delay = this.connection.schedule(() => { this.initializeSession(true) })
                 this.write(`\r\nSSH transport lost. Retrying in ${delay} ms. Disconnect cancels retry.\r\n`)
             } else {
@@ -209,8 +209,7 @@ export class SSHTabComponent extends ConnectableTerminalTabComponent<SSHProfile>
     }
 
     private async listTmux (ssh: SSHSession, socket: TmuxSocket, signal: AbortSignal): Promise<TmuxSessionInfo[]|null> {
-        const channel = await ssh.openExecChannel()
-        const result = await framedExec(channel, listCommand(socket), signal)
+        const result = await runSSHExec(() => ssh.openExecChannel(), listCommand(socket), signal)
         if (result.status === 127) { return null }
         if (result.status) { throw new TmuxError('Cannot enumerate this tmux socket/account') }
         return parseSessionList(result.output)
@@ -228,6 +227,7 @@ export class SSHTabComponent extends ConnectableTerminalTabComponent<SSHProfile>
         const ui = modal.componentInstance as TmuxSelectModalComponent
         const cancel = () => modal.dismiss('cancelled')
         signal.addEventListener('abort', cancel, { once: true })
+        ui.canBind = !!ssh.verifiedHostKey
         ui.restoring = !!this.tmuxBinding
         ui.socket = this.tmuxBinding ? { ...this.tmuxBinding.selector } : { kind: 'default', value: '' }
         ui.load = async () => {
@@ -241,8 +241,7 @@ export class SSHTabComponent extends ConnectableTerminalTabComponent<SSHProfile>
             return sessions ?? []
         }
         ui.make = async name => {
-            const channel = await ssh.openExecChannel()
-            const result = await framedExec(channel, createCommand(ui.socket, name, this.profile.options.cwd ?? undefined), signal)
+            const result = await runSSHExec(() => ssh.openExecChannel(), createCommand(ui.socket, name, this.profile.options.cwd ?? undefined), signal)
             if (result.status) { throw new TmuxError('tmux creation failed (duplicate name or server error). Refresh before retrying.') }
             const identity = result.output.trim().split(':')
             if (identity.length !== 4 || !/^\$\d+$/u.test(identity[2])) { throw new TmuxError('Invalid creation response; refresh before retrying') }
@@ -288,6 +287,12 @@ export class SSHTabComponent extends ConnectableTerminalTabComponent<SSHProfile>
                     host: this.profile.options.host, port: this.profile.options.port ?? 22,
                     account: ssh.authUsername, hostKey: ssh.verifiedHostKey,
                 })
+                const owner = this.tmuxTabs.claim(this.tmuxBinding, this)
+                if (owner !== this) {
+                    this.app.selectTab(this.app.getParentTab(owner) ?? owner)
+                    this.destroy()
+                    return
+                }
                 const sessions = await this.listTmux(ssh, this.tmuxBinding.selector, signal)
                 const match = sessions?.find(session => sameSession(this.tmuxBinding!, session))
                 if (!match) { throw new TmuxError('Saved tmux session is missing or was replaced; no session was created') }
