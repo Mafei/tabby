@@ -6,7 +6,6 @@ import errno
 import fcntl
 import json
 import os
-import pty
 import select
 import signal
 import struct
@@ -21,48 +20,74 @@ def resize(fd, rows, cols):
     fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack("HHHH", rows, cols, 0, 0))
 
 
-def terminate(pid):
+def signal_child(pid, sig):
     try:
-        os.killpg(pid, signal.SIGHUP)
+        os.killpg(pid, sig)
     except ProcessLookupError:
-        return
-    deadline = time.monotonic() + 0.5
+        # A cancellation can precede login_tty creating the child's group.
+        # The unreaped child is still ours, so its PID cannot have been reused.
+        try:
+            os.kill(pid, sig)
+        except ProcessLookupError:
+            pass
+
+
+def reap_until(pid, deadline):
     while time.monotonic() < deadline:
-        done, _ = os.waitpid(pid, os.WNOHANG)
+        try:
+            done, _ = os.waitpid(pid, os.WNOHANG)
+        except ChildProcessError:
+            return True
         if done:
-            return
+            return True
         time.sleep(0.01)
-    try:
-        os.killpg(pid, signal.SIGKILL)
-    except ProcessLookupError:
-        pass
-    try:
-        os.waitpid(pid, 0)
-    except ChildProcessError:
-        pass
+    return False
+
+
+def terminate(pid):
+    signal_child(pid, signal.SIGHUP)
+    if not reap_until(pid, time.monotonic() + 0.5):
+        signal_child(pid, signal.SIGKILL)
+        if not reap_until(pid, time.monotonic() + 0.5):
+            raise RuntimeError("PTY child did not terminate")
 
 
 def main():
     rows, cols = int(sys.argv[1]), int(sys.argv[2])
-    pid, master = pty.fork()
-    if pid == 0:
-        resize(0, rows, cols)
-        os.environ["PS1"] = "FIXTURE$ "
-        os.execv("/bin/sh", ["/bin/sh", "-i"])
-    resize(master, rows, cols)
-    # Only nonsecret lifecycle metadata goes to stderr.
-    sys.stderr.write(json.dumps({"type": "ptyReady", "pid": pid}) + "\n")
-    sys.stderr.flush()
-    pending = b""
     running = True
 
     def stop(_signal, _frame):
         nonlocal running
         running = False
 
+    # Node can send SIGTERM as soon as the helper is spawned. Install before
+    # fork so every parent-side startup cancellation reaches owned cleanup.
     signal.signal(signal.SIGTERM, stop)
     signal.signal(signal.SIGINT, stop)
+    master, slave = os.openpty()
     try:
+        # Initialize before either process can accept a later window-change.
+        resize(slave, rows, cols)
+        pid = os.fork()
+    except BaseException:
+        os.close(master)
+        os.close(slave)
+        raise
+    if pid == 0:
+        signal.signal(signal.SIGTERM, signal.SIG_DFL)
+        signal.signal(signal.SIGINT, signal.SIG_DFL)
+        os.close(master)
+        # Establish the session, controlling terminal and standard descriptors.
+        # login_tty also closes the original slave descriptor.
+        os.login_tty(slave)
+        os.environ["PS1"] = "FIXTURE$ "
+        os.execv("/bin/sh", ["/bin/sh", "-i"])
+    try:
+        os.close(slave)
+        # Only nonsecret lifecycle metadata goes to stderr.
+        sys.stderr.write(json.dumps({"type": "ptyReady", "pid": pid}) + "\n")
+        sys.stderr.flush()
+        pending = b""
         while running:
             readable, _, _ = select.select([master, sys.stdin.fileno()], [], [], 0.1)
             if master in readable:

@@ -12,6 +12,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.tabby.android.ssh.NativeSSH
 import java.util.ArrayDeque
+import java.io.ByteArrayOutputStream
 import java.io.File
 
 /** Uses the isolated repository fixture, never a user's SSH server or secret. */
@@ -90,12 +91,20 @@ class RealSSHBridgeTest {
     }
 
     private fun outputContains(id: Long, vararg texts: String) {
-        val output = StringBuilder()
+        val output = ByteArrayOutputStream()
+        val outputLimit = 1024 * 1024
         event(id) {
             if (it.optString("type") == "data") {
-                output.append(Base64.decode(it.getString("data"), Base64.DEFAULT).toString(Charsets.UTF_8))
+                val bytes = Base64.decode(it.getString("data"), Base64.DEFAULT)
+                if (bytes.size > outputLimit - output.size()) {
+                    fail("SSH fixture output exceeded the test limit")
+                }
+                output.write(bytes)
             }
-            texts.all { text -> output.contains(text) }
+            // SSH frames may split a UTF-8 code point. Retain its bytes so the
+            // next complete-buffer decode can recover it without replacements.
+            val text = output.toString(Charsets.UTF_8.name())
+            texts.all { text.contains(it) }
         }
     }
 
@@ -114,16 +123,18 @@ class RealSSHBridgeTest {
 
     @Test fun cancellingAnAuthenticationChallengeDoesNotBlockANewConnection() {
         val oldId = start(201)
-        val oldChallenge = event(oldId) { it.optString("type") == "hostKey" }
-        send(oldId, 201, JSONObject().put("type", "hostKeyResponse")
-            .put("requestId", oldChallenge.get("requestId")).put("accept", true))
-        val oldAuth = event(oldId) { it.optString("type") == "auth" }
-        NativeSSH.destroy(oldId)
         try {
-            send(oldId, 201, JSONObject().put("type", "authResponse").put("requestId", oldAuth.get("requestId"))
-                .put("password", metadata.getString("password")))
-            fail("Destroyed connection accepted an old authentication response")
-        } catch (_: IllegalStateException) { /* Expected stable JNI rejection. */ }
+            val oldChallenge = event(oldId) { it.optString("type") == "hostKey" }
+            send(oldId, 201, JSONObject().put("type", "hostKeyResponse")
+                .put("requestId", oldChallenge.get("requestId")).put("accept", true))
+            val oldAuth = event(oldId) { it.optString("type") == "auth" }
+            NativeSSH.destroy(oldId)
+            try {
+                send(oldId, 201, JSONObject().put("type", "authResponse").put("requestId", oldAuth.get("requestId"))
+                    .put("password", metadata.getString("password")))
+                fail("Destroyed connection accepted an old authentication response")
+            } catch (_: IllegalStateException) { /* Expected stable JNI rejection. */ }
+        } finally { NativeSSH.destroy(oldId) }
         pending.clear()
         val currentId = start(202)
         try { authenticate(currentId, 202) } finally { NativeSSH.destroy(currentId) }

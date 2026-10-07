@@ -51,6 +51,10 @@ accidental skips of a cloud harness:
 All seven selected instrumentation tests must pass with zero skips. Each of the
 two explicit WebView harness invocations must separately report exactly one
 passing test; partial test discovery fails the runner.
+The native Unicode assertion accumulates at most 1 MiB of raw SSH bytes before
+decoding so a character split across frames remains intact. Authentication
+cancellation always releases the old connection, including an earlier failed
+wait, while still rejecting the unanswered old challenge's response.
 
 The second phase invokes `CloudWebViewHarness` explicitly. Only its test APK
 temporarily enables WebView inspection while the real application is running;
@@ -83,6 +87,9 @@ DOM state, control counts, viewport dimensions, event types and fixture resource
 counts. It never includes input values, raw Playwright errors, authentication
 prompts, terminal output, HTML or screenshots. Form-control selection uses the
 actual select element because its wrapping label also contains the option text.
+Native instrumentation failures add only fixed known class/method labels,
+numeric status/counts and allowlisted error categories. Raw JUnit/adb output,
+assertion values and stack messages remain suppressed.
 The swipe gate waits for a fresh unique marker in both SSH output and parsed
 visible rows, with nonzero scrollback. It requires trusted WebView pointer
 events identified as touch, an actual xterm scrollbar-position change toward

@@ -44,6 +44,133 @@ async function until (condition, description, timeout = 5000) {
     throw new Error(`Timed out: ${description}`)
 }
 
+async function heldPTY (t, boundary) {
+    // The pipe gate and observations exist only in this regression wrapper.
+    // The fixture itself has no scheduling controls or test-only startup flags.
+    const program = `
+import importlib.util, json, os, pty, sys
+sys.dont_write_bytecode = True
+path, boundary = sys.argv[1:3]
+spec = importlib.util.spec_from_file_location("fixture_pty_regression", path)
+fixture = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(fixture)
+parent = os.getpid()
+metadata_fd = os.dup(2)
+def report(value):
+    # login_tty replaces stderr, so retain a private observation descriptor.
+    os.write(metadata_fd, (json.dumps(value) + "\\n").encode())
+def pause_child():
+    report({"type": "testChildPaused", "pid": os.getpid()})
+    if os.read(3, 1) != b"r":
+        os._exit(91)
+    os.close(3)
+original_login = os.login_tty
+def held_login(fd):
+    if boundary in ("before-login", "parent-return"):
+        pause_child()
+    original_login(fd)
+    if boundary == "after-login":
+        pause_child()
+os.login_tty = held_login
+original_os_fork = os.fork
+def held_os_fork():
+    pid = original_os_fork()
+    if pid == 0:
+        os.close(4)
+    elif boundary == "parent-return":
+        report({"type": "testParentPaused", "pid": pid})
+        if os.read(4, 1) != b"r":
+            os._exit(92)
+        os.close(4)
+    return pid
+os.fork = held_os_fork
+# Also gates the old forkpty implementation, allowing the same schedule to
+# demonstrate its post-fork initial resize overwriting the accepted new size.
+original_fork = pty.fork
+def held_fork():
+    result = original_fork()
+    if result[0] == 0:
+        pause_child()
+    return result
+pty.fork = held_fork
+original_resize = fixture.resize
+def observed_resize(fd, rows, cols):
+    original_resize(fd, rows, cols)
+    report({"type": "testResizeApplied", "rows": rows, "cols": cols,
+            "process": "parent" if os.getpid() == parent else "child"})
+fixture.resize = observed_resize
+sys.argv = [path, "24", "80"]
+fixture.main()
+`
+    const helper = fileURLToPath(new URL('../scripts/test-fixture-pty.py', import.meta.url))
+    const child = spawn('python3', ['-u', '-c', program, helper, boundary], { stdio: ['pipe', 'pipe', 'pipe', 'pipe', 'pipe'] })
+    const closed = once(child, 'close')
+    const events = []
+    const stderr = createInterface({ input: child.stderr })
+    stderr.on('line', line => {
+        try { events.push(JSON.parse(line)) } catch { /* Never print child stderr. */ }
+    })
+    let output = ''
+    child.stdout.setEncoding('utf8')
+    child.stdout.on('data', data => { output = (output + data).slice(-65536) })
+    t.after(async () => {
+        // Release a failed assertion's gate before stopping the owned helper.
+        for (const [index, gate] of child.stdio.slice(3).entries()) {
+            if (!gate.destroyed && !gate.writableEnded) {
+                gate.end(index === 0 || boundary === 'parent-return' ? 'r' : undefined)
+            }
+        }
+        if (!child.stdin.destroyed && !child.stdin.writableEnded) { child.stdin.end(`${JSON.stringify({ type: 'stop' })}\n`) }
+        if (child.exitCode === null && child.signalCode === null) { child.kill('SIGTERM') }
+        await Promise.race([closed, delay(2000)])
+        if (child.exitCode === null && child.signalCode === null) { child.kill('SIGKILL') }
+        await closed
+        stderr.close()
+    })
+    const readyEvent = boundary === 'parent-return' ? 'testParentPaused' : 'ptyReady'
+    await until(() => events.some(event => event.type === readyEvent) && events.some(event => event.type === 'testChildPaused'), 'gated real PTY startup')
+    return {
+        child, closed, events, output: () => output,
+        send: command => child.stdin.write(`${JSON.stringify(command)}\n`),
+    }
+}
+
+test('PTY startup cannot overwrite a newer resize while the child is paused', { timeout: 10000 }, async t => {
+    const terminal = await heldPTY(t, 'after-login')
+    terminal.send({ type: 'resize', rows: 31, cols: 99 })
+    await until(() => terminal.events.some(event => event.type === 'testResizeApplied' && event.rows === 31 && event.cols === 99), 'new size applied before child initialization resumes')
+    terminal.send({ type: 'input', data: Buffer.from("printf '__EARLY_SIZE__'; stty size; printf '__EARLY_SIZE_END__\\n'\n").toString('base64') })
+    terminal.child.stdio[3].end('r')
+    await until(() => /__EARLY_SIZE__(\d+) (\d+)\r?\n__EARLY_SIZE_END__/.test(terminal.output()), 'one real stty query after the gated initialization')
+    const size = terminal.output().match(/__EARLY_SIZE__(\d+) (\d+)\r?\n__EARLY_SIZE_END__/)
+    assert.deepEqual(size.slice(1).map(Number), [31, 99])
+    const initializations = terminal.events.filter(event => event.type === 'testResizeApplied' && event.rows === 24 && event.cols === 80)
+    assert.equal(initializations.length, 1)
+    assert.equal(initializations[0].process, 'parent')
+})
+
+test('PTY startup cancellation reaps a child before it creates its session', { timeout: 10000 }, async t => {
+    for (const boundary of ['before-login', 'parent-return']) {
+        const terminal = await heldPTY(t, boundary)
+        const pid = terminal.events.find(event => event.type === 'testChildPaused').pid
+        assert.equal(Number.isSafeInteger(pid) && pid > 0, true)
+        if (boundary === 'parent-return') {
+            // The real Node cancellation path: SIGTERM while parent fork has
+            // not returned, before metadata or control-loop startup. Keep the
+            // child's gate closed; the helper must reap it without assistance.
+            assert.equal(terminal.events.some(event => event.type === 'ptyReady'), false)
+            terminal.child.kill('SIGTERM')
+            terminal.child.stdio[4].end('r')
+        } else {
+            terminal.send({ type: 'stop' })
+        }
+        const [code, signal] = await terminal.closed
+        assert.equal(code, 0)
+        assert.equal(signal, null)
+        assert.throws(() => process.kill(pid, 0), { code: 'ESRCH' })
+    }
+})
+
 async function connect (metadata, options = {}) {
     const client = new Client()
     await new Promise((resolve, reject) => {
@@ -59,7 +186,7 @@ async function connect (metadata, options = {}) {
     return client
 }
 
-async function openTerminal (client) {
+async function openTerminal (client, { waitForPrompt = true } = {}) {
     const stream = await new Promise((resolve, reject) => {
         client.shell({ rows: 24, cols: 80, term: 'xterm-256color' }, (error, channel) => error ? reject(error) : resolve(channel))
     })
@@ -72,7 +199,7 @@ async function openTerminal (client) {
         output = output.slice(match.index + match[0].length)
         return match
     }
-    await wait(/FIXTURE\$ /)
+    if (waitForPrompt) { await wait(/FIXTURE\$ /) }
     return { stream, wait }
 }
 
@@ -108,12 +235,14 @@ test('isolated SSH fixture: protocol, real PTY and lifecycle controls', { timeou
     await t.test('password connects to real PTY: UTF-8, control bytes, and window-change', async () => {
         const client = await connect(metadata)
         try {
-            const terminal = await openTerminal(client)
-            terminal.stream.write("printf '__UTF8__%s__END__\\n' '中文🙂'\n")
-            await terminal.wait(/__UTF8__中文🙂__END__/u)
+            // Resize and query immediately after SSH shell-success, before a
+            // prompt or any child output can establish initialization ordering.
+            const terminal = await openTerminal(client, { waitForPrompt: false })
             terminal.stream.setWindow(31, 99, 0, 0)
             terminal.stream.write("printf '__SIZE__'; stty size; printf '__SIZE_END__\\n'\n")
             await terminal.wait(/__SIZE__31 99\r?\n__SIZE_END__/)
+            terminal.stream.write("printf '__UTF8__%s__END__\\n' '中文🙂'\n")
+            await terminal.wait(/__UTF8__中文🙂__END__/u)
 
             const bytes = Buffer.from('中文\x03\x1b\t\x1b[A\x1b[B\x1b[C\x1b[D')
             const program = [

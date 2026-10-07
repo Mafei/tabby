@@ -2,6 +2,11 @@
 
 This fixture uses `ssh2` for a real SSH server and Python's system PTY support
 to run `/bin/sh`. It listens only on `127.0.0.1` at a randomly allocated port.
+Python 3.11 or later is required for `os.login_tty`. Initial dimensions are
+set before forking, so shell startup cannot overwrite an accepted resize.
+Cancellation also stops the owned child before it establishes its PTY process
+group. The regression tests control that startup ordering without changing
+the fixture's protocol or adding a runtime delay option.
 Ed25519 test keys are serialized from Node crypto's fixed-width JWK public and
 seed bytes. This preserves leading zero bytes that ssh2 1.17's key generator
 incorrectly removes. Encrypted fixture keys retain OpenSSH bcrypt (16 rounds)

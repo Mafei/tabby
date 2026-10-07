@@ -194,13 +194,88 @@ export class Android {
     }
 }
 
+const instrumentationMethods = new Map([
+    [`${APP}.RealSSHBridgeTest`, new Set(['realConnectionTransfersUnicodeAndResizesTheRemotePTY',
+        'cancellingAnAuthenticationChallengeDoesNotBlockANewConnection', 'changedHostKeyIsRejectedBeforeAuthentication'])],
+    [`${APP}.AndroidHostKeyStoreTest`, new Set(['realCapacitorCallPreservesSmallAndLargeJavaScriptGenerations',
+        'savedPinCannotBeReplacedAndPortsRemainSeparate', 'failedCommitWithARealMutatedCacheRequiresFreshApproval'])],
+    [`${APP}.ViewportLifecycleTest`, new Set(['rotationPreservesTheBridgeAndRecomputesViewport'])],
+    [`${APP}.CloudWebViewHarness`, new Set(['holdTheRealAppForCloudInteraction'])],
+])
+const instrumentationKinds = new Map([
+    ['java.lang.AssertionError', 'AssertionError'], ['org.junit.ComparisonFailure', 'AssertionError'],
+    ['junit.framework.AssertionFailedError', 'AssertionError'], ['java.util.concurrent.TimeoutException', 'TimeoutException'],
+    ['java.lang.IllegalStateException', 'IllegalState'], ['java.lang.SecurityException', 'Security'],
+    ['java.lang.NullPointerException', 'NullPointer'],
+])
+
+function instrumentationDiagnostics (result, expectedTests) {
+    const integer = value => {
+        if (typeof value === 'string' && !/^-?\d{1,11}$/.test(value)) { return undefined }
+        const number = typeof value === 'number' ? value : typeof value === 'string' ? Number(value) : undefined
+        return Number.isInteger(number) && Math.abs(number) <= 2147483647 ? number : undefined
+    }
+    const stdout = typeof result.stdout === 'string' ? result.stdout : ''
+    const output = { exitCode: integer(result.code) ?? 'unknown', expectedTests: integer(expectedTests) ?? 'unknown',
+        declaredTests: 'unknown', reportedTests: 'unknown', statusCount: 0, negativeStatusCount: 0, statusCodes: [], tests: [] }
+    let current = {}
+    for (const line of stdout.split(/\r?\n/)) {
+        const field = line.match(/^INSTRUMENTATION_STATUS: (class|test|current|numtests|stack)=(.*)$/)
+        if (field) {
+            if (field[1] === 'class') { current.className = field[2] }
+            else if (field[1] === 'test') { current.methodName = field[2] }
+            else if (field[1] === 'current') { current.index = integer(field[2]) }
+            else if (field[1] === 'numtests') {
+                const count = integer(field[2])
+                if (count !== undefined && count >= 0) { output.declaredTests = count }
+            }
+        }
+        // Match exception headers only. A message containing an exception name
+        // must not affect the fixed kind, and no message or stack is returned.
+        const header = line.match(/^(?:INSTRUMENTATION_STATUS: stack=|Caused by: )([A-Za-z_$][A-Za-z0-9_.$]*)(?=:|$)/)
+        if (header && instrumentationKinds.has(header[1]) && !current.kind) {
+            current.kind = instrumentationKinds.get(header[1])
+        }
+        const status = line.match(/^INSTRUMENTATION_STATUS_CODE:\s*(-?\d+)\s*$/)
+        if (status) {
+            const code = integer(status[1])
+            if (code !== undefined) {
+                output.statusCount++
+                if (status[1].startsWith('-')) { output.negativeStatusCount++ }
+                output.statusCodes.push(code)
+                output.statusCodes = output.statusCodes.slice(-32)
+                const known = instrumentationMethods.get(current.className)
+                output.tests.push({ class: known ? current.className.slice(APP.length + 1) : 'unknown',
+                    method: known?.has(current.methodName) ? current.methodName : 'unknown', statusCode: code,
+                    kind: current.kind || 'other',
+                    ...(current.index !== undefined && current.index >= 0 ? { index: current.index } : {}) })
+                output.tests = output.tests.slice(-32)
+            }
+            current = {}
+        }
+    }
+    const tests = stdout.match(/OK \((\d+) tests?\)/)
+    const count = tests ? integer(tests[1]) : undefined
+    if (count !== undefined && count >= 0) { output.reportedTests = count }
+    return output
+}
+
 export function instrumentationResult (result, expectedTests) {
-    check(result.code === 0, 'INSTRUMENTATION_PROCESS_FAILED')
-    check(!/INSTRUMENTATION_STATUS_CODE:\s*-/.test(result.stdout), 'INSTRUMENTATION_FAILED_OR_SKIPPED')
-    const tests = result.stdout.match(/OK \((\d+) tests?\)/)
-    check(!!tests && Number(tests[1]) > 0, 'INSTRUMENTATION_DID_NOT_PASS')
+    const fail = code => {
+        const failure = new TestFailure(code)
+        failure.nativeInstrumentation = instrumentationDiagnostics(result, expectedTests)
+        failure.diagnostics = { stage: 'native-instrumentation',
+            substage: expectedTests === 1 ? 'webview-harness-result' : 'native-suite-result',
+            nativeInstrumentation: failure.nativeInstrumentation }
+        throw failure
+    }
+    const stdout = typeof result.stdout === 'string' ? result.stdout : ''
+    if (result.code !== 0) { fail('INSTRUMENTATION_PROCESS_FAILED') }
+    if (/INSTRUMENTATION_STATUS_CODE:\s*-/.test(stdout)) { fail('INSTRUMENTATION_FAILED_OR_SKIPPED') }
+    const tests = stdout.match(/OK \((\d+) tests?\)/)
+    if (!tests || !Number.isSafeInteger(Number(tests[1])) || Number(tests[1]) <= 0) { fail('INSTRUMENTATION_DID_NOT_PASS') }
     if (expectedTests !== undefined) {
-        check(Number(tests[1]) === expectedTests, 'INSTRUMENTATION_TEST_COUNT_MISMATCH')
+        if (Number(tests[1]) !== expectedTests) { fail('INSTRUMENTATION_TEST_COUNT_MISMATCH') }
     }
     return { tests: Number(tests[1]), passed: true, skipped: 0 }
 }

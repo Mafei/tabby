@@ -68,6 +68,11 @@ try {
 } catch (error) {
     report.failure = error instanceof TestFailure ? error.code : 'ANDROID_TEST_SETUP_OR_UNEXPECTED_FAILURE'
     if (error instanceof TestFailure && error.diagnostics) { report.diagnostics = error.diagnostics }
+    if (error instanceof TestFailure && error.nativeInstrumentation) {
+        // The WebView wrapper adds its own stage diagnostics. Preserve only
+        // the parser's fixed metadata, never the underlying process output.
+        report.diagnostics = { ...report.diagnostics, nativeInstrumentation: error.nativeInstrumentation }
+    }
     console.error(`Cloud Android tests failed: ${report.failure}. Credential-bearing output is suppressed.`)
     if (report.diagnostics) { console.error(`Android failure diagnostics: ${JSON.stringify(report.diagnostics)}`) }
     process.exitCode = cancelled ? 130 : 1
