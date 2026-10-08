@@ -198,7 +198,7 @@ export async function webviewAcceptance (android, fixture) {
                     const geometry = values => Object.fromEntries(['sliderCount', 'sliderTop', 'legacyViewportCount', 'legacyScrollTop',
                         'x', 'y', 'width', 'height', 'fromX', 'fromY', 'toX', 'toY', 'terminalX', 'terminalY', 'terminalWidth', 'terminalHeight',
                         'screenWidth', 'screenHeight', 'rowCount', 'scrollbarHeight', 'sliderHeight', 'viewportWidth', 'viewportHeight',
-                        'visualHeight', 'devicePixelRatio', 'nativeViewportWidth', 'nativeViewportHeight', 'firstHistoryOrdinal'].filter(key => Number.isFinite(values?.[key]))
+                        'visualHeight', 'devicePixelRatio', 'nativeViewportWidth', 'nativeViewportHeight', 'nativeKeyboardHeight', 'firstHistoryOrdinal'].filter(key => Number.isFinite(values?.[key]))
                         .map(key => [key, values[key]]))
                     const notice = document.querySelector('.notice')?.textContent || ''
                     return {
@@ -275,6 +275,12 @@ export async function webviewAcceptance (android, fixture) {
                                     remote: Object.fromEntries(['rows', 'cols'].filter(key => Number.isFinite(value.remote?.[key])).map(key => [key, value.remote[key]])),
                                     converged: value.converged === true }]
                             })),
+                        keyboardShow: {
+                            visible: window.__tabbyCloudObservation.keyboardShow?.visible === true,
+                            height: Number.isFinite(window.__tabbyCloudObservation.keyboardShow?.height) ? window.__tabbyCloudObservation.keyboardShow.height : null,
+                            viewportHeight: Number.isFinite(window.__tabbyCloudObservation.keyboardShow?.viewportHeight) ? window.__tabbyCloudObservation.keyboardShow.viewportHeight : null,
+                            baselineHeight: Number.isFinite(window.__tabbyCloudObservation.keyboardShow?.baselineHeight) ? window.__tabbyCloudObservation.keyboardShow.baselineHeight : null,
+                        },
                     }
                 }), deadline, 'ANDROID_DOM_DIAGNOSTICS_DEADLINE_EXCEEDED')
             } catch { result.domUnavailable = true }
@@ -695,7 +701,7 @@ export async function webviewAcceptance (android, fixture) {
                 page.evaluate(() => window.__tabbyCloudObservation.readScroll()), viewport(),
             ])
             return { ...Object.fromEntries(keys.map(key => [key, scroll[key]])), nativeViewportWidth: native.viewportWidth,
-                nativeViewportHeight: native.viewportHeight, nativeKeyboardVisible: native.visible }
+                nativeViewportHeight: native.viewportHeight, nativeKeyboardVisible: native.visible, nativeKeyboardHeight: native.height }
         }
         const deadline = Date.now() + 10000
         const inTime = () => check(Date.now() < deadline, 'ANDROID_REMOTE_PTY_SIZE_DID_NOT_CONVERGE')
@@ -707,7 +713,9 @@ export async function webviewAcceptance (android, fixture) {
             const current = await geometry()
             inTime()
             const valid = keys.every(key => Number.isFinite(current[key])) && current.rowCount > 0 && current.screenHeight > 0
-                && current.nativeKeyboardVisible === expectedIME && Number.isFinite(current.nativeViewportWidth) && Number.isFinite(current.nativeViewportHeight)
+                && current.nativeKeyboardVisible === expectedIME && Number.isFinite(current.nativeKeyboardHeight)
+                && (expectedIME ? current.nativeKeyboardHeight > 0 : current.nativeKeyboardHeight === 0)
+                && Number.isFinite(current.nativeViewportWidth) && Number.isFinite(current.nativeViewportHeight)
                 && current.nativeViewportWidth > 0 && current.nativeViewportHeight > 0
             const serialized = JSON.stringify(current)
             if (!valid || serialized !== previous) { previous = serialized; stableSince = Date.now(); return false }
@@ -963,7 +971,15 @@ export async function webviewAcceptance (android, fixture) {
         const sizeBefore = await size(false, 'hidden')
         const hidden = await viewport()
         await step('keyboard-show-native-touch', () => nativeTouch(page.getByRole('button', { name: '键盘', exact: true })))
-        await step('keyboard-shown-native-state', () => until(async () => (await viewport()).visible, 'ANDROID_SYSTEM_IME_DID_NOT_SHOW'))
+        await step('keyboard-shown-native-state', () => until(async () => {
+            const shown = await viewport()
+            await page.evaluate(value => { window.__tabbyCloudObservation.keyboardShow = value },
+                { visible: shown.visible === true, height: shown.height, viewportHeight: shown.viewportHeight, baselineHeight: hidden.viewportHeight })
+            // Visibility can precede the first nonzero animation inset.
+            // Require the actual docked keyboard and native shrink before
+            // measuring rows; the later real PTY shrink assertion remains.
+            return shown.visible && shown.height > 0 && shown.viewportHeight < hidden.viewportHeight
+        }, 'ANDROID_SYSTEM_IME_DID_NOT_SHOW'))
         const sizeShown = await size(true, 'shown')
         const shown = await viewport()
         substage = 'keyboard-native-viewport-shrank'
@@ -1074,20 +1090,35 @@ export async function webviewAcceptance (android, fixture) {
         await beginHarness()
         await connect(true)
         const api = Number(await android.shell('getprop ro.build.version.sdk'))
+        async function systemHierarchy (filename, deadline) {
+            const remaining = () => Math.max(1, deadline - Date.now())
+            check(Date.now() < deadline, 'ANDROID_SYSTEM_UI_OBSERVATION_TIMEOUT')
+            try {
+                // No stale snapshot can supply a touch after a failed read.
+                await android.shell(`rm -f /data/local/tmp/${filename}`, { timeout: Math.min(1000, remaining()) })
+                await android.shell(`uiautomator dump /data/local/tmp/${filename}`, { timeout: Math.min(12000, remaining()) })
+                return await android.shell(`cat /data/local/tmp/${filename}`, { timeout: Math.min(3000, remaining()) })
+            } catch (error) {
+                if (!(error instanceof TestFailure) || !['ADB_COMMAND_FAILED', 'TEST_COMMAND_DEADLINE_EXCEEDED'].includes(error.code)) throw error
+                check(Date.now() < deadline, 'ANDROID_SYSTEM_UI_OBSERVATION_TIMEOUT')
+                return undefined
+            }
+        }
         async function systemButton (pattern, failure) {
             // This runner only accepts emulator-* serials. Normal dialog/shade UI;
             // no pm grant, appops changes, battery changes, or physical device access.
             let point
+            const deadline = Date.now() + 20000
             await until(async () => {
-                await android.shell('uiautomator dump /data/local/tmp/tabby-owned-dialog.xml', { timeout: 12000 })
-                const xml = await android.shell('cat /data/local/tmp/tabby-owned-dialog.xml')
+                const xml = await systemHierarchy('tabby-owned-dialog.xml', deadline)
+                if (!xml) return false
                 const nodes = xml.match(/<node\b[^>]*>/g) || []
                 const node = nodes.find(value => pattern.test(value))
                 const bounds = node && /bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"/.exec(node)
                 if (!bounds) return false
                 point = { x: (Number(bounds[1]) + Number(bounds[3])) / 2, y: (Number(bounds[2]) + Number(bounds[4])) / 2 }
                 return true
-            }, failure, 20000)
+            }, failure, Math.max(1, deadline - Date.now()))
             await android.shell(`input tap ${point.x} ${point.y}`)
             await android.shell('rm -f /data/local/tmp/tabby-owned-dialog.xml')
         }
@@ -1097,14 +1128,14 @@ export async function webviewAcceptance (android, fixture) {
         }
         if (api >= 33) {
             await requestBackground()
-            await systemButton(/resource-id="(?:com\.android|com\.google\.android)\.permissioncontroller:id\/permission_deny_button"/, 'ANDROID_NOTIFICATION_DENY_DIALOG_MISSING')
+            await step('notification-normal-permission-denial', () => systemButton(/resource-id="(?:com\.android|com\.google\.android)\.permissioncontroller:id\/permission_deny_button"/, 'ANDROID_NOTIFICATION_DENY_DIALOG_MISSING'))
             await until(async () => !(await plugin('backgroundState')).enabled && await page.getByRole('button', { name: '开启后台保持', exact: true }).isEnabled(), 'ANDROID_NOTIFICATION_DENIAL_NOT_RESOLVED')
             check(await page.locator('.pane-status').textContent() === '已连接', 'ANDROID_NOTIFICATION_DIALOG_CLOSED_SSH')
             // Menu remains open after this setting. Close it before opening for retry.
             await nativeTouch(page.getByRole('button', { name: '更多终端操作', exact: true }))
         }
         await requestBackground()
-        if (api >= 33) await systemButton(/resource-id="(?:com\.android|com\.google\.android)\.permissioncontroller:id\/permission_allow_button"/, 'ANDROID_NOTIFICATION_ALLOW_DIALOG_MISSING')
+        if (api >= 33) await step('notification-normal-permission-allow', () => systemButton(/resource-id="(?:com\.android|com\.google\.android)\.permissioncontroller:id\/permission_allow_button"/, 'ANDROID_NOTIFICATION_ALLOW_DIALOG_MISSING'))
         await until(async () => (await plugin('backgroundState')).enabled === true, 'ANDROID_FOREGROUND_SERVICE_NOT_ENABLED')
         await android.shell('input keyevent KEYCODE_HOME')
         await pause(2000)
@@ -1116,15 +1147,11 @@ export async function webviewAcceptance (android, fixture) {
         await output('W_BACKGROUND_RETAINED')
         await android.shell('cmd statusbar expand-notifications')
         const notificationDeadline = Date.now() + 20000
-        async function notificationXML () {
-            const remaining = () => Math.max(1, notificationDeadline - Date.now())
-            await android.shell('uiautomator dump /data/local/tmp/tabby-owned-notification.xml', { timeout: Math.min(12000, remaining()) })
-            return android.shell('cat /data/local/tmp/tabby-owned-notification.xml', { timeout: Math.min(3000, remaining()) })
-        }
         let stopPoint
         let expanded = false
-        await until(async () => {
-            const xml = await notificationXML()
+        await step('notification-owned-stop-visible', () => until(async () => {
+            const xml = await systemHierarchy('tabby-owned-notification.xml', notificationDeadline)
+            if (!xml) return false
             stopPoint = systemUIActionPoint(xml, 'notificationStop')
             if (stopPoint) return true
             if (!expanded) {
@@ -1132,7 +1159,7 @@ export async function webviewAcceptance (android, fixture) {
                 if (point) { expanded = true; await android.shell(`input tap ${point.x} ${point.y}`) }
             }
             return false
-        }, 'ANDROID_NOTIFICATION_STOP_ACTION_MISSING', Math.max(1, notificationDeadline - Date.now()))
+        }, 'ANDROID_NOTIFICATION_STOP_ACTION_MISSING', Math.max(1, notificationDeadline - Date.now())))
         await capture('connection-notification')
         await android.shell(`input tap ${stopPoint.x} ${stopPoint.y}`)
         await android.shell('rm -f /data/local/tmp/tabby-owned-notification.xml')
