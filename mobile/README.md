@@ -219,6 +219,11 @@ It still requires 350ms of observed preview absence within the original
 notification card; a collapsed card is normally expanded once before clicking
 Stop. These bounded actions change no SystemUI settings, permissions or IME
 configuration and never dismiss an ANR, security dialog or foreign notification.
+Independent cloud WebView phases finish their owned instrumentation and restart
+only the disposable app process, retaining native public pins and encrypted
+fixture records. They cannot reuse a cached debug page from a destroyed WebView.
+The actual lifecycle and network checks run within each phase; focus emulation
+is disabled and the native focus gates remain mandatory on every new attach.
 See [Android's device-lock API](https://developer.android.com/reference/android/app/KeyguardManager#isDeviceLocked())
 and [TrustManager's direct user dump](https://github.com/aosp-mirror/platform_frameworks_base/blob/master/services/core/java/com/android/server/trust/TrustManagerService.java).
 The

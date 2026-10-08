@@ -117,6 +117,7 @@ export async function webviewAcceptance (android, fixture) {
     let harness
     let harnessDeadline
     let harnessPID
+    let retiredHarnessPID
     let page
     let stage = 'harness-start'
     let substage = 'initializing'
@@ -377,7 +378,16 @@ export async function webviewAcceptance (android, fixture) {
                         await android.shell('uiautomator dump /data/local/tmp/tabby-owned-clipboard.xml', { timeout: Math.max(1, Math.min(3000, deadline - Date.now())) })
                         point = systemUIActionPoint(await android.shell('cat /data/local/tmp/tabby-owned-clipboard.xml',
                             { timeout: Math.max(1, Math.min(1000, deadline - Date.now())) }), 'clipboardDismiss')
-                    } finally { await android.shell('rm -f /data/local/tmp/tabby-owned-clipboard.xml', { timeout: Math.max(1, Math.min(1000, deadline - Date.now())) }) }
+                    } catch (error) {
+                        // uiautomator's idle wait can outlast a fading preview.
+                        // An unavailable read supplies no touch coordinates;
+                        // the normal outside gesture still has to pass every
+                        // native guard and actual disappearance deadline.
+                        if (!(error instanceof TestFailure) || !['ADB_COMMAND_FAILED', 'TEST_COMMAND_DEADLINE_EXCEEDED'].includes(error.code)) throw error
+                        inTime()
+                    } finally {
+                        try { await android.shell('rm -f /data/local/tmp/tabby-owned-clipboard.xml', { timeout: Math.max(1, Math.min(500, deadline - Date.now())) }) } catch {}
+                    }
                     inTime()
                     dismissalSent = true
                     if (point) {
@@ -504,7 +514,7 @@ export async function webviewAcceptance (android, fixture) {
         harness.result.catch(() => {})
         let view
         await until(() => {
-            view = device.webViews().find(view => view.pkg() === APP && view.pid() !== previousPID)
+            view = device.webViews().find(view => view.pkg() === APP && view.pid() !== previousPID && view.pid() !== retiredHarnessPID)
             return !!view
         }, 'ANDROID_TEST_HARNESS_WEBVIEW_NOT_AVAILABLE', 45000)
         harnessPID = view.pid()
@@ -620,6 +630,12 @@ export async function webviewAcceptance (android, fixture) {
         instrumentationResult(result, 1)
         harness = undefined
         await quiet()
+        // Playwright caches each process's debug page. An ActivityScenario
+        // closes its WebView, so the next independent phase needs a fresh
+        // disposable app process, as the existing tmux harness already does.
+        retiredHarnessPID = harnessPID
+        await android.shell(`am force-stop ${APP}`)
+        page = undefined
     }
     async function connect (known, mode = 'password', credential = 'transient') {
         const authenticatedBefore = fixture.stats().authenticated
