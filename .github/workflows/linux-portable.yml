@@ -35,8 +35,8 @@ jobs:
           test "$(uname -m)" = x86_64
           test "$(getconf GNU_LIBC_VERSION)" = 'glibc 2.28'
           grep -q '^VERSION_ID="8.10"$' /etc/os-release
-          # Final AppImage GTK3 tray/GConf libraries need actual system providers;
-          # AppRun adds no LD_LIBRARY_PATH and usr/lib presence is insufficient.
+          # Final AppImage GTK3 tray/GConf libraries also need actual system
+          # DBus-menu/GLib providers beyond its reviewed app-local usr/lib path.
           dnf -y install git make gcc gcc-c++ gcc-toolset-13-gcc gcc-toolset-13-gcc-c++ python39 python39-devel python39-pip pkgconf-pkg-config libsecret-devel fontconfig-devel libX11-devel libXtst-devel libXScrnSaver libXcomposite libXdamage libxkbcommon atk at-spi2-atk gtk3 dbus-glib libdbusmenu libdbusmenu-gtk3 libindicator-gtk3 libappindicator-gtk3 nss mesa-libgbm alsa-lib cups-libs libdrm dbus-libs xz zip unzip tar gzip curl findutils util-linux binutils
       - uses: actions/checkout@v4
         env:

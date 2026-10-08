@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs'
 import jsYaml from 'js-yaml'
 import * as vars from './vars.mjs'
 import { linuxPortableOptions } from './linux-portable-options.mjs'
-import afterLinuxPack from './linux-portable-after-pack.mjs'
+import { afterLinuxPortablePack } from './linux-portable-after-pack.mjs'
 
 // electron-builder reads this as its sole portable configuration file. Replace
 // array fields before its normal merge, so every resource has one copy owner.
@@ -20,7 +20,7 @@ export default function linuxPortableConfig () {
         npmRebuild: false,
         files: options.files,
         extraResources: options.extraResources,
-        afterPack: afterLinuxPack,
+        afterPack: afterLinuxPortablePack,
         extraMetadata: { ...base.extraMetadata, version: vars.version },
         publish: null,
     }

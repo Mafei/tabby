@@ -1,8 +1,10 @@
 import importlib.util
 import json
+import os
 import shutil
 from pathlib import Path
 import struct
+import subprocess
 import tempfile
 import unittest
 
@@ -35,6 +37,32 @@ def write_asar(path, header, content):
     payload_size = 4 + len(data) + len(padding)
     path.write_bytes(struct.pack('<IIII', 4, 4 + payload_size, payload_size, len(data)) + data + padding + content)
     path.chmod(0o644)
+
+
+def write_portable_launcher(root):
+    module = (SCRIPT.parent / 'linux-portable-after-pack.mjs').as_uri()
+    text = AUDIT.run(['node', '--input-type=module', '-e',
+        'import {linuxAppRun} from ' + json.dumps(module) + '; process.stdout.write(linuxAppRun("tabby", true));'])
+    root.joinpath('AppRun').write_text(text)
+    root.joinpath('AppRun').chmod(0o755)
+    root.joinpath('resources/builtin-plugins/tabby-electron').mkdir(parents=True, exist_ok=True)
+    return AUDIT.check_launcher(root)
+
+
+def compile_fixture(root, output, source, flags=()):
+    sources = root / 'sources'
+    sources.mkdir(exist_ok=True)
+    c_file = sources / (output.relative_to(root).as_posix().replace('/', '_') + '.c')
+    c_file.write_text(source)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    AUDIT.run(['gcc', str(c_file), '-o', str(output), *map(str, flags)])
+
+
+def fixture_elfs(root):
+    # These synthetic C fixtures exercise closure on the host's actual loader.
+    # ABI acceptance for the real product remains a separate strict audit gate.
+    paths = [root / 'tabby', *root.rglob('*.so'), *root.rglob('*.so.1')]
+    return {p.relative_to(root).as_posix(): AUDIT.inspect_elf(p, packaged=False) for p in paths}
 
 
 class PortableAuditTests(unittest.TestCase):
@@ -120,6 +148,104 @@ Version needs section '.gnu.version_r' contains 2 entries:
             selected, _ = AUDIT.resolve_needed('libfoo.so', child,
                 {'searchPath': [], 'searchPathKind': None}, root, {}, (root,))
             self.assertEqual(selected, root / 'libfoo.so')
+
+    def test_actual_loader_rpath_environment_runpath_and_child_context_order(self):
+        with tempfile.TemporaryDirectory(prefix='tabby loader ') as directory:
+            root = Path(directory)
+            local = root / 'usr/lib'
+            for destination, value in [(root, 101), (local, 202), (root / 'fallback', 303)]:
+                compile_fixture(root, destination / 'libfixture.so.1',
+                    'int fixture_value(void) { return ' + str(value) + '; }\n',
+                    ['-shared', '-fPIC', '-Wl,-soname,libfixture.so.1'])
+            library_path = write_portable_launcher(root)
+            env = {key: value for key, value in os.environ.items() if key != 'LD_LIBRARY_PATH'}
+            inherited_env = {**env, 'LD_LIBRARY_PATH': str(root / 'fallback') + '::.'}
+            main = '#include <stdio.h>\nextern int fixture_value(void); int main(void) { printf("%d\\n", fixture_value()); }\n'
+            for tag, expected in [('enable', 202), ('disable', 101)]:
+                compile_fixture(root, root / 'tabby', main,
+                    [root / 'libfixture.so.1', '-Wl,--' + tag + '-new-dtags,-rpath,$ORIGIN'])
+                actual = subprocess.run([str(root / 'AppRun')], env=inherited_env,
+                    check=True, capture_output=True, text=True, timeout=30)
+                self.assertEqual(actual.stdout.strip(), str(expected))
+                metadata = fixture_elfs(root)
+                _, edges = AUDIT.dependency_closure(root, metadata, library_path)
+                edge = next(item for item in edges if item['from'] == 'tabby' and item['needed'] == 'libfixture.so.1')
+                self.assertEqual(edge['provider'], 'usr/lib/libfixture.so.1' if tag == 'enable' else 'libfixture.so.1')
+            consumer = root / 'libconsumer.so'
+            consumer_source = 'extern int fixture_value(void); int fixture_consume(void) { return fixture_value(); }\n'
+            main = '#include <stdio.h>\nextern int fixture_consume(void); int main(void) { printf("%d\\n", fixture_consume()); }\n'
+            for child_runpath, expected in [(True, 202), (False, 101)]:
+                flags = ['-shared', '-fPIC', root / 'libfixture.so.1', '-Wl,-soname,libconsumer.so']
+                if child_runpath:
+                    flags.append('-Wl,--enable-new-dtags,-rpath,$ORIGIN/fallback')
+                compile_fixture(root, consumer, consumer_source, flags)
+                compile_fixture(root, root / 'tabby', main,
+                    [consumer, '-Wl,--disable-new-dtags,-rpath,$ORIGIN'])
+                actual = subprocess.run([str(root / 'AppRun')], env=inherited_env,
+                    check=True, capture_output=True, text=True, timeout=30)
+                self.assertEqual(actual.stdout.strip(), str(expected))
+                metadata = fixture_elfs(root)
+                _, edges = AUDIT.dependency_closure(root, metadata, library_path)
+                edge = next(item for item in edges if item['from'] == 'libconsumer.so' and item['needed'] == 'libfixture.so.1')
+                self.assertEqual(edge['provider'], 'usr/lib/libfixture.so.1' if child_runpath else 'libfixture.so.1')
+                if child_runpath:
+                    without_environment = subprocess.run([str(root / 'tabby')], env=env,
+                        check=True, capture_output=True, text=True, timeout=30)
+                    self.assertEqual(without_environment.stdout.strip(), '303')
+                    _, edges = AUDIT.dependency_closure(root, metadata)
+                    edge = next(item for item in edges if item['from'] == 'libconsumer.so' and item['needed'] == 'libfixture.so.1')
+                    self.assertEqual(edge['provider'], 'fallback/libfixture.so.1')
+
+    def test_actual_loader_missing_version_and_strong_symbol_still_fail(self):
+        with tempfile.TemporaryDirectory(prefix='tabby closure ') as directory:
+            root = Path(directory)
+            local = root / 'usr/lib/libfixture.so.1'
+            fallback = root / 'fallback/libfixture.so.1'
+            old_version = root / 'old.map'
+            new_version = root / 'new.map'
+            old_version.write_text('FIXTURE_1 { global: fixture_marker; local: *; };\n')
+            new_version.write_text('FIXTURE_2 { global: fixture_added; fixture_marker; local: *; };\n')
+            common = ['-shared', '-fPIC', '-Wl,-soname,libfixture.so.1']
+            compile_fixture(root, fallback, 'int fixture_marker(void) { return 1; }\n',
+                [*common, '-Wl,--version-script=' + str(old_version)])
+            compile_fixture(root, local, 'int fixture_added(void) { return 202; } int fixture_marker(void) { return 2; }\n',
+                [*common, '-Wl,--version-script=' + str(new_version)])
+            compile_fixture(root, root / 'tabby',
+                '#include <stdio.h>\nextern int fixture_added(void); int main(void) { printf("%d\\n", fixture_added()); }\n',
+                [local, '-Wl,--enable-new-dtags,-rpath,$ORIGIN/fallback'])
+            library_path = write_portable_launcher(root)
+            env = {key: value for key, value in os.environ.items() if key != 'LD_LIBRARY_PATH'}
+            result = subprocess.run([str(root / 'AppRun')], env=env,
+                check=True, capture_output=True, text=True, timeout=30)
+            self.assertEqual(result.stdout.strip(), '202')
+            metadata = fixture_elfs(root)
+            AUDIT.dependency_closure(root, metadata, library_path)
+            failed = subprocess.run([str(root / 'tabby')], env=env, capture_output=True, text=True, timeout=30)
+            self.assertNotEqual(failed.returncode, 0)
+            self.assertIn('FIXTURE_2', failed.stderr)
+            with self.assertRaisesRegex(AUDIT.AuditError, 'required version definitions'):
+                AUDIT.dependency_closure(root, metadata)
+            # The selected provider still advertises FIXTURE_2, but cannot supply
+            # the actual strong import. Neither loader nor audit may waive it.
+            compile_fixture(root, local, 'int fixture_marker(void) { return 2; }\n',
+                [*common, '-Wl,--version-script=' + str(new_version)])
+            failed = subprocess.run([str(root / 'AppRun')], env=env, capture_output=True, text=True, timeout=30)
+            self.assertNotEqual(failed.returncode, 0)
+            self.assertIn('fixture_added', failed.stderr)
+            with self.assertRaisesRegex(AUDIT.AuditError, 'Strong dynamic symbol'):
+                AUDIT.dependency_closure(root, fixture_elfs(root), library_path)
+            local.unlink()
+            fallback.unlink()
+            failed = subprocess.run([str(root / 'AppRun')], env=env, capture_output=True, text=True, timeout=30)
+            self.assertNotEqual(failed.returncode, 0)
+            self.assertIn('libfixture.so.1', failed.stderr)
+            with self.assertRaisesRegex(AUDIT.AuditError, 'System dependency is missing'):
+                AUDIT.dependency_closure(root, fixture_elfs(root), library_path)
+            launcher = root / 'AppRun'
+            launcher.write_text(launcher.read_text().replace('LD_LIBRARY_PATH="$APPDIR/usr/lib"',
+                'LD_LIBRARY_PATH="$APPDIR/usr/lib:${LD_LIBRARY_PATH:-}"'))
+            with self.assertRaisesRegex(AUDIT.AuditError, 'reviewed launcher'):
+                AUDIT.check_launcher(root)
 
     def test_dynamic_symbols_keep_version_and_default_export_semantics(self):
         data = '''

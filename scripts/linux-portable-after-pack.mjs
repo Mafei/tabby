@@ -1,7 +1,7 @@
 import { chmod, lstat, readdir, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 
-export function linuxAppRun (executableName) {
+export function linuxAppRun (executableName, portable = false) {
     if (!/^[A-Za-z0-9._-]+$/.test(executableName)) {
         throw new Error('Unsafe Linux executable name')
     }
@@ -17,11 +17,25 @@ else
 fi
 APPDIR="$tabby_app_dir"
 export APPDIR APPIMAGE
+${portable ? `case "$APPDIR" in
+    *:*|*';'*) printf '%s\\n' 'Unsupported AppDir path delimiter' >&2; exit 1 ;;
+esac
+if [ -L "$APPDIR/usr" ] || [ -L "$APPDIR/usr/lib" ]; then
+    printf '%s\\n' 'App-local library directories must be real directories' >&2
+    exit 1
+fi
+LD_LIBRARY_PATH="$APPDIR/usr/lib"
+export LD_LIBRARY_PATH
+` : ''}\
 exec "$APPDIR/${executableName}" "$@"
 `
 }
 
-export default async function afterLinuxPack (context) {
+export async function afterLinuxPortablePack (context) {
+    return afterLinuxPack(context, true)
+}
+
+export default async function afterLinuxPack (context, portable = false) {
     if (context.electronPlatformName !== 'linux') {
         return
     }
@@ -70,6 +84,6 @@ export default async function afterLinuxPack (context) {
         await chmod(directory, 0o755)
     }
     const appRun = path.join(root, 'AppRun')
-    await writeFile(appRun, linuxAppRun(context.packager.executableName), { mode: 0o755 })
+    await writeFile(appRun, linuxAppRun(context.packager.executableName, portable), { mode: 0o755 })
     await chmod(appRun, 0o755)
 }

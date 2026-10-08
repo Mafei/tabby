@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { execFileSync } from 'node:child_process'
+import { execFileSync, spawnSync } from 'node:child_process'
 import { chmodSync, copyFileSync, existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url'
 import vm from 'node:vm'
 import test from 'node:test'
 import { linuxPortableOptions } from '../linux-portable-options.mjs'
-import afterLinuxPack, { linuxAppRun } from '../linux-portable-after-pack.mjs'
+import afterLinuxPack, { afterLinuxPortablePack, linuxAppRun } from '../linux-portable-after-pack.mjs'
 
 test('portable targets retain AppDir and tar fallback independently of artifact-only CI', () => {
     const options = linuxPortableOptions({ TABBY_LINUX_PORTABLE: '1', TABBY_ARTIFACT_ONLY: '1' }, 'x64', ['**/*', '!src'])
@@ -114,8 +114,9 @@ test('actual builder config and copy avoid overlapping plugin owners while prese
         assert.equal(fixed.publish, null)
         assert.deepEqual(fixed.electronFuses, base.electronFuses)
         assert.deepEqual(fixed.linux.executableArgs, [])
-        assert.equal(fixed.afterPack, afterLinuxPack)
-        assert.equal(linuxAppRun('tabby').includes('no-sandbox'), false)
+        assert.equal(fixed.afterPack, afterLinuxPortablePack)
+        assert.equal(linuxAppRun('tabby', true).includes('no-sandbox'), false)
+        assert.equal(linuxAppRun('tabby').includes('LD_LIBRARY_PATH'), false)
         // Both real builder branches generate AppRun before copying appOutDir
         // over it. Exercise the pinned generator and the same actual copy.
         const { generateAppRunScript } = require('app-builder-lib/out/targets/appimage/appImageUtil')
@@ -129,7 +130,7 @@ test('actual builder config and copy avoid overlapping plugin owners while prese
         writeFileSync(path.join(launcherStage, 'AppRun'), generated)
         await fixed.afterPack({ electronPlatformName: 'linux', appOutDir: launcherApp, packager: { executableName: 'tabby' } })
         await copyDir(launcherApp, launcherStage, { isUseHardLink: false })
-        assert.equal(readFileSync(path.join(launcherStage, 'AppRun'), 'utf8'), linuxAppRun('tabby'))
+        assert.equal(readFileSync(path.join(launcherStage, 'AppRun'), 'utf8'), linuxAppRun('tabby', true))
         assert.equal(readFileSync(path.join(launcherStage, 'AppRun'), 'utf8').includes('no-sandbox'), false)
         const project = path.join(directory, 'project')
         const plugin = path.join(project, 'builtin-plugins')
@@ -249,6 +250,27 @@ test('real shell AppRun preserves argument boundaries and AppImage path without 
             encoding: 'utf8', env: { PATH: process.env.PATH, APPDIR: '/tmp/another-version', APPIMAGE: '/tmp/old.Tabby.AppImage' },
         }).trimEnd().split('\n')
         assert.equal(inherited[1], path.join(directory, 'AppRun'))
+        writeFileSync(path.join(directory, 'AppRun'), linuxAppRun('tabby', true))
+        writeFileSync(path.join(directory, 'tabby'), '#!/bin/sh\nprintf "%s\\n" "$LD_LIBRARY_PATH" "$APPDIR" "$APPIMAGE" "$#" "$@"\n')
+        const portable = execFileSync(path.join(directory, 'AppRun'), ['one two', '$(false)', "a'b"], {
+            encoding: 'utf8', env: { ...process.env, APPDIR: directory, APPIMAGE: '/tmp/image with space.AppImage', LD_LIBRARY_PATH: '/tmp/unrelated::.' },
+        }).trimEnd().split('\n')
+        assert.deepEqual(portable, [path.join(directory, 'usr/lib'), directory, '/tmp/image with space.AppImage', '3', 'one two', '$(false)', "a'b"])
+        // Neither a linked search directory nor a loader separator is accepted.
+        mkdirSync(path.join(directory, 'unrelated'))
+        symlinkSync('unrelated', path.join(directory, 'usr'))
+        const linked = spawnSync(path.join(directory, 'AppRun'), [], { encoding: 'utf8', env: { PATH: process.env.PATH } })
+        assert.equal(linked.status, 1)
+        assert.match(linked.stderr, /real directories/)
+        for (const delimiter of [':', ';']) {
+            const invalid = path.join(directory, 'invalid' + delimiter + 'path')
+            mkdirSync(invalid)
+            writeFileSync(path.join(invalid, 'AppRun'), linuxAppRun('tabby', true))
+            chmodSync(path.join(invalid, 'AppRun'), 0o755)
+            const failed = spawnSync(path.join(invalid, 'AppRun'), [], { encoding: 'utf8', env: { PATH: process.env.PATH } })
+            assert.equal(failed.status, 1)
+            assert.match(failed.stderr, /path delimiter/)
+        }
         assert.throws(() => linuxAppRun('tabby;false'))
     } finally {
         rmSync(directory, { recursive: true, force: true })

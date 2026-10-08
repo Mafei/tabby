@@ -303,14 +303,27 @@ def check_launcher(root):
                 'if [ -n "${APPIMAGE:-}" ] && [ -n "${APPDIR:-}" ] && [ "$(readlink -f -- "$APPDIR" 2>/dev/null || true)" = "$tabby_app_dir" ]; then\n'
                 '    :\nelse\n    APPIMAGE="$tabby_app_dir/AppRun"\nfi\n'
                 'APPDIR="$tabby_app_dir"\nexport APPDIR APPIMAGE\n'
+                'case "$APPDIR" in\n'
+                "    *:*|*';'*) printf '%s\\n' 'Unsupported AppDir path delimiter' >&2; exit 1 ;;\n"
+                'esac\n'
+                'if [ -L "$APPDIR/usr" ] || [ -L "$APPDIR/usr/lib" ]; then\n'
+                "    printf '%s\\n' 'App-local library directories must be real directories' >&2\n"
+                '    exit 1\nfi\n'
+                'LD_LIBRARY_PATH="$APPDIR/usr/lib"\nexport LD_LIBRARY_PATH\n'
                 'exec "$APPDIR/tabby" "$@"\n').encode("utf8")
     require(app_run.read_bytes() == expected, "AppRun differs from the reviewed launcher")
+    require(not any(delimiter in str(root) for delimiter in (":", ";")), "Unsupported AppDir path delimiter")
+    library_path = root / "usr/lib"
+    require(not (root / "usr").is_symlink() and not library_path.is_symlink(),
+            "App-local library directories must be real directories")
+    require(not library_path.exists() or library_path.is_dir(), "App-local library path is not a directory")
     for path in root.rglob("*.desktop"):
         check_launch_text(path.read_bytes(), path.relative_to(root).as_posix())
     electron_plugin = root.joinpath("resources/builtin-plugins/tabby-electron")
     require(electron_plugin.is_dir(), "Packaged Electron plugin is missing")
     for path in electron_plugin.rglob("*.js"):
         check_launch_text(path.read_bytes(), path.relative_to(root).as_posix())
+    return (library_path,)
 
 
 def check_public_readability(path, root):
@@ -423,23 +436,26 @@ def host_libraries(text):
     return result
 
 
-def resolve_needed(name, origin, info, root, system, inherited=()):
-    # AppRun adds no LD_LIBRARY_PATH. Only the ELF's real search path and the
-    # baseline linker cache are considered; unrelated usr/lib copies are not.
+def resolve_needed(name, origin, info, root, system, inherited=(), library_path=()):
+    # Only the exact reviewed launcher's app-local LD_LIBRARY_PATH is supplied.
+    # glibc searches RPATH before that environment path, then RUNPATH/cache.
     # glibc 2.28 elf/dl-load.c:1899 suppresses inherited DT_RPATH whenever
     # the requesting object has its own DT_RUNPATH (including grandchildren).
-    for directory in inherited if info.get("searchPathKind") != "RUNPATH" else ():
-        candidate = directory.joinpath(name)
-        if candidate.is_file():
-            require(inside(candidate, root), "Inherited dependency escapes AppDir")
-            return candidate.resolve(), True
+    require(library_path in ((), (root / "usr/lib",)), "Unreviewed launcher library path")
+    own = []
     for entry in info["searchPath"]:
         expanded = entry.replace("${ORIGIN}", str(origin)).replace("$ORIGIN", str(origin))
         require(expanded and "$" not in expanded and Path(expanded).is_absolute(), "Unsupported ELF search path")
         directory = Path(expanded)
         require(not inside(origin, root) or inside(directory, root), "Packaged ELF has a nonportable absolute search path")
+        own.append(directory)
+    rpath = own if info.get("searchPathKind") == "RPATH" else []
+    inherited_rpath = inherited if info.get("searchPathKind") != "RUNPATH" else ()
+    runpath = own if info.get("searchPathKind") != "RPATH" else []
+    for directory in (*rpath, *inherited_rpath, *library_path, *runpath):
         candidate = directory.joinpath(name)
         if candidate.is_file():
+            require(not inside(directory, root) or inside(candidate, root), "Dependency escapes AppDir")
             require(not inside(origin, root) or inside(candidate, root), "Dependency escapes AppDir")
             return candidate.resolve(), inside(candidate, root)
     candidates = list(dict.fromkeys(system.get(name, [])))
@@ -447,7 +463,7 @@ def resolve_needed(name, origin, info, root, system, inherited=()):
     return candidates[0].resolve(), False
 
 
-def dependency_closure(root, elfs):
+def dependency_closure(root, elfs, library_path=()):
     system = host_libraries(run(["ldconfig", "-p"]))
     cache = {root.joinpath(name).resolve(): info for name, info in elfs.items()}
     main = elfs["tabby"]
@@ -474,7 +490,7 @@ def dependency_closure(root, elfs):
         info = cache[filename]
         graph[context] = []
         for name in info["needed"]:
-            target, bundled = resolve_needed(name, filename.parent, info, root, system, inherited)
+            target, bundled = resolve_needed(name, filename.parent, info, root, system, inherited, library_path)
             if target not in cache:
                 cache[target] = inspect_elf(target, packaged=bundled)
             provider = cache[target]
@@ -486,7 +502,8 @@ def dependency_closure(root, elfs):
             pending.append((target, inherited, owner))
             graph[context].append((target, inherited, owner))
             edges.append({"from": filename.relative_to(root).as_posix() if inside(filename, root) else filename.name,
-                          "needed": name, "bundled": bundled})
+                          "needed": name, "bundled": bundled,
+                          "provider": target.relative_to(root).as_posix() if bundled else str(target)})
     def reachable(start):
         queue, found = [start], set()
         while queue:
@@ -522,10 +539,10 @@ def audit(app_dir, allow_non_baseline=False):
     baseline = baseline_host()
     require(baseline or allow_non_baseline, "Strict dependency closure must run on Rocky Linux 8.10 / glibc 2.28")
     elfs, native_entries, active = scan_payload(root)
-    check_launcher(root)
+    library_path = check_launcher(root)
     notices = check_font_notices(root)
     fonts = check_font_payload(root)
-    external, edges = dependency_closure(root, elfs) if baseline else ({}, [])
+    external, edges = dependency_closure(root, elfs, library_path) if baseline else ({}, [])
     binaries = []
     for name, info in sorted(elfs.items()):
         binaries.append({"file": name, "sha256": sha256(root.joinpath(name)),
@@ -537,6 +554,7 @@ def audit(app_dir, allow_non_baseline=False):
             "strongDynamicSymbolClosureVerified": baseline,
             "rockySELinuxVerified": False, "productRendererSandboxed": False,
             "sandboxDisableArgumentsAbsent": True, "appRunSHA256": sha256(root.joinpath("AppRun")),
+            "loaderLibraryPath": ["$APPDIR/usr/lib"], "inheritedLDLibraryPath": "replaced",
             "appAsarSHA256": sha256(root.joinpath("resources/app.asar")),
             "nativeASAREntries": native_entries, "activeNativeCandidates": active, "binaries": binaries,
             "unusedNativeModulesExcluded": ["fontmanager-redux"],
