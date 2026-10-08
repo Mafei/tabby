@@ -4,6 +4,7 @@ import json
 import math
 import re
 import subprocess
+import hashlib
 from urllib.parse import urlparse
 from build import ROOT, STATES
 
@@ -55,6 +56,12 @@ def validate():
     assert not re.search(r"<(?:script|link|img)[^>]+(?:src|href)=",prototype)
     assert not re.search(r"\b(fetch|XMLHttpRequest|WebSocket|localStorage|sessionStorage)\b",prototype)
     assert "不连接 SSH" in prototype and "设计提案" in prototype
+    evidence=json.loads((ROOT/"preview/design-render-report.json").read_text())
+    assert evidence["status"]=="passed"
+    for name in ("prototype.html","review.html","states.json"):
+        assert evidence["renderedDesign"][name]==hashlib.sha256((ROOT/name).read_bytes()).hexdigest(),name
+    assert evidence["proposalGestureChecks"]>=16
+    assert evidence["exportedScreenBodyTextMinimumContrast"]>=4.5
     changed=subprocess.check_output(["git","diff","--name-only",sources["baseline"]],cwd=ROOT,text=True).splitlines()
     for file in changed:
         assert file.startswith("docs/design/android-mobile-ux/") or file==".github/workflows/android-design-review.yml",file

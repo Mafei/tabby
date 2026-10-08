@@ -46,5 +46,10 @@ jobs:
             docs/design/android-mobile-ux/budgets.json
             docs/design/android-mobile-ux/sources.json
             docs/design/android-mobile-ux/states.json
+            docs/design/android-mobile-ux/build.py
+            docs/design/android-mobile-ux/navigation.py
+            docs/design/android-mobile-ux/navigation_checks.py
+            docs/design/android-mobile-ux/render.py
+            docs/design/android-mobile-ux/validate.py
             docs/design/android-mobile-ux/preview/
           retention-days: 14

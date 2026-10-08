@@ -278,6 +278,139 @@
       "terminalHeight": null
     },
     {
+      "state": "navigation-phone",
+      "width": 360,
+      "height": 800,
+      "smallTargets": [],
+      "terminalHeight": 752
+    },
+    {
+      "state": "navigation-ime",
+      "width": 360,
+      "height": 800,
+      "smallTargets": [],
+      "terminalHeight": 404
+    },
+    {
+      "state": "navigation-first",
+      "width": 360,
+      "height": 800,
+      "smallTargets": [],
+      "terminalHeight": 752
+    },
+    {
+      "state": "navigation-last",
+      "width": 360,
+      "height": 800,
+      "smallTargets": [],
+      "terminalHeight": 752
+    },
+    {
+      "state": "navigation-locked",
+      "width": 360,
+      "height": 800,
+      "smallTargets": [],
+      "terminalHeight": 404
+    },
+    {
+      "state": "navigation-wide",
+      "width": 840,
+      "height": 900,
+      "smallTargets": [],
+      "terminalHeight": 852
+    },
+    {
+      "state": "navigation-sessions",
+      "width": 360,
+      "height": 800,
+      "smallTargets": [],
+      "terminalHeight": 752
+    },
+    {
+      "state": "navigation-home",
+      "width": 360,
+      "height": 800,
+      "smallTargets": [],
+      "terminalHeight": null
+    },
+    {
+      "state": "navigation-manage",
+      "width": 360,
+      "height": 800,
+      "smallTargets": [],
+      "terminalHeight": 752
+    },
+    {
+      "state": "navigation-all-keys",
+      "width": 360,
+      "height": 800,
+      "smallTargets": [],
+      "terminalHeight": 752
+    },
+    {
+      "state": "key-generate",
+      "width": 360,
+      "height": 800,
+      "smallTargets": [],
+      "terminalHeight": 752
+    },
+    {
+      "state": "key-install",
+      "width": 360,
+      "height": 800,
+      "smallTargets": [],
+      "terminalHeight": 752
+    },
+    {
+      "state": "key-verified",
+      "width": 360,
+      "height": 800,
+      "smallTargets": [],
+      "terminalHeight": 752
+    },
+    {
+      "state": "key-import",
+      "width": 360,
+      "height": 800,
+      "smallTargets": [],
+      "terminalHeight": 752
+    },
+    {
+      "state": "key-settings",
+      "width": 360,
+      "height": 800,
+      "smallTargets": [],
+      "terminalHeight": 752
+    },
+    {
+      "state": "key-delete",
+      "width": 360,
+      "height": 800,
+      "smallTargets": [],
+      "terminalHeight": 752
+    },
+    {
+      "state": "key-export",
+      "width": 360,
+      "height": 800,
+      "smallTargets": [],
+      "terminalHeight": 752
+    },
+    {
+      "state": "key-restricted",
+      "width": 360,
+      "height": 800,
+      "smallTargets": [],
+      "terminalHeight": 752
+    },
+    {
+      "state": "key-generation-failed",
+      "width": 360,
+      "height": 800,
+      "smallTargets": [],
+      "terminalHeight": 752
+    },
+    {
       "flow": "first-login",
       "transitions": 4,
       "passed": true
@@ -323,6 +456,75 @@
       "passed": true
     },
     {
+      "flow": "key-generation-proposal",
+      "transitions": 3,
+      "passed": true
+    },
+    {
+      "proposalInteraction": "title-short-drag-cancels-click-and-switch",
+      "passed": true
+    },
+    {
+      "proposalInteraction": "title-next-and-last-boundary-no-wrap",
+      "passed": true
+    },
+    {
+      "proposalInteraction": "title-first-boundary-no-wrap",
+      "passed": true
+    },
+    {
+      "proposalInteraction": "vertical-dominant-drag-cancels",
+      "passed": true
+    },
+    {
+      "proposalInteraction": "title-reversed-short-release-cancels",
+      "passed": true
+    },
+    {
+      "proposalInteraction": "pointercancel-does-not-switch",
+      "passed": true
+    },
+    {
+      "proposalInteraction": "terminal-content-drag-does-not-switch",
+      "passed": true
+    },
+    {
+      "proposalInteraction": "key-strip-drag-scrolls-with-zero-simulated-keys",
+      "passed": true
+    },
+    {
+      "proposalInteraction": "explicit-key-click-consumes-one-shot-modifier-once",
+      "passed": true
+    },
+    {
+      "proposalInteraction": "locked-modifier-remains-visible-while-key-strip-scrolls",
+      "passed": true
+    },
+    {
+      "proposalInteraction": "offline-selection-clears-modifiers-and-input-focus-intent",
+      "passed": true
+    },
+    {
+      "proposalInteraction": "offline-key-and-lock-controls-disabled",
+      "passed": true
+    },
+    {
+      "proposalInteraction": "home-and-return-preserve-terminal-viewport",
+      "passed": true
+    },
+    {
+      "proposalInteraction": "wide-tab-drag-scrolls-without-selecting",
+      "passed": true
+    },
+    {
+      "proposalInteraction": "wide-tab-explicit-click-selects-readonly",
+      "passed": true
+    },
+    {
+      "proposalInteraction": "ownership-labels-accessible-buttons-and-single-48px-header",
+      "passed": true
+    },
+    {
       "viewport": [
         360,
         800
@@ -355,40 +557,55 @@
       "passed": true
     }
   ],
+  "proposalGestureChecks": 16,
+  "exportedScreenBodyTextMinimumContrast": 8.09,
   "storageEntries": 0,
   "status": "passed",
+  "renderedDesign": {
+    "prototype.html": "8112273b7e07897cba287ddefb299a2c8b9f0df2a199716080b1064b09f51fd3",
+    "review.html": "39845d2a0a6c8d9ce8a84cfbadbec49150438a5d94032d2b703c3a0f00e4e1c9",
+    "states.json": "c1f22ddecf438f3c8da46e93bc0448314a6188ddb41ef025fe302c11784b5465"
+  },
   "artifacts": {
     "Tabby-Android-First-Connection-Design.png": {
-      "bytes": 266294,
-      "sha256": "e30b9d1f729f400a3910be6dec66e6cec109d6af037aab04a7099c673cabd07e"
+      "bytes": 272690,
+      "sha256": "305c97659e10109440fb68b7f0d52a61c2c31f0a219a0f5d83a0baa502a86d5b"
     },
     "Tabby-Android-Foldable-Design.png": {
-      "bytes": 194735,
-      "sha256": "d8dcb5225fcc399e8ac1aac6ac1a7f8d409b956182bafc6506ec228d222899da"
+      "bytes": 181017,
+      "sha256": "d7832d979869e2f656e82e0a7af2b59312b1363a021eb2823a2dffd0d81c98d0"
     },
     "fold-ime.png": {
-      "bytes": 143282,
-      "sha256": "580b8c24e717b7f754d4867b7c57cf5ec39746e893a2a1aeeb3c8364bf90aee9"
+      "bytes": 248519,
+      "sha256": "fcc9c98fbf63fe889442bb849e96a5f9741c75410b807778f4087332901c72a7"
+    },
+    "Tabby-Android-Key-Setup-Design.png": {
+      "bytes": 358786,
+      "sha256": "463140f369be975d9cee4acf0e9f2a93b2a2f0eac9437c37f55551589cadef08"
     },
     "landscape.png": {
-      "bytes": 64110,
-      "sha256": "fc9070217fed617376f05f4afc11e98d06c0d3915ebf160728d77204b78986c6"
+      "bytes": 90858,
+      "sha256": "89541c156920d74c86592069649ff61fbfe5ce441f7d66078aeed11d1a6eb594"
     },
     "Tabby-Android-Design-Review.pdf": {
-      "bytes": 1461176,
-      "sha256": "2d7d26f22cbeee6a89b88b93e931162cdb5d11bb58df680e82224dabb7856f53"
+      "bytes": 1689910,
+      "sha256": "ce2f7764d388bc498b5a65fc23998d0b0f1ba38911b586832e53225298e168e3"
     },
     "Tabby-Android-Terminal-Design.png": {
-      "bytes": 298068,
-      "sha256": "a0d9446fa330570639e9dc9abc9303e58f1cbc7b1866c508a20891945ccc3aae"
+      "bytes": 296704,
+      "sha256": "9b874849cf5622e9ed984b773a3d162530fb3d54c381891962528aea734067e2"
     },
     "terminal.png": {
-      "bytes": 83895,
-      "sha256": "1764f6faf23bd6f42858fd863590a872b1b5da4838540ef0249659383748a3a2"
+      "bytes": 250111,
+      "sha256": "7f3ea353b59bb74ec95c3be109d81ac5a6836d05da771969025d18c0ae8c1e1b"
+    },
+    "Tabby-Android-Navigation-Design.png": {
+      "bytes": 239980,
+      "sha256": "c28effe8b2e6cc3242aa1fe370555b258f643542d4d1041f56883ac292292cc5"
     },
     "terminal-ime.png": {
-      "bytes": 96401,
-      "sha256": "4b97edf9e937a81b57e49e792d9ef4133aaaeebd91823e39a26bd44086798e2e"
+      "bytes": 184706,
+      "sha256": "252f07513d531b723b4fc1d34029def3e8ce7d8ed0094f1365901e392ca87cf6"
     }
   }
 }

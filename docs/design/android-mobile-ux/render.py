@@ -9,6 +9,8 @@ import threading
 from pathlib import Path
 from playwright.sync_api import sync_playwright
 from build import ROOT, STATES, build
+from navigation_checks import check_navigation
+from validate import contrast
 
 class QuietHandler(http.server.SimpleHTTPRequestHandler):
     def log_message(self, *args):
@@ -54,6 +56,7 @@ def run(chromium):
                 ("notification-stop","terminal",["more","background","permission","notification","stopped"]),
                 ("permission-denial","background",["permission","permission-denied","terminal"]),
                 ("missing-recovery","offline",["offline-details","missing","tmux"]),
+                ("key-generation-proposal","key-generate",["key-install","key-verified","navigation-phone"]),
             ]
             for name,start,targets in flows:
                 page.evaluate("name=>window.designShow(name)",start)
@@ -61,6 +64,7 @@ def run(chromium):
                     page.locator(f".mobile [data-screen='{target}']").first.click()
                     assert page.get_attribute("body","data-current")==target
                 report["checks"].append({"flow":name,"transitions":len(targets),"passed":True})
+            check_navigation(page,report)
             for width,height,key in [(360,800,"terminal-ime"),(420,900,"terminal"),(840,900,"fold-ime"),(800,360,"landscape")]:
                 page.set_viewport_size({"width":width,"height":height})
                 page.goto(base+f"/prototype.html?capture&screen={key}")
@@ -70,7 +74,17 @@ def run(chromium):
             page.set_viewport_size({"width":1120,"height":1000})
             page.goto(base+"/review.html")
             page.evaluate("document.fonts.ready")
-            for key,name in [("focus","Tabby-Android-Terminal-Design.png"),("fold","Tabby-Android-Foldable-Design.png"),("first","Tabby-Android-First-Connection-Design.png")]:
+            colors=page.evaluate("""()=>[...document.querySelectorAll('.mobile p')].map(p=>{
+              let owner=p;while(owner&&getComputedStyle(owner).backgroundColor==='rgba(0, 0, 0, 0)')owner=owner.parentElement;
+              return {text:getComputedStyle(p).color,background:owner?getComputedStyle(owner).backgroundColor:'rgb(17, 24, 32)'};
+            })""")
+            def rgb(value):
+                values=value.replace("rgb(","").replace(")","").split(",")
+                return "#"+"".join(f"{int(x.strip()):02x}" for x in values[:3])
+            ratios=[contrast(rgb(x["text"]),rgb(x["background"])) for x in colors]
+            assert ratios and min(ratios)>=4.5, min(ratios)
+            report["exportedScreenBodyTextMinimumContrast"]=round(min(ratios),2)
+            for key,name in [("focus","Tabby-Android-Terminal-Design.png"),("fold","Tabby-Android-Foldable-Design.png"),("first","Tabby-Android-First-Connection-Design.png"),("navigation","Tabby-Android-Navigation-Design.png"),("key-setup","Tabby-Android-Key-Setup-Design.png")]:
                 page.locator("#"+key).screenshot(path=str(evidence/name))
             page.pdf(path=str(evidence/"Tabby-Android-Design-Review.pdf"),print_background=True,prefer_css_page_size=True)
             assert not report["consoleErrors"], report["consoleErrors"]
@@ -78,10 +92,11 @@ def run(chromium):
             assert page.evaluate("localStorage.length+sessionStorage.length")==0
             report["storageEntries"]=0
             report["status"]="passed"
+            report["renderedDesign"]={name:hashlib.sha256((ROOT/name).read_bytes()).hexdigest() for name in ("prototype.html","review.html","states.json")}
             report["artifacts"]={x.name:{"bytes":x.stat().st_size,"sha256":hashlib.sha256(x.read_bytes()).hexdigest()} for x in evidence.iterdir() if x.suffix in (".png",".pdf")}
             (evidence/"design-render-report.json").write_text(json.dumps(report,ensure_ascii=False,indent=2)+"\n")
             browser.close()
-        print(json.dumps({"states":len(STATES),"flows":len(flows),"viewports":4,"status":report["status"],"evidence":str(evidence)}))
+        print(json.dumps({"states":len(STATES),"flows":len(flows),"proposalGestureChecks":report["proposalGestureChecks"],"viewports":4,"status":report["status"],"evidence":str(evidence)}))
     finally:
         server.shutdown()
 

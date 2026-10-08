@@ -29,11 +29,11 @@
   },
   "terminal": {
     "label": "08 · 专注终端 · 键盘关",
-    "note": "只有 48dp 状态行常驻。大块内容区不放重复品牌、新建或断开按钮。"
+    "note": "本轮提案：Home独立；标题1/3位置与点击列表；滑标题才切会话。"
   },
   "terminal-ime": {
     "label": "09 · 专注终端 · 键盘开",
-    "note": "360×800 安全窗口假设，IME300dp。终端矩形404dp，35×18估算；非设备测量。"
+    "note": "09保留：薄荷边界上方是Tabby快捷键；demo/工作/输入法属于系统IME候选示意。"
   },
   "sessions": {
     "label": "10 · 切换会话",
@@ -53,19 +53,19 @@
   },
   "fold": {
     "label": "14 · 展开 · 专注终端",
-    "note": "设计窗口840×900；85×40估算。展开也不自动出现占宽侧栏。"
+    "note": "同一48dp顶栏显示Tab；Tab拖动只滚动，点击选中；当前身份摘要固定可见。"
   },
   "fold-ime": {
     "label": "15 · 展开 · 键盘开",
-    "note": "设计窗口840×900，IME320；终端矩形484dp，85×22估算。"
+    "note": "同一行显示更多快捷键，不加第二行。系统IME独立于Tabby。"
   },
   "fold-panel": {
     "label": "16 · 展开 · 可选会话面板",
-    "note": "用户主动展开240dp会话侧栏后，网格按剩余窗口重算。"
+    "note": "Home与同栏Tab保留；用户主动面板占240dp，不靠缩字号补列数。"
   },
   "landscape": {
     "label": "17 · 横屏短窗口",
-    "note": "800×360，IME180。默认收起快捷条，终端矩形132dp；81×5估算。"
+    "note": "短窗口使用标题选择器与Home；默认折叠快捷条。800×360、IME180是假设，终端132dp预算。"
   },
   "selection": {
     "label": "18 · 文本选择",
@@ -153,6 +153,82 @@
   },
   "stopped": {
     "label": "39 · 用户停止",
+    "note": ""
+  },
+  "navigation-phone": {
+    "label": "40 · 窄屏会话导航",
+    "note": "浏览器手势模拟：没有远端输入；门槛为设计候选，原生验收未完成。"
+  },
+  "navigation-ime": {
+    "label": "41 · 标题与键栏各自横滑",
+    "note": "浏览器手势模拟：没有远端输入；门槛为设计候选，原生验收未完成。"
+  },
+  "navigation-first": {
+    "label": "42 · 首项 · 只读",
+    "note": "浏览器手势模拟：没有远端输入；门槛为设计候选，原生验收未完成。"
+  },
+  "navigation-last": {
+    "label": "43 · 末项 · 已断线",
+    "note": "浏览器手势模拟：没有远端输入；门槛为设计候选，原生验收未完成。"
+  },
+  "navigation-locked": {
+    "label": "44 · Ctrl锁定可见",
+    "note": "浏览器手势模拟：没有远端输入；门槛为设计候选，原生验收未完成。"
+  },
+  "navigation-wide": {
+    "label": "45 · 宽屏同栏Tab",
+    "note": ""
+  },
+  "navigation-sessions": {
+    "label": "46 · 全部会话",
+    "note": ""
+  },
+  "navigation-home": {
+    "label": "47 · Home回连接与会话",
+    "note": ""
+  },
+  "navigation-manage": {
+    "label": "48 · 独立管理入口",
+    "note": ""
+  },
+  "navigation-all-keys": {
+    "label": "49 · 全部键与修饰键",
+    "note": ""
+  },
+  "key-generate": {
+    "label": "50 · 用户允许生成密钥",
+    "note": ""
+  },
+  "key-install": {
+    "label": "51 · 确认安装公钥",
+    "note": ""
+  },
+  "key-verified": {
+    "label": "52 · 新连接验证结果",
+    "note": ""
+  },
+  "key-import": {
+    "label": "53 · 现有私钥导入能力",
+    "note": ""
+  },
+  "key-settings": {
+    "label": "54 · 本地SSH密钥管理",
+    "note": ""
+  },
+  "key-delete": {
+    "label": "55 · 删除本地密钥",
+    "note": ""
+  },
+  "key-export": {
+    "label": "56 · 私钥导出风险",
+    "note": ""
+  },
+  "key-restricted": {
+    "label": "57 · 安装受限或无法验证",
+    "note": ""
+  },
+  "key-generation-failed": {
+    "label": "58 · 安全保存失败",
     "note": ""
   }
 }
