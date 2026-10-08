@@ -5,6 +5,7 @@ import type { PluginListenerHandle } from '@capacitor/core'
 import { SSH_BRIDGE, type AuthMode, type SSHCommand, type SSHEvent, encodeBytes, decodeBytes } from './bridge'
 import { TerminalInput, arrowSequence, controlSequence, pasteSequence } from './terminal-input'
 import { TerminalView } from './terminal-view'
+import { secureUUID } from './web-platform'
 import { MobileTmuxController, MobileTmuxError, MobileTmuxRecovery, type TmuxBinding, type TmuxSessionInfo, type TmuxSocket } from './tmux-controller'
 
 export interface SessionEndpoint { host: string, port: number, username: string, authMode: AuthMode, sessionMode: 'direct' | 'tmux' }
@@ -672,7 +673,7 @@ export class SessionPaneComponent implements AfterViewInit, OnDestroy {
     async choosePrivateKey(): Promise<void> {
         if (!this.active || this.busy || this.pickerActive) { return }
         const token = ++this.pickerToken; this.pickerActive = true
-        const requestId = this.pickerRequestId = crypto.randomUUID()
+        const requestId = this.pickerRequestId = secureUUID()
         try {
             const result = await this.bridge.selectPrivateKey({ ownerId: this.tabID, requestId })
             if (token === this.pickerToken && !this.busy && !this.destroyed) {

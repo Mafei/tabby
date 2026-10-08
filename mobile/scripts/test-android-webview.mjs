@@ -4,6 +4,68 @@ import { APP, RUNNER, DONE, INPUT, METADATA, check, until, pause, TestFailure, i
 const require = createRequire(import.meta.url)
 const quote = value => `'${value.replace(/'/g, `'"'"'`)}'`
 
+/** Classify untrusted browser errors immediately; never retain message/stack/URL. */
+export function javaScriptErrorCategory (value) {
+    const text = typeof value === 'string' ? value : typeof value?.message === 'string' ? value.message : ''
+    const name = typeof value?.name === 'string' ? value.name : ''
+    const kinds = new Map([['TypeError', 'TYPE_ERROR'], ['ReferenceError', 'REFERENCE_ERROR'], ['SyntaxError', 'SYNTAX_ERROR'],
+        ['RangeError', 'RANGE_ERROR'], ['EvalError', 'EVAL_ERROR'], ['URIError', 'URI_ERROR'], ['AggregateError', 'AGGREGATE_ERROR'],
+        ['Error', 'ERROR'], ['DOMException', 'DOM_EXCEPTION']])
+    if (text.length > 16384 || name.length > 128) { return { kind: 'OTHER', builtin: 'UNKNOWN' } }
+    const matched = /^(?:Uncaught\s+(?:\(in promise\)\s+)?)?(TypeError|ReferenceError|SyntaxError|RangeError|EvalError|URIError|AggregateError|DOMException|Error)(?::|\b)/.exec(text)
+    let kind = kinds.get(name) || kinds.get(matched?.[1]) || 'OTHER'
+    if (/Refused to (?:execute|evaluate|load).{0,128}(?:Content Security Policy|script)/i.test(text) || /Content Security Policy.*(?:unsafe-eval|script-src)/i.test(text)) { kind = 'CSP_BLOCKED' }
+    const builtins = [
+        ['OBJECT_HAS_OWN', /\b(?:Object\.)?hasOwn\b/], ['CRYPTO_RANDOM_UUID', /\b(?:crypto\.)?randomUUID\b/],
+        ['ARRAY_AT', /\bArray(?:\.prototype)?\.at\b|\.at\s+is not a function/], ['ABORT_SIGNAL_ANY', /\bAbortSignal\.any\b/],
+        ['STRUCTURED_CLONE', /\bstructuredClone\b/], ['ARRAY_FIND_LAST', /\bfindLast\b/],
+    ]
+    const builtin = ['TYPE_ERROR', 'REFERENCE_ERROR'].includes(kind) && /(?:not a function|not defined|undefined)/i.test(text)
+        ? builtins.find(([, expression]) => expression.test(text))?.[0] || 'UNKNOWN' : 'UNKNOWN'
+    return { kind, builtin }
+}
+
+/** The optional public Log backlog shares the existing CDP phase deadline. */
+export function javaScriptBootObservation (page) {
+    const errors = []
+    let dropped = 0
+    let backlog = 'NOT_ENABLED'
+    const record = (source, value) => {
+        if (errors.length >= 16) { dropped = Math.min(1000000, dropped + 1); return }
+        errors.push({ source, ...javaScriptErrorCategory(value) })
+    }
+    const pageError = value => record('PAGE_ERROR', value)
+    const consoleError = value => { if (value.type() === 'error') { record('CONSOLE_ERROR', value.text()) } }
+    page.on('pageerror', pageError)
+    page.on('console', consoleError)
+    return {
+        async enableBacklog (session, deadline) {
+            session.on('Log.entryAdded', ({ entry }) => {
+                if (entry?.level === 'error') { record('CDP_LOG', typeof entry.text === 'string' ? entry.text : '') }
+            })
+            try {
+                await observeReadUntil(() => session.send('Log.enable'), deadline, 'ANDROID_JS_LOG_OBSERVATION_DEADLINE_EXCEEDED')
+                backlog = 'COLLECTED'
+            } catch (error) {
+                backlog = 'UNAVAILABLE'
+                // Unsupported Log is diagnostic unavailability. An actual
+                // deadline/cancel still fails the unchanged CDP phase.
+                if (error instanceof TestFailure) { throw error }
+            }
+        },
+        snapshot: () => ({ backlog, errors: errors.map(value => ({ ...value })), dropped }),
+        dispose: () => { page.off('pageerror', pageError); page.off('console', consoleError) },
+    }
+}
+
+export function quarterTurnTarget (rotation) {
+    const values = ['ROTATION_0', 'ROTATION_90', 'ROTATION_180', 'ROTATION_270']
+    const current = values.indexOf(rotation)
+    check(current >= 0, 'ANDROID_ROTATION_BASELINE_UNKNOWN')
+    const requested = (current + 1) % values.length
+    return { requested, expected: values[requested] }
+}
+
 /** Uses the real Android app, real Capacitor plugin and native SSH transport. */
 export async function webviewAcceptance (android, fixture) {
     // Playwright debug/protocol logging can contain arguments. Never enable it
@@ -19,6 +81,7 @@ export async function webviewAcceptance (android, fixture) {
     const passed = []
     const settings = []
     const deviceStates = []
+    const bootObservations = []
     let harness
     let harnessDeadline
     let harnessPID
@@ -26,6 +89,7 @@ export async function webviewAcceptance (android, fixture) {
     let stage = 'harness-start'
     let substage = 'initializing'
     let sizeSequence = 0
+    let rotationGeometry
 
     const verify = label => { passed.push(label); console.log(`PASS Android WebView: ${label}.`) }
     async function step (name, action) {
@@ -39,6 +103,8 @@ export async function webviewAcceptance (android, fixture) {
         const counterNames = new Set(['clients', 'sessions', 'pendingAuth', 'ptys', 'timers', 'authenticated',
             'authPrompts', 'authAnswers', 'shellStarts', 'resizeRequests', 'connections'])
         const result = { stage, substage, passedCases: [...passed], deviceStates,
+            javascriptBoot: bootObservations.map(value => value.snapshot()),
+            ...(rotationGeometry ? { rotationGeometry } : {}),
             nativeInput: android.lastInput,
             errorKind: error instanceof TestFailure ? 'FIXED_TEST_FAILURE'
                 : error?.name === 'TimeoutError' ? 'PLAYWRIGHT_TIMEOUT'
@@ -88,6 +154,10 @@ export async function webviewAcceptance (android, fixture) {
                         .map(key => [key, values[key]]))
                     const notice = document.querySelector('.notice')?.textContent || ''
                     return {
+                        capabilities: { objectHasOwn: typeof Object.hasOwn === 'function', cryptoRandomUUID: typeof window.crypto?.randomUUID === 'function',
+                            arrayAt: typeof Array.prototype.at === 'function', abortSignalAny: typeof window.AbortSignal?.any === 'function',
+                            cssDynamicViewport: typeof window.CSS?.supports === 'function' && window.CSS.supports('height', '100dvh') },
+                        bootstrapFallback: document.body?.textContent?.includes('界面无法启动。请重新打开应用。') === true,
                         documentReady: ['loading', 'interactive', 'complete'].includes(document.readyState) ? document.readyState : 'unknown',
                         status: statusNames.get(document.querySelector('header .status')?.textContent) || 'UNRECOGNIZED',
                         notice: notice ? noticeNames.get(notice) || 'OTHER_FIXED_UI_NOTICE' : 'NONE',
@@ -351,8 +421,10 @@ export async function webviewAcceptance (android, fixture) {
         const preparation = { harness: previousPID === undefined ? 'first' : 'fresh-process', actions: [] }
         deviceStates.push(preparation)
         preparation.beforeCDP = await step('focus-before-cdp-attach', () => focusSample())
-        page = await observeUntil(view.page(), harnessDeadline, 'ANDROID_CDP_ATTACH_DEADLINE_EXCEEDED')
+        page = await observeReadUntil(() => view.page(), harnessDeadline, 'ANDROID_CDP_ATTACH_DEADLINE_EXCEEDED')
         page.setDefaultTimeout(15000)
+        const bootObservation = javaScriptBootObservation(page)
+        bootObservations.push(bootObservation)
         await step('cdp-disable-focus-emulation', async () => {
             const deadline = Math.min(harnessDeadline, Date.now() + 5000)
             const inTime = () => check(Date.now() < deadline, 'ANDROID_CDP_FOCUS_OBSERVATION_DEADLINE_EXCEEDED')
@@ -372,6 +444,8 @@ export async function webviewAcceptance (android, fixture) {
                 // focus observable; this does not request Android window focus.
                 await observeUntil(session.send('Emulation.setFocusEmulationEnabled', { enabled: false }), deadline,
                     'ANDROID_CDP_FOCUS_OBSERVATION_DEADLINE_EXCEEDED')
+                inTime()
+                await bootObservation.enableBacklog(session, deadline)
                 inTime()
             } catch (error) { failure = error; throw error } finally {
                 const detaching = Promise.resolve().then(() => session.detach())
@@ -730,8 +804,44 @@ export async function webviewAcceptance (android, fixture) {
         await step('keyboard-hide-after-shown-size', () => plugin('hideKeyboard'))
         await step('keyboard-hidden-before-rotation', () => until(async () => !(await viewport()).visible, 'ANDROID_IME_DID_NOT_HIDE_AFTER_SHOW'))
         await step('rotation-disable-automatic', () => setting('system', 'accelerometer_rotation', 0))
-        await step('rotation-landscape', () => setting('system', 'user_rotation', 1))
-        await step('rotation-native-viewport-landscape', () => until(async () => { const value = await viewport(); return value.viewportWidth > value.viewportHeight }, 'ANDROID_ROTATION_DID_NOT_CHANGE_VIEWPORT'))
+        const rotationDeadline = Math.min(harnessDeadline, Date.now() + 30000)
+        const readRotationGeometry = async () => {
+            const [native, browser, state] = await observeReadUntil(() => Promise.all([
+                viewport(), page.evaluate(() => ({ width: innerWidth, height: innerHeight })),
+                android.input({ type: 'deviceState' }, { deadline: rotationDeadline }),
+            ]), rotationDeadline, 'ANDROID_ROTATION_DID_NOT_CHANGE_VIEWPORT')
+            return { nativeWidth: native.viewportWidth, nativeHeight: native.viewportHeight, browserWidth: browser.width,
+                browserHeight: browser.height, keyboardVisible: native.visible, rotation: state.rotation }
+        }
+        const validRotationGeometry = value => ['nativeWidth', 'nativeHeight', 'browserWidth', 'browserHeight']
+            .every(key => Number.isFinite(value[key]) && value[key] > 0)
+            && value.nativeWidth !== value.nativeHeight && value.browserWidth !== value.browserHeight
+            && (value.nativeWidth > value.nativeHeight) === (value.browserWidth > value.browserHeight)
+            && value.keyboardVisible === false
+        let rotationBefore
+        let previousRotationGeometry
+        let rotationStableSince = Date.now()
+        await step('rotation-hidden-baseline-stable', () => until(async () => {
+            const current = await readRotationGeometry()
+            const serialized = JSON.stringify(current)
+            if (!validRotationGeometry(current) || serialized !== previousRotationGeometry) {
+                previousRotationGeometry = serialized; rotationStableSince = Date.now(); return false
+            }
+            rotationBefore = current
+            return Date.now() - rotationStableSince >= 350 && Date.now() < rotationDeadline
+        }, 'ANDROID_ROTATION_BASELINE_DID_NOT_STABILIZE', rotationDeadline - Date.now()))
+        const rotation = quarterTurnTarget(rotationBefore.rotation)
+        const wasLandscape = rotationBefore.nativeWidth > rotationBefore.nativeHeight
+        rotationGeometry = { before: rotationBefore, requested: rotation.requested }
+        await step('rotation-quarter-turn', () => observeReadUntil(() => setting('system', 'user_rotation', rotation.requested), rotationDeadline,
+            'ANDROID_ROTATION_DID_NOT_CHANGE_VIEWPORT'))
+        await step('rotation-native-and-dom-orientation-changed', () => until(async () => {
+            const current = await readRotationGeometry()
+            if (validRotationGeometry(current)) { rotationGeometry.after = current }
+            return current.rotation === rotation.expected && validRotationGeometry(current)
+                && (current.nativeWidth > current.nativeHeight) !== wasLandscape
+                && (current.browserWidth > current.browserHeight) !== wasLandscape && Date.now() < rotationDeadline
+        }, 'ANDROID_ROTATION_DID_NOT_CHANGE_VIEWPORT', rotationDeadline - Date.now()))
         const sizeRotated = await size(false, 'rotated')
         substage = 'rotation-real-pty-cols-changed'
         check(sizeRotated.cols !== sizeBefore.cols, 'ANDROID_ROTATION_DID_NOT_RESIZE_REMOTE_PTY')
@@ -822,6 +932,7 @@ export async function webviewAcceptance (android, fixture) {
         failure.diagnostics = await diagnostics(error)
         throw failure
     } finally {
+        for (const observation of bootObservations) { observation.dispose() }
         if (harness) {
             try { await android.privateFile(DONE, ''); await harness.result } catch { harness.terminate() }
         }

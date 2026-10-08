@@ -4,6 +4,7 @@ import { SessionPaneComponent, type SessionEndpoint } from './session-pane.compo
 import { MobileTmuxRegistry, SavedTmuxStore, type TmuxBinding } from './tmux-controller'
 import { SSH_BRIDGE } from './bridge'
 import type { PluginListenerHandle } from '@capacitor/core'
+import { secureUUID } from './web-platform'
 
 interface SessionTab { id: string, endpoint?: SessionEndpoint, binding?: TmuxBinding, title?: string, remembered?: boolean }
 
@@ -29,7 +30,7 @@ interface SessionTab { id: string, endpoint?: SessionEndpoint, binding?: TmuxBin
 })
 export class AppComponent implements OnDestroy {
     @ViewChildren(SessionPaneComponent) private panes!: QueryList<SessionPaneComponent>
-    tabs: SessionTab[] = [{ id: crypto.randomUUID() }]
+    tabs: SessionTab[] = [{ id: secureUUID() }]
     activeTabID = this.tabs[0].id
     notice = ''
     private readonly registry = new MobileTmuxRegistry<string>()
@@ -76,7 +77,7 @@ export class AppComponent implements OnDestroy {
     newTab(sourceID?: string): void {
         if (this.tabs.length >= 4) { this.notice = '最多同时打开 4 个 SSH 标签页。请先关闭一个标签页。'; return }
         const source = sourceID ? this.panes.find(pane => pane.tabID === sourceID) : undefined
-        const tab = { id: crypto.randomUUID(), endpoint: source?.endpointValue }
+        const tab = { id: secureUUID(), endpoint: source?.endpointValue }
         this.tabs = [...this.tabs, tab]; this.selectTab(tab.id)
     }
 
@@ -84,7 +85,7 @@ export class AppComponent implements OnDestroy {
         this.registry.release(id)
         const index = this.tabs.findIndex(tab => tab.id === id)
         this.tabs = this.tabs.filter(tab => tab.id !== id)
-        if (!this.tabs.length) { this.tabs = [{ id: crypto.randomUUID() }] }
+        if (!this.tabs.length) { this.tabs = [{ id: secureUUID() }] }
         if (this.activeTabID === id) { this.selectTab(this.tabs[Math.min(index, this.tabs.length - 1)].id) }
         this.notice = ''
         this.saveBindings()

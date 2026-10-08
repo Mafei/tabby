@@ -1,6 +1,7 @@
 import { createRequire } from 'node:module'
 import { APP, RUNNER, DONE, INPUT, check, until, pause, TestFailure, instrumentationResult, observeUntil, observeReadUntil } from './test-android-utils.mjs'
 import { TMUX_WEBVIEW_CASES } from './test-android-tmux-cases.mjs'
+import { javaScriptBootObservation } from './test-android-webview.mjs'
 import { connect as sshConnect, exec as sshExec, terminal as sshTerminal, quote } from '../test/ssh-fixture-client.mjs'
 
 const require = createRequire(import.meta.url)
@@ -24,6 +25,7 @@ export async function tmuxWebviewAcceptance (android, fixture) {
     let lastTouch
     const passed = []
     const harnesses = []
+    const bootObservations = []
     const externalClients = new Set()
     const base = `${quote(fixture.metadata.tmuxPath)} -S ${quote(fixture.metadata.tmuxSocket)} -f /dev/null`
     const active = () => page.locator('.session-pane:not([hidden])')
@@ -169,6 +171,8 @@ export async function tmuxWebviewAcceptance (android, fixture) {
         record.beforeCDP = await step('focus-before-cdp-attach', focusSample)
         page = await observeReadUntil(() => view.page(), harnessDeadline, 'ANDROID_CDP_ATTACH_DEADLINE_EXCEEDED')
         page.setDefaultTimeout(15000)
+        const bootObservation = javaScriptBootObservation(page)
+        bootObservations.push(bootObservation)
         const deadline = deadlineFor(5000)
         let acquiring
         let session
@@ -180,6 +184,7 @@ export async function tmuxWebviewAcceptance (android, fixture) {
         let firstError
         try {
             await observeReadUntil(() => session.send('Emulation.setFocusEmulationEnabled', { enabled: false }), deadline, 'ANDROID_CDP_FOCUS_OBSERVATION_DEADLINE_EXCEEDED')
+            await bootObservation.enableBacklog(session, deadline)
         } catch (error) { firstError = error; throw error } finally {
             const detaching = Promise.resolve().then(() => session.detach()); detaching.catch(() => {})
             try { await observeUntil(detaching, deadline, 'ANDROID_CDP_FOCUS_OBSERVATION_DEADLINE_EXCEEDED') }
@@ -203,7 +208,9 @@ export async function tmuxWebviewAcceptance (android, fixture) {
                 } else {
                     // Credentials and exec commands are not part of this list.
                     observation.events.push({ sequence: ++observation.sequence, type: event.type, state: event.state, code: event.code, transportLost: event.transportLost,
-                        status: event.status, connectionId: event.connectionId, generation: event.generation, requestId: event.requestId })
+                        status: event.status, connectionId: event.connectionId, generation: event.generation, requestId: event.requestId,
+                        ...(typeof event.complete === 'boolean' ? { complete: event.complete } : {}),
+                        ...(Number.isSafeInteger(event.exitStatus) && event.exitStatus >= 0 && event.exitStatus <= 4294967295 ? { exitStatus: event.exitStatus } : {}) })
                     if (observation.events.length > 512) { observation.events.shift() }
                 }
             })
@@ -289,6 +296,7 @@ export async function tmuxWebviewAcceptance (android, fixture) {
             Object.keys(storage).every(key => !(storage.getItem(key) || '').includes(password))), fixture.metadata.password), 'ANDROID_WEB_STORAGE_CONTAINED_TEST_PASSWORD')
     }
     async function chooser () {
+        substage = 'tmux-chooser-ready'
         await wait(async () => await active().getByRole('region', { name: '选择 tmux 会话' }).count() > 0
             && await active().getByLabel('访问方式', { exact: true }).count() === 1
             && await active().getByLabel('访问方式', { exact: true }).isEnabled(), 'ANDROID_TMUX_CHOOSER_NOT_READY')
@@ -350,6 +358,7 @@ export async function tmuxWebviewAcceptance (android, fixture) {
     }
     async function diagnostics (error) {
         const result = { stage, substage, passedCases: [...passed], harnesses,
+            javascriptBoot: bootObservations.map(value => value.snapshot()),
             nativeInput: android.lastInput, errorKind: error instanceof TestFailure ? 'FIXED_TEST_FAILURE'
                 : error?.name === 'TimeoutError' ? 'PLAYWRIGHT_TIMEOUT' : 'UNEXPECTED',
             fixture: Object.fromEntries(Object.entries(fixture.stats()).filter(([key, value]) => counterNames.has(key) && Number.isSafeInteger(value) && value >= 0)),
@@ -362,15 +371,49 @@ export async function tmuxWebviewAcceptance (android, fixture) {
             observeReadUntil(() => android.anrState({ deadline, harnessPID }), deadline, 'ANDROID_ANR_STATE_DEADLINE_EXCEEDED'),
             observeReadUntil(() => page.evaluate(() => {
                 const states = new Set(['ready', 'authenticated', 'error', 'closed', 'connecting', 'verifying_host', 'authenticating'])
-                const types = new Set(['state', 'hostKey', 'auth', 'execStarted', 'execExit', 'execError', 'terminalError'])
+                const types = new Set(['state', 'hostKey', 'auth', 'execStarted', 'execData', 'execExit', 'execError', 'terminalError'])
                 const codes = new Set(['transport_lost', 'transport_failed', 'remote_disconnect', 'tcp_failed', 'tcp_timeout',
                     'cancelled', 'exec_cancelled', 'exec_timeout', 'exec_incomplete', 'channel_cleanup_timeout'])
+                const pane = document.querySelector('.session-pane:not([hidden])')
+                const statusNames = new Map([['未连接', 'DISCONNECTED'], ['连接中', 'CONNECTING'], ['等待主机密钥确认', 'WAITING_HOST_KEY'],
+                    ['认证中', 'AUTHENTICATING'], ['等待认证', 'WAITING_AUTH'], ['已连接', 'READY'], ['选择 tmux 会话', 'CHOOSING_TMUX'],
+                    ['连接会话中', 'ATTACHING_TMUX'], ['等待恢复', 'WAITING_RECOVERY'], ['正在恢复', 'RESTORING'], ['等待断开原因', 'WAITING_DISCONNECT_REASON']])
+                const noticeNames = new Map([
+                    ['无法检测所选 tmux socket。请检查权限、socket 和 tmux 版本。', 'TMUX_DETECTION_FAILED'],
+                    ['服务器返回的会话身份信息无效，操作已停止。', 'INVALID_TMUX_METADATA'],
+                    ['保存的会话已消失或被替换，恢复已停止；不会重新创建。', 'SESSION_MISSING'],
+                    ['服务器或会话身份已变化，恢复已停止；不会重新创建。', 'IDENTITY_REPLACED'],
+                    ['会话已有其他客户端，自动恢复已暂停。可手动选择共享、只读或显式接管。', 'SESSION_OCCUPIED'],
+                    ['无法新建会话。名称可能已存在；不会转为连接同名会话。', 'CREATE_FAILED'],
+                    ['原生 SSH 认证身份不完整或与请求不符，连接已停止。', 'AUTHENTICATED_IDENTITY_INVALID'],
+                    ['tmux 操作未完成。会话身份已保留，可核实后手动恢复。', 'TMUX_OPERATION_FAILED'],
+                    ['主机密钥已变化，连接已拒绝。请先通过可信渠道核实。', 'HOST_KEY_CHANGED'],
+                    ['SSH 连接失败或认证被拒绝。', 'SSH_FAILED'], ['SSH 连接已关闭。', 'CLOSED'],
+                ])
+                const notice = pane?.querySelector('.notice')?.textContent || ''
+                const access = pane?.querySelector('select[name="accessMode"]')
+                const socket = pane?.querySelector('select[name="socketKind"]')?.value
                 return { documentFocused: document.hasFocus(), paneCount: document.querySelectorAll('.session-pane').length,
+                    capabilities: { objectHasOwn: typeof Object.hasOwn === 'function', cryptoRandomUUID: typeof window.crypto?.randomUUID === 'function',
+                        arrayAt: typeof Array.prototype.at === 'function', abortSignalAny: typeof window.AbortSignal?.any === 'function',
+                        cssDynamicViewport: typeof window.CSS?.supports === 'function' && window.CSS.supports('height', '100dvh') },
+                    bootstrapFallback: document.body?.textContent?.includes('界面无法启动。请重新打开应用。') === true,
+                    status: statusNames.get(pane?.querySelector('header .status')?.textContent) || 'UNRECOGNIZED',
+                    notice: notice ? noticeNames.get(notice) || 'OTHER_FIXED_UI_NOTICE' : 'NONE',
+                    tmuxUnavailableHint: [...(pane?.querySelectorAll('.tmux-panel .hint') || [])].some(element =>
+                        element.textContent === '服务器没有 tmux。可使用普通 SSH；应用不会安装软件。'),
+                    actionBusy: !!pane?.querySelector('.tmux-panel [role="status"]'),
+                    accessSelectCount: pane?.querySelectorAll('select[name="accessMode"]').length || 0,
+                    accessSelectDisabled: access ? access.disabled === true : null,
+                    socketKind: ['default', 'name', 'path'].includes(socket) ? socket : 'UNKNOWN',
+                    sessionRowCount: pane?.querySelectorAll('.tmux-session-list > li').length || 0,
                     chooserVisible: !!document.querySelector('.session-pane:not([hidden]) .tmux-panel'),
                     events: (window.__tabbyTmuxObservation?.events || []).slice(-16).map(event => ({
                         type: types.has(event.type) ? event.type : 'other', state: states.has(event.state) ? event.state : 'other',
                         code: codes.has(event.code) ? event.code : 'other',
                         ...(typeof event.transportLost === 'boolean' ? { transportLost: event.transportLost } : {}),
+                        ...(typeof event.complete === 'boolean' ? { complete: event.complete } : {}),
+                        ...(Number.isSafeInteger(event.exitStatus) && event.exitStatus >= 0 && event.exitStatus <= 4294967295 ? { exitStatus: event.exitStatus } : {}),
                     })),
                     trustedTouchCount: (window.__tabbyTmuxObservation?.pointers || []).filter(event => event.trusted && event.pointerType === 'touch').length }
             }), deadline, 'ANDROID_TMUX_DOM_DIAGNOSTICS_DEADLINE_EXCEEDED'),
@@ -540,6 +583,7 @@ export async function tmuxWebviewAcceptance (android, fixture) {
         failure.diagnostics = await diagnostics(error)
         throw failure
     } finally {
+        for (const observation of bootObservations) { observation.dispose() }
         await closeExternal()
         if (harness) {
             try { await android.privateFile(DONE, ''); await harness.result } catch { harness.terminate() }

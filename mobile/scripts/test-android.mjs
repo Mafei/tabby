@@ -5,7 +5,7 @@ import { createHash } from 'node:crypto'
 import { resolve, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { startFixture } from './test-fixture.mjs'
-import { APP, RUNNER, METADATA, DONE, INPUT, INPUT_RESULT, Android, check, TestFailure, instrumentationResult, cancelCommands } from './test-android-utils.mjs'
+import { APP, RUNNER, METADATA, DONE, INPUT, INPUT_RESULT, Android, check, TestFailure, instrumentationResult, cancelCommands, observeReadUntil } from './test-android-utils.mjs'
 import { webviewAcceptance } from './test-android-webview.mjs'
 import { tmuxWebviewAcceptance } from './test-android-tmux.mjs'
 import { TMUX_NATIVE_CLASS, TMUX_ISOLATION_CLASS } from './test-android-tmux-cases.mjs'
@@ -16,6 +16,17 @@ function option (name, fallback) {
     if (index === -1) { return fallback }
     check(!!process.argv[index + 1] && !process.argv[index + 1].startsWith('--'), 'MISSING_RUNNER_OPTION')
     return process.argv[index + 1]
+}
+async function webviewIdentity () {
+    const deadline = Date.now() + 5000
+    const output = await observeReadUntil(() => {
+        const remaining = deadline - Date.now()
+        check(remaining > 0, 'RUNTIME_WEBVIEW_IDENTITY_DEADLINE_EXCEEDED')
+        return android.shell('dumpsys webviewupdate', { timeout: remaining })
+    }, deadline, 'RUNTIME_WEBVIEW_IDENTITY_DEADLINE_EXCEEDED')
+    const match = /Current WebView package[^\n]*\((com\.[A-Za-z0-9_.]+),\s*(\d+(?:\.\d+){1,4})\)/u.exec(output)
+    check(!!match && match[1].length <= 256 && match[2].length <= 64, 'RUNTIME_WEBVIEW_IDENTITY_INVALID')
+    return { webViewPackage: match[1], webViewVersion: match[2] }
 }
 const report = { suite: 'real-android-emulator', passed: false, limitations: [
     'Cloud AOSP emulator; physical-device touch behavior and a specific Chinese IME candidate UI remain unverified.',
@@ -74,14 +85,16 @@ try {
         const result = await android.launch(['shell', '-T', command], { timeout: 180000 }).result
         report.instrumentation = instrumentationResult(result, 7)
         console.log(`PASS Android instrumentation: ${report.instrumentation.tests} tests, no skips.`)
+        // The native Activity tests already initialize the actual provider.
+        // Capture only its bounded public identity before WebView boot checks,
+        // so a failed application startup still reports the engine in use.
+        Object.assign(report.compatibility, await webviewIdentity())
+        console.log(`Actual Android WebView: ${report.compatibility.webViewPackage} ${report.compatibility.webViewVersion}.`)
     }
     if (!process.argv.includes('--native-only')) {
         report.webview = await webviewAcceptance(android, fixture)
     }
-    const webviewIdentity = /Current WebView package[^\n]*\((com\.[A-Za-z0-9_.]+),\s*(\d+(?:\.\d+){1,4})\)/u.exec(await android.shell('dumpsys webviewupdate'))
-    check(!!webviewIdentity, 'RUNTIME_WEBVIEW_IDENTITY_INVALID')
-    report.compatibility.webViewPackage = webviewIdentity[1]
-    report.compatibility.webViewVersion = webviewIdentity[2]
+    Object.assign(report.compatibility, await webviewIdentity())
     if (!process.argv.includes('--native-only') && !process.argv.includes('--webview-only')) {
         tmuxFixture = await startFixture({ profile: 'control-tmux', tmuxPath: process.env.TABBY_TEST_TMUX })
         android.secrets.push(tmuxFixture.metadata.password)
@@ -106,6 +119,11 @@ try {
 } catch (error) {
     report.failure = error instanceof TestFailure ? error.code : 'ANDROID_TEST_SETUP_OR_UNEXPECTED_FAILURE'
     if (error instanceof TestFailure && error.diagnostics) { report.diagnostics = error.diagnostics }
+    if (report.compatibility?.webViewPackage && report.compatibility?.webViewVersion) {
+        report.diagnostics = { ...report.diagnostics, webView: {
+            package: report.compatibility.webViewPackage, version: report.compatibility.webViewVersion,
+        } }
+    }
     if (error instanceof TestFailure && error.nativeInstrumentation) {
         // The WebView wrapper adds its own stage diagnostics. Preserve only
         // the parser's fixed metadata, never the underlying process output.

@@ -1,3 +1,4 @@
+import './web-platform'
 import 'zone.js'
 import { enableProdMode, provideZoneChangeDetection } from '@angular/core'
 import { bootstrapApplication } from '@angular/platform-browser'

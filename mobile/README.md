@@ -135,11 +135,16 @@ SDK agreement. The current official metadata has no matching default or Google
 APIs x86_64 API 37 image, so Android 17 runtime remains an acceptance gap. The
 configured API 26 minimum is an installation declaration, not a claim that
 every old Android WebView was tested. The mobile language build explicitly
-targets Chrome 93+, while actual emulator reports record their WebView version
+targets Chrome 89+, while actual emulator reports record their WebView version
 and screen geometry; Angular upstream support remains its
 [published Baseline](https://angular.dev/reference/versions#browser-support).
 The [Capacitor Android support requirements](https://capacitorjs.com/docs/android#android-support)
 and syntax target alone do not establish compatibility of the complete app.
+The production entry supplies `Object.hasOwn` before Angular initialization.
+On engines without `crypto.randomUUID`, Tab and picker IDs use 16 bytes from
+`crypto.getRandomValues`; missing secure entropy stops startup. These paths
+have production-bundle browser regressions, while actual old-engine acceptance
+still requires the Android matrix below.
 No preview, Google Play, store, billing or personal signing agreement was accepted.
 
 The same free public `ubuntu-24.04` runner gives the disposable emulator four
