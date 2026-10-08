@@ -215,7 +215,7 @@ if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === imp
         console.error(code)
         if (failure.failureCode) {
             console.error(failure.failureCode)
-            console.error(JSON.stringify({ origin: failure.failureOrigin, kind: failure.failureKind, substage: failure.substage }))
+            console.error(JSON.stringify({ origin: failure.failureOrigin, kind: failure.failureKind, substage: failure.substage, loadError: failure.loadError }))
         }
         process.exitCode = 1
     }

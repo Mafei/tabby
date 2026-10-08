@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
+import { EventEmitter } from 'node:events'
+import { readFile } from 'node:fs/promises'
+import { runInNewContext } from 'node:vm'
 import { validateFailure, validateRuntime } from '../test-linux-font-renderer.mjs'
 import { failureCode, failureDiagnostic, normalizeDiagnostic } from '../linux-font-runtime/diagnostics.mjs'
 import { Terminal } from '../../tabby-terminal/node_modules/@xterm/xterm/lib/xterm.mjs'
@@ -51,7 +54,7 @@ test('failure categories survive both boundaries while unknown private errors ar
         const mainCode = failureCode(new Error(rendererCode))
         assert.deepEqual(validateFailure({ stage: 'SANDBOXED_FONT_RENDERER', failureCode: mainCode }), {
             passed: false, stage: 'SANDBOXED_FONT_RENDERER', code: 'FONT_RUNTIME_FAILED_SANDBOXED_FONT_RENDERER', failureCode: code,
-            failureOrigin: 'UNKNOWN', failureKind: 'UNKNOWN', substage: 'UNKNOWN',
+            failureOrigin: 'UNKNOWN', failureKind: 'UNKNOWN', substage: 'UNKNOWN', loadError: 'UNKNOWN',
         })
     }
     const privateValue = 'DO_NOT_PUBLISH_PRIVATE_RUNTIME_VALUE'
@@ -60,7 +63,7 @@ test('failure categories survive both boundaries while unknown private errors ar
     const result = validateFailure({ passed: true, stage: privateValue, failureCode: privateValue,
         message: privateValue, stack: privateValue, url: privateValue, metrics: { text: privateValue } })
     assert.deepEqual(result, { passed: false, stage: 'STARTUP', code: 'FONT_RUNTIME_FAILED_STARTUP', failureCode: 'UNKNOWN_FAILURE',
-        failureOrigin: 'UNKNOWN', failureKind: 'UNKNOWN', substage: 'UNKNOWN' })
+        failureOrigin: 'UNKNOWN', failureKind: 'UNKNOWN', substage: 'UNKNOWN', loadError: 'UNKNOWN' })
     assert.equal(JSON.stringify(result).includes(privateValue), false)
 })
 test('unknown exceptions retain only fixed origin, substage and built-in kind across both boundaries', () => {
@@ -78,11 +81,94 @@ test('unknown exceptions retain only fixed origin, substage and built-in kind ac
         assert.equal(JSON.stringify(result).includes(privateValue), false)
     }
     assert.deepEqual(normalizeDiagnostic({ failureCode: privateValue, failureOrigin: privateValue, failureKind: privateValue, substage: privateValue }), {
-        failureCode: 'UNKNOWN_FAILURE', failureOrigin: 'UNKNOWN', failureKind: 'UNKNOWN', substage: 'UNKNOWN',
+        failureCode: 'UNKNOWN_FAILURE', failureOrigin: 'UNKNOWN', failureKind: 'UNKNOWN', substage: 'UNKNOWN', loadError: 'UNKNOWN',
     })
     const main = failureDiagnostic(new TypeError(privateValue), 'CAPTURE', 'MAIN')
     assert.equal(validateFailure({ stage: 'SANDBOXED_FONT_RENDERER', ...main }).substage, 'CAPTURE')
     assert.equal(validateFailure({ stage: 'SANDBOXED_FONT_RENDERER', ...main }).failureOrigin, 'MAIN')
+    for (const code of ['ERR_FILE_NOT_FOUND', 'ERR_ACCESS_DENIED', 'ERR_ABORTED', 'ERR_BLOCKED_BY_CLIENT']) {
+        const error = Object.assign(new Error(privateValue), { code, url: privateValue })
+        const value = validateFailure({ stage: 'SANDBOXED_FONT_RENDERER', ...failureDiagnostic(error, 'RENDERER_LOAD', 'MAIN') })
+        assert.equal(value.loadError, code)
+        assert.equal(value.passed, false)
+        assert.equal(JSON.stringify(value).includes(privateValue), false)
+    }
+    assert.equal(failureDiagnostic(Object.assign(new Error(privateValue), { code: privateValue }), 'RENDERER_LOAD', 'MAIN').loadError, 'UNKNOWN')
+})
+test('actual test-app setup owns the zero-window gap, single exit and bounded cleanup', async () => {
+    const source = await readFile(new URL('../linux-font-runtime/main.cjs', import.meta.url), 'utf8')
+    assert.match(source, /\nmain\(\)\.catch\(fail\)\s*$/)
+    const setup = source.replace(/\nmain\(\)\.catch\(fail\)\s*$/, '\n')
+    const model = () => {
+        const app = new EventEmitter()
+        app.quitting = false; app.exits = []
+        app.quit = () => { app.quitting = true }
+        app.setPath = () => {}
+        app.exit = code => { app.exits.push(code) }
+        // The pinned Electron 43 init.ts default, before the test entry loads.
+        app.on('window-all-closed', () => { if (app.listenerCount('window-all-closed') === 1) { app.quit() } })
+        const active = new Set()
+        class Window {
+            constructor () {
+                active.add(this)
+                this.webContents = new EventEmitter()
+                this.webContents.setWindowOpenHandler = () => {}
+                this.webContents.loadFile = async () => {
+                    if (app.quitting) { throw Object.assign(new Error('PUBLIC_LOAD_CANCELLED'), { code: 'ERR_ABORTED' }) }
+                }
+            }
+            isDestroyed () { return !active.has(this) }
+            destroy () { if (active.delete(this) && active.size === 0) { app.emit('window-all-closed') } }
+        }
+        return { app, active, Window }
+    }
+    const original = model()
+    new original.Window().destroy()
+    assert.equal(original.app.quitting, true)
+    await assert.rejects(new original.Window().webContents.loadFile(), { code: 'ERR_ABORTED' })
+    const actualSetup = () => {
+        const { app, active, Window } = model()
+        const timers = []; const results = []
+        const context = { __dirname: '/public-font-fixture', process: new EventEmitter(),
+            require: name => {
+                if (name === 'electron') { return { app, BrowserWindow: Window, ipcMain: new EventEmitter(), session: {} } }
+                if (name === 'fs') { return { readFileSync: () => JSON.stringify({ userData: '/public-user-data', result: '/public-result' }),
+                    writeFileSync: (_file, value) => results.push(JSON.parse(value)) } }
+                if (name === 'path') { return { join: (...parts) => parts.join('/') } }
+                if (name === 'crypto') { return {} }
+                if (name === 'url') { return {} }
+                throw new Error('UNEXPECTED_TEST_REQUIRE')
+            },
+            setTimeout: (callback, delay) => { timers.push({ callback, delay }); return { unref () {} } }, clearTimeout: () => {},
+        }
+        // Execute the real main setup and function bodies, suppressing only its
+        // automatic entry. This is a controlled lifecycle test, not GUI proof.
+        runInNewContext(setup, context)
+        return { app, active, timers, results, context }
+    }
+    const owned = actualSetup()
+    owned.context.secureWindow({}).destroy()
+    assert.equal(owned.app.quitting, false)
+    const isolated = owned.context.secureWindow({})
+    let prevented = false
+    const navigation = { preventDefault: () => { prevented = true } }
+    isolated.webContents.emit('will-navigate', navigation, 'file:///public-font-fixture/font-test.ready.html')
+    assert.equal(prevented, false)
+    isolated.webContents.emit('will-navigate', navigation, 'https://public.invalid/')
+    assert.equal(prevented, true)
+    await isolated.webContents.loadFile()
+    owned.context.finish({ passed: true })
+    owned.context.finish({ passed: false })
+    assert.equal(owned.active.size, 0)
+    assert.deepEqual(owned.app.exits, [0])
+    assert.deepEqual(owned.results, [{ passed: true }])
+    const timeout = actualSetup()
+    timeout.context.secureWindow({})
+    assert.equal(timeout.timers.length, 1); assert.equal(timeout.timers[0].delay, 90000)
+    timeout.timers[0].callback()
+    assert.equal(timeout.active.size, 0)
+    assert.deepEqual(timeout.app.exits, [1])
+    assert.equal(timeout.results.length, 1); assert.equal(timeout.results[0].passed, false)
 })
 test('the real pinned xterm default preserves the active wrapped group during resize', async () => {
     const term = new Terminal({ cols: 40, rows: 18, allowProposedApi: true })

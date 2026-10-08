@@ -9,6 +9,9 @@ const config = JSON.parse(fs.readFileSync(path.join(__dirname, 'font-test-config
 const deadline = Date.now() + 90000
 app.setPath('userData', config.userData)
 app.setPath('crashDumps', path.join(config.userData, 'crashes'))
+// The product probe closes before the isolated test window opens. Let the
+// bounded test lifetime and finish() own exit across that zero-window gap.
+app.on('window-all-closed', () => {})
 let finished = false
 let stage = 'STARTUP'
 let substage = 'INITIALIZATION'

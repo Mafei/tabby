@@ -4,6 +4,11 @@ service. It copies the AppDir into a private temporary directory, verifies the
 executable hash, and replaces only that copy's application entry. The delivered
 AppDir and AppImage remain unchanged.
 
+The test app subscribes to `window-all-closed` so closing its product probe
+does not start Electron's default quit before the sandboxed window opens.
+The existing 90-second deadline and `finish()` still own bounded cleanup and
+exit; explicit quit and renderer/load failures remain failures.
+
 Run after a clean checkout has built and audited the portable package:
 
 ```sh
@@ -64,7 +69,8 @@ allow ZWJ and flag grapheme sequences to occupy multiple terminal cells.
 
 Failures retain the fixed stage and an allowlisted error category, such as
 `FONT_MONO_WIDTH_FAILED` or `TERMINAL_COMPLETED_LINE_REFLOW_FAILED`. They also
-retain an allowlisted main/renderer origin, operation substage and built-in
-exception kind. Unknown exceptions become `UNKNOWN_FAILURE`; arbitrary messages, console output,
+retain an allowlisted main/renderer origin, operation substage, built-in
+exception kind and Electron load error code such as `ERR_ABORTED`.
+Unknown exceptions become `UNKNOWN_FAILURE`; arbitrary messages, console output,
 paths, stacks and user text never enter the failure receipt. CI also uploads
 this bounded failure receipt when the runtime probe fails.

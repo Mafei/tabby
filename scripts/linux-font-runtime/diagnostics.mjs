@@ -17,6 +17,8 @@ const codes = new Set([
 ])
 const kinds = new Set(['Error', 'TypeError', 'ReferenceError', 'RangeError', 'SyntaxError', 'URIError', 'EvalError',
     'SecurityError', 'NotSupportedError', 'InvalidStateError', 'NetworkError', 'AbortError', 'OperationError', 'DataError'])
+const loadErrors = new Set(['ERR_FILE_NOT_FOUND', 'ERR_ACCESS_DENIED', 'ERR_ABORTED', 'ERR_BLOCKED_BY_CLIENT',
+    'ERR_FAILED', 'ERR_INVALID_URL', 'ERR_UNKNOWN_URL_SCHEME', 'ERR_NETWORK_ACCESS_DENIED', 'ERR_INSUFFICIENT_RESOURCES'])
 const substages = new Set(['INITIALIZATION', 'NATIVE_PROBE', 'PRODUCT_FONT_PROBE', 'RENDERER_SETUP', 'RENDERER_LOAD',
     'RENDERER_WAIT', 'RENDERER_RESULT', 'PLATFORM_FONT_ATTACH', 'PLATFORM_FONT_DOM', 'PLATFORM_FONT_CSS',
     'PLATFORM_FONT_SAMPLE', 'CAPTURE', 'PREFERENCES', 'SANDBOX', 'FONT_LOAD', 'FONT_MATCH', 'SAMPLES',
@@ -31,10 +33,11 @@ export function normalizeDiagnostic (value) {
     return { failureCode: failureCode(value?.failureCode),
         failureOrigin: ['MAIN', 'RENDERER'].includes(value?.failureOrigin) ? value.failureOrigin : 'UNKNOWN',
         failureKind: kinds.has(value?.failureKind) ? value.failureKind : 'UNKNOWN',
-        substage: substages.has(value?.substage) ? value.substage : 'UNKNOWN' }
+        substage: substages.has(value?.substage) ? value.substage : 'UNKNOWN',
+        loadError: loadErrors.has(value?.loadError) ? value.loadError : 'UNKNOWN' }
 }
 export function failureDiagnostic (error, substage, origin) {
-    return normalizeDiagnostic({ failureCode: failureCode(error), failureKind: error?.name, substage, failureOrigin: origin })
+    return normalizeDiagnostic({ failureCode: failureCode(error), failureKind: error?.name, substage, failureOrigin: origin, loadError: error?.code })
 }
 export function runtimeFailure (value) {
     const stage = runtimeStages.includes(value?.stage) ? value.stage : 'STARTUP'
