@@ -6,7 +6,7 @@ export interface SSHEvent {
     connectionId: string
     generation: number
     ownerId?: string
-    type: 'state' | 'hostKey' | 'auth' | 'data' | 'exit' | 'execStarted' | 'execData' | 'execExit' | 'execError' | 'terminalError'
+    type: 'state' | 'hostKey' | 'auth' | 'data' | 'exit' | 'execStarted' | 'execData' | 'execExit' | 'execError' | 'terminalError' | 'credentialStatus'
     state?: 'connecting' | 'authenticating' | 'authenticated' | 'ready' | 'closed' | 'error'
     requestId?: number
     status?: 'unknown' | 'known' | 'changed'
@@ -49,7 +49,7 @@ export interface SSHStart {
 
 export type SSHCommand =
     | { type: 'hostKeyResponse', requestId: number, accept: boolean }
-    | { type: 'authResponse', requestId: number, password?: string, keyId?: string, passphrase?: string, responses?: string[] }
+    | { type: 'authResponse', requestId: number, useSavedPassword?: boolean, savePassword?: boolean, password?: string, keyId?: string, passphrase?: string, responses?: string[] }
     | { type: 'write', data: string }
     | { type: 'resize', cols: number, rows: number }
     | { type: 'outputAck', sequence: number, generation: number }
@@ -63,7 +63,7 @@ export interface SSHBridge {
     close(options: { connectionId: string }): Promise<void>
     addListener(eventName: 'sshEvent', listener: (event: SSHEvent) => void): Promise<PluginListenerHandle>
     addListener(eventName: 'keyboardState', listener: (event: { visible: boolean, height: number, viewportWidth: number, viewportHeight: number }) => void): Promise<PluginListenerHandle>
-    addListener(eventName: 'lifecycleState', listener: (event: { active: boolean, reason?: 'privateKeyPicker' | 'background' }) => void): Promise<PluginListenerHandle>
+    addListener(eventName: 'lifecycleState', listener: (event: { active: boolean, reason?: 'privateKeyPicker' | 'background', retained?: boolean }) => void): Promise<PluginListenerHandle>
     writeClipboard(options: { text: string }): Promise<void>
     readClipboard(): Promise<{ text: string }>
     selectPrivateKey(options?: { ownerId: string, requestId: string }): Promise<{ keyId: string, label: string }>
@@ -73,7 +73,11 @@ export interface SSHBridge {
     setActiveTab(options: { ownerId: string, epoch: number }): Promise<void>
     showKeyboard(options: { connectionId: string, generation: number }): Promise<void>
     hideKeyboard(): Promise<void>
-    getViewport(): Promise<{ visible: boolean, height: number, viewportWidth: number, viewportHeight: number }>
+    backgroundState(): Promise<{ enabled: boolean, notificationsAllowed: boolean }>
+    setBackground(options: { enabled: boolean }): Promise<{ enabled: boolean }>
+    credentialStatus(options: { host: string, port: number, username: string }): Promise<{ saved: boolean }>
+    deletePassword(options: { host: string, port: number, username: string }): Promise<void>
+    getViewport(): Promise<{ visible: boolean, height: number, viewportWidth: number, viewportHeight: number, fontPixels?: Record<string, number>, touchSlop?: number }>
 }
 
 export const SSH_BRIDGE = new InjectionToken<SSHBridge>('SSH bridge', {

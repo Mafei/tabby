@@ -2,6 +2,8 @@ package org.tabby.android.prototype
 
 import android.content.res.Configuration
 import android.os.Bundle
+import android.util.TypedValue
+import android.view.ViewConfiguration
 import androidx.core.graphics.Insets
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
@@ -52,6 +54,8 @@ class MainActivity : BridgeActivity() {
         val ime = insets?.getInsets(WindowInsetsCompat.Type.ime())
         val visible = insets?.isVisible(WindowInsetsCompat.Type.ime()) ?: false
         return JSObject().apply {
+            put("fontPixels", org.json.JSONObject((12..26).associate { it.toString() to TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, it.toFloat(), resources.displayMetrics) / density }))
+            put("touchSlop", ViewConfiguration.get(this@MainActivity).scaledTouchSlop / density)
             put("visible", visible)
             put("height", if (visible) (ime?.bottom ?: 0) / density else 0)
             put("viewportWidth", (webView?.width ?: 0) / density)

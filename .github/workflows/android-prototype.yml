@@ -1,10 +1,10 @@
 name: Android prototype checks and APK
 on:
   push:
-    branches: [prototype/android-direct-ssh]
+    branches: [prototype/android-direct-ssh, candidate/android-mobile-product-20261008]
     paths: [mobile/**, tabby-ssh/src/session/tmux*, tabby-ssh/src/session/reconnect.ts, .github/workflows/android-prototype.yml]
   pull_request:
-    branches: [feature/ssh-tmux-recovery]
+    branches: [feature/ssh-tmux-recovery, candidate/android-mobile-ux-20261008]
     paths: [mobile/**, tabby-ssh/src/session/tmux*, tabby-ssh/src/session/reconnect.ts, .github/workflows/android-prototype.yml]
   workflow_dispatch:
 permissions:
@@ -14,7 +14,7 @@ concurrency:
   cancel-in-progress: true
 jobs:
   checks:
-    if: github.event.repository.visibility == 'public' && github.repository == 'Mafei/tabby' && ((github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == 'Mafei/tabby' && github.event.pull_request.head.ref == 'prototype/android-direct-ssh') || (github.event_name != 'pull_request' && github.ref == 'refs/heads/prototype/android-direct-ssh'))
+    if: github.event.repository.visibility == 'public' && github.repository == 'Mafei/tabby' && ((github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == 'Mafei/tabby' && (github.event.pull_request.head.ref == 'prototype/android-direct-ssh' || github.event.pull_request.head.ref == 'candidate/android-mobile-product-20261008')) || (github.event_name != 'pull_request' && (github.ref == 'refs/heads/prototype/android-direct-ssh' || github.ref == 'refs/heads/candidate/android-mobile-product-20261008')))
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     steps:
@@ -94,7 +94,7 @@ jobs:
         if: always() && steps.install.outcome == 'success'
         run: node mobile/scripts/test-jvm-policy.mjs
   arm64-core:
-    if: github.event.repository.visibility == 'public' && github.repository == 'Mafei/tabby' && ((github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == 'Mafei/tabby' && github.event.pull_request.head.ref == 'prototype/android-direct-ssh') || (github.event_name != 'pull_request' && github.ref == 'refs/heads/prototype/android-direct-ssh'))
+    if: github.event.repository.visibility == 'public' && github.repository == 'Mafei/tabby' && ((github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == 'Mafei/tabby' && (github.event.pull_request.head.ref == 'prototype/android-direct-ssh' || github.event.pull_request.head.ref == 'candidate/android-mobile-product-20261008')) || (github.event_name != 'pull_request' && (github.ref == 'refs/heads/prototype/android-direct-ssh' || github.ref == 'refs/heads/candidate/android-mobile-product-20261008')))
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 25
     steps:
@@ -136,7 +136,7 @@ jobs:
           TABBY_TEST_TMUX: /usr/bin/tmux
         run: node mobile/scripts/test-fixture-jni.mjs --deferred
   android:
-    if: github.event.repository.visibility == 'public' && github.repository == 'Mafei/tabby' && ((github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == 'Mafei/tabby' && github.event.pull_request.head.ref == 'prototype/android-direct-ssh') || (github.event_name != 'pull_request' && github.ref == 'refs/heads/prototype/android-direct-ssh'))
+    if: github.event.repository.visibility == 'public' && github.repository == 'Mafei/tabby' && ((github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == 'Mafei/tabby' && (github.event.pull_request.head.ref == 'prototype/android-direct-ssh' || github.event.pull_request.head.ref == 'candidate/android-mobile-product-20261008')) || (github.event_name != 'pull_request' && (github.ref == 'refs/heads/prototype/android-direct-ssh' || github.ref == 'refs/heads/candidate/android-mobile-product-20261008')))
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     strategy:
