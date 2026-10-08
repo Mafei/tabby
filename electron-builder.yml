@@ -39,6 +39,11 @@ files:
 extraResources:
 - builtin-plugins
 - extras
+- from: scripts/fonts
+  to: font-notices
+  filter:
+  - font-manifest.json
+  - licenses/**/*
 asarUnpack:
 - 'dist/*.map'
 - node_modules/keytar/build/Release/*.node
@@ -82,8 +87,8 @@ linux:
   category: "Utility;TerminalEmulator;System"
   icon: "./build/icons"
   artifactName: tabby-${version}-linux-${env.ARCH}.${ext}
-  executableArgs:
-  - "--no-sandbox"
+  # An explicit empty list also disables electron-builder's AppImage default argument.
+  executableArgs: []
   desktop:
     entry:
       StartupWMClass: tabby

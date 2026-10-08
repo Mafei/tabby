@@ -19,6 +19,8 @@ import { BaseTerminalProfile } from '../api/interfaces'
 import { getXtermBackgroundColor } from '../helpers'
 import { generatePalette } from '../generatePalette'
 import { disposeWebglAddon } from './webglAddon'
+import { waitForBundledTerminalFonts } from '../fonts/bundled'
+import { waitForPlatformTerminalFonts } from '../fonts/fontLoader'
 import './xterm.css'
 
 const COLOR_NAMES = [
@@ -109,6 +111,9 @@ export class XTermFrontend extends Frontend {
     private ligaturesAddon?: LigaturesAddon
     private webGLAddon?: WebglAddon
     private opened = false
+    private fontsReady = false
+    private fontLoadAbort?: AbortController
+    private attachEpoch = 0
     private resizeObserver?: any
     private hostEventHandlers?: {
         wheel: (event: WheelEvent) => void
@@ -136,7 +141,11 @@ export class XTermFrontend extends Frontend {
     private themes: ThemesService
 
     private isAttachActive (): boolean {
-        return !this.disposed && this.opened
+        return !this.disposed && this.opened && this.fontsReady
+    }
+
+    private isCurrentAttach (epoch: number, abort: AbortController): boolean {
+        return !this.disposed && !abort.signal.aborted && epoch === this.attachEpoch
     }
 
     constructor (injector: Injector) {
@@ -185,7 +194,9 @@ export class XTermFrontend extends Frontend {
             this.input.next(Buffer.from(data, 'utf-8'))
         })
         this.xterm.onResize(({ cols, rows }) => {
-            this.resize.next({ rows, columns: cols })
+            if (this.isAttachActive()) {
+                this.resize.next({ rows, columns: cols })
+            }
         })
         this.xterm.onTitleChange(title => {
             this.title.next(title)
@@ -204,6 +215,9 @@ export class XTermFrontend extends Frontend {
 
         this.xterm.loadAddon(this.fitAddon)
         this.xterm.loadAddon(this.serializeAddon)
+        // Fonts determine glyph coverage and appearance. Unicode 11 separately
+        // determines terminal cell widths; loading emoji fonts does not add
+        // grapheme/ZWJ cluster support or enable an experimental Unicode addon.
         this.xterm.loadAddon(new Unicode11Addon())
         this.xterm.unicode.activeVersion = '11'
 
@@ -397,15 +411,35 @@ export class XTermFrontend extends Frontend {
         if (this.disposed) {
             return
         }
+        const epoch = ++this.attachEpoch
+        this.fontLoadAbort?.abort()
+        const abort = this.fontLoadAbort = new AbortController()
         this.element = host
 
-        this.xterm.open(host)
-        this.opened = true
+        // Other platforms keep their original immediate open and loading delay.
+        if (this.hostApp.platform !== Platform.Linux) {
+            this.fontsReady = true
+            this.xterm.open(host)
+            this.opened = true
+        }
 
-        // Work around font loading bugs
-        await new Promise(resolve => setTimeout(resolve, this.hostApp.platform === Platform.Web ? 1000 : 0))
-        if (!this.isAttachActive()) {
+        try {
+            await waitForPlatformTerminalFonts(this.hostApp.platform, waitForBundledTerminalFonts, abort.signal)
+        } catch {
+            if (this.isCurrentAttach(epoch, abort)) {
+                host.textContent = 'Terminal font files could not be loaded. Reopen this tab or reinstall this build.'
+            }
             return
+        }
+        if (!this.isCurrentAttach(epoch, abort)) {
+            return
+        }
+        if (this.hostApp.platform === Platform.Linux) {
+            this.fontsReady = true
+            // Set the intended font and size before the first Linux measurement.
+            this.configure(profile)
+            this.xterm.open(host)
+            this.opened = true
         }
 
         // Just configure the colors to avoid a flash
@@ -422,7 +456,7 @@ export class XTermFrontend extends Frontend {
 
         // Allow an animation frame
         await new Promise(r => setTimeout(r, 100))
-        if (!this.isAttachActive()) {
+        if (!this.isAttachActive() || epoch !== this.attachEpoch) {
             return
         }
 
@@ -447,7 +481,7 @@ export class XTermFrontend extends Frontend {
 
         // Allow an animation frame
         await new Promise(r => setTimeout(r, 0))
-        if (!this.isAttachActive()) {
+        if (!this.isAttachActive() || epoch !== this.attachEpoch) {
             return
         }
 
@@ -515,6 +549,10 @@ export class XTermFrontend extends Frontend {
     }
 
     detach (_host: HTMLElement): void {
+        this.attachEpoch++
+        this.fontLoadAbort?.abort()
+        this.fontLoadAbort = undefined
+        this.fontsReady = false
         const host = this.element
         window.removeEventListener('resize', this.resizeHandler)
         if (this.resizeTimeout !== undefined) {
@@ -707,7 +745,7 @@ export class XTermFrontend extends Frontend {
         const config = this.configService.store
 
         setImmediate(() => {
-            if (this.xterm.cols && this.xterm.rows && this.xtermCore.charMeasure) {
+            if (this.isAttachActive() && this.xterm.cols && this.xterm.rows && this.xtermCore.charMeasure) {
                 if (this.xtermCore.charMeasure) {
                     this.xtermCore.charMeasure.measure(this.xtermCore.options)
                 }
@@ -725,7 +763,7 @@ export class XTermFrontend extends Frontend {
             isMac: this.hostApp.platform === Platform.macOS,
         }
 
-        this.xterm.options.fontFamily = getCSSFontFamily(config)
+        this.xterm.options.fontFamily = getCSSFontFamily(config, this.hostApp.platform === Platform.Linux)
         this.xterm.options.cursorStyle = {
             beam: 'bar',
         }[config.terminal.cursor] || config.terminal.cursor

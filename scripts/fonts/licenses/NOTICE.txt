@@ -1,0 +1,82 @@
+Tabby portable Linux terminal font bundle
+========================================
+
+Tabby redistributes these font files without changing their bytes, outlines,
+internal names, Unicode mappings or hinting. Local CSS family aliases are
+application settings only. Font copyrights and licenses remain with their
+respective owners. This bundle does not grant trademark or endorsement rights.
+The manifest identifies the exact source revision and SHA-256 of every file.
+
+JetBrainsMono Nerd Font Mono (Regular and Bold)
+---------------------------------------------
+Base: JetBrains Mono 2.304, copyright 2020 The JetBrains Mono Project Authors
+(https://github.com/JetBrains/JetBrainsMono), SIL Open Font License 1.1.
+Nerd Fonts v3.4.0: copyright 2014 Ryan L McIntyre and contributors,
+https://github.com/ryanoasis/nerd-fonts/tree/v3.4.0.
+Nerd Fonts has already patched the base font with scaled/remapped icon glyphs.
+Tabby has made no further font modifications. Retain JetBrainsMono-OFL.txt,
+JetBrainsMono-AUTHORS.txt, nerd-fonts-LICENSE.txt and the accompanying licenses.
+
+Included Nerd Fonts icon sources (the pinned font-patcher patch set):
+* Codicons, Microsoft/vscode-codicons: CC BY 4.0; codicons-CC-BY-4.0.txt.
+  https://github.com/microsoft/vscode-codicons
+* Devicons, devicons/devicon contributors: MIT; devicons-MIT.txt.
+  Nerd Fonts' generator explicitly pins v2.16.0, with custom mapping/fixes.
+  https://github.com/devicons/devicon/tree/v2.16.0
+* Font Awesome, Fonticons Inc.: CC BY 4.0 icons/OFL font/MIT code as specified
+  in font-awesome-LICENSE.txt. https://fontawesome.com/
+* Font Awesome Extension, Andre Luiz Gava: MIT as classified by Nerd Fonts'
+  pinned license audit/root license. https://github.com/AndreLZGava/font-awesome-extension
+* Font Logos 1.3.0, copyright 2014-2024 Lukas W: Unlicense;
+  font-logos-Unlicense.txt. The Nerd Fonts input font's embedded version is
+  1.3.0, matching the pinned v1.3.0 license snapshot. Nerd Fonts' audit labels
+  this set "Unlicensed"; retain the actual Unlicense rather than interpreting
+  that label as an absent grant. https://github.com/Lukas-W/font-logos/tree/v1.3.0
+* IEC Power Symbols: MIT as classified by Nerd Fonts' pinned license audit/root
+  license. https://unicodepowersymbol.com/
+* Material Design Icons, Pictogrammers / Austin Andrews and contributors:
+  Apache 2.0; materialdesign-Apache-2.0.txt and Apache-2.0.txt.
+  Nerd Fonts' pinned materialdesign-modifications.md identifies its corrected
+  glyph U+F1522 and the source fetch date (2022-10-06).
+  https://github.com/Templarian/MaterialDesign-Font
+* Seti-UI/custom original symbols: MIT under Nerd Fonts' pinned root license;
+  copyright Ryan L McIntyre and contributors, with Seti-UI by Jesse Weed.
+  https://github.com/jesseweed/seti-ui and https://github.com/ryanoasis/nerd-fonts
+* Octicons, GitHub Inc.: MIT; octicons-MIT.txt. https://github.com/primer/octicons
+* Pomicons, Gabriele Lana: OFL 1.1; pomicons-OFL.txt.
+  https://github.com/gabrielelana/pomicons
+* Powerline Extra Symbols, Ryan L McIntyre: MIT; powerline-extra-MIT.txt.
+  https://github.com/ryanoasis/powerline-extra-symbols
+* Powerline Symbols, copyright 2013 Kim Silkebækken and other contributors:
+  MIT-style grant reproduced in powerline-symbols-MIT.txt.
+  https://github.com/powerline/powerline
+* Weather Icons, Erik Flowers: OFL 1.1; weather-icons-OFL.txt.
+  https://github.com/erikflowers/weather-icons
+* Box/progress/heavy brackets and custom Nerd Fonts glyphs: the pinned Nerd
+  Fonts root license applies; retain nerd-fonts-LICENSE.txt.
+
+Noto Sans Mono CJK SC Regular, Sans2.004
+--------------------------------------
+Copyright 2014-2021 Adobe (http://www.adobe.com/).
+SIL Open Font License 1.1; NotoCJK-OFL.txt.
+https://github.com/notofonts/noto-cjk/tree/Sans2.004
+This is the full untrimmed regional SC mono file, not universal CJK coverage.
+
+Noto Color Emoji, v2.051
+-----------------------
+Copyright 2022 Google Inc. SIL Open Font License 1.1; NotoEmoji-OFL.txt.
+https://github.com/googlefonts/noto-emoji/tree/v2.051
+Only the font is included; this bundle does not include the separately licensed
+image/SVG assets or font-building tools from that repository.
+
+JuliaMono Regular, v0.061
+------------------------
+SIL Open Font License 1.1; retain the original copyright statement and full
+license in JuliaMono-OFL.txt. https://github.com/cormullion/juliamono/tree/v0.061
+
+Legacy SourceCodePro.ttf
+-----------------------
+The repository's pre-existing SourceCodePro.ttf is not one of the pinned files
+in this manifest. It has embedded SauceCodePro NF metadata and an OFL license.
+Its historical Nerd Fonts patch revision has not been established by this
+work; it must not be represented as the new pinned JetBrains font bundle.

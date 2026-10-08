@@ -124,10 +124,12 @@ export default options => {
                 {
                     test: /\.(eot|otf|woff|woff2|ogg)(\?v=[0-9]\.[0-9]\.[0-9])?$/,
                     type: 'asset',
+                    exclude: /[\\/]fonts[\\/]bundled[\\/]/,
                 },
                 {
                     test: /\.ttf$/,
                     type: 'asset/inline',
+                    exclude: /[\\/]fonts[\\/]bundled[\\/]/,
                 },
                 {
                     test: /\.po$/,

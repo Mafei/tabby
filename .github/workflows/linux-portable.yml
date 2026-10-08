@@ -1,0 +1,146 @@
+name: Linux portable Rocky 8 baseline and font renderer
+on:
+  push:
+    branches: [feature/linux-portable-rocky8-fonts]
+  pull_request:
+    branches: [master, feature/ssh-tmux-recovery]
+  workflow_dispatch:
+permissions:
+  contents: read
+defaults:
+  run:
+    shell: bash
+concurrency:
+  group: linux-portable-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+env:
+  TABBY_LINUX_PORTABLE: '1'
+  ARCH: x64
+  CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+  CSC_LINK: ''
+  CSC_KEY_PASSWORD: ''
+  KEYGEN_TOKEN: ''
+  APPLE_TEAM_ID: ''
+jobs:
+  rocky-baseline:
+    if: github.repository == 'Mafei/tabby' && github.event.repository.visibility == 'public' && ((github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == 'Mafei/tabby' && github.event.pull_request.head.ref == 'feature/linux-portable-rocky8-fonts') || (github.event_name != 'pull_request' && github.ref == 'refs/heads/feature/linux-portable-rocky8-fonts'))
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    container:
+      # Official Rocky project 8.10 amd64 manifest, not the stale library repo.
+      image: rockylinux/rockylinux@sha256:f5529992e67440c1a4ae7788244d4381c6909159a88eacd95b7523ae47ced82e
+    steps:
+      - name: Install baseline tools in the disposable ordinary container
+        run: |
+          test "$(uname -m)" = x86_64
+          test "$(getconf GNU_LIBC_VERSION)" = 'glibc 2.28'
+          grep -q '^VERSION_ID="8.10"$' /etc/os-release
+          # Final AppImage GTK3 tray/GConf libraries also need actual system
+          # DBus-menu/GLib providers beyond its reviewed app-local usr/lib path.
+          dnf -y install git make gcc gcc-c++ gcc-toolset-13-gcc gcc-toolset-13-gcc-c++ python39 python39-devel python39-pip pkgconf-pkg-config libsecret-devel fontconfig-devel libX11-devel libXtst-devel libXScrnSaver libXcomposite libXdamage libxkbcommon atk at-spi2-atk gtk3 dbus-glib libdbusmenu libdbusmenu-gtk3 libindicator-gtk3 libappindicator-gtk3 nss mesa-libgbm alsa-lib cups-libs libdrm dbus-libs xz zip unzip tar gzip curl findutils util-linux binutils
+      - uses: actions/checkout@v4
+        env:
+          GIT_CONFIG_COUNT: '1'
+          GIT_CONFIG_KEY_0: safe.directory
+          GIT_CONFIG_VALUE_0: ${{ github.workspace }}
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          set-safe-directory: false
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: dtolnay/rust-toolchain@1.90.0
+      - name: Verify fonts and build all native/plugin copies against Rocky
+        # Container Git trusts only this checkout, for this process tree.
+        env:
+          GIT_CONFIG_COUNT: '1'
+          GIT_CONFIG_KEY_0: safe.directory
+          GIT_CONFIG_VALUE_0: ${{ github.workspace }}
+        run: |
+          source /opt/rh/gcc-toolset-13/enable
+          export npm_config_python=/usr/bin/python3.9
+          npm install -g yarn@1.22.22
+          yarn install --frozen-lockfile --ignore-scripts --network-timeout 1000000
+          yarn patch-package
+          python3.9 scripts/fonts/fetch-fonts.py
+          python3.9 scripts/fonts/fetch-fonts.py --verify
+          mkdir -p dist
+          python3.9 scripts/fonts/audit-fonts.py --output dist/linux-font-coverage.json
+          python3.9 scripts/fonts/test-fonts.py
+          python3.9 scripts/test/test_linux_portable.py
+          node --test scripts/test/linux-git-trust.test.mjs scripts/test/linux-patch-package.test.mjs
+          node scripts/prepare-linux-portable.mjs
+          # The real cwd wrapper test loads app dependencies installed above.
+          node --test scripts/test/linux-portable.test.mjs scripts/test/linux-ansi-color.test.mjs
+          node scripts/build-linux.mjs
+      - name: Audit actual AppDir and AppImage ELF dependency closures
+        env:
+          GIT_CONFIG_COUNT: '1'
+          GIT_CONFIG_KEY_0: safe.directory
+          GIT_CONFIG_VALUE_0: ${{ github.workspace }}
+        run: |
+          python3.9 scripts/verify-linux-portable.py --app-dir dist/linux-unpacked --output dist/linux-portable-verification.json
+          mapfile -t images < <(find "$PWD/dist" -maxdepth 1 -name '*.AppImage' -type f -print)
+          test "${#images[@]}" = 1
+          image_path="${images[0]}"
+          mkdir -p dist/appimage-inspection
+          cd dist/appimage-inspection
+          "$image_path" --appimage-extract
+          cd ../..
+          python3.9 scripts/verify-linux-portable.py --app-dir dist/appimage-inspection/squashfs-root --output dist/linux-appimage-verification.json
+          sha256sum dist/*.AppImage dist/*.tar.gz > dist/linux-portable.sha256
+          git diff --exit-code
+      - name: Upload unsigned portable artifacts and baseline receipts
+        uses: actions/upload-artifact@v4
+        with:
+          name: tabby-linux-rocky8-x64-${{ github.event.pull_request.head.sha || github.sha }}
+          path: |
+            dist/*.AppImage
+            dist/*.tar.gz
+            dist/linux-*.json
+            dist/linux-portable.sha256
+          if-no-files-found: error
+          retention-days: 14
+  sandbox-font-renderer:
+    needs: rocky-baseline
+    if: github.repository == 'Mafei/tabby' && github.event.repository.visibility == 'public' && ((github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == 'Mafei/tabby' && github.event.pull_request.head.ref == 'feature/linux-portable-rocky8-fonts') || (github.event_name != 'pull_request' && github.ref == 'refs/heads/feature/linux-portable-rocky8-fonts'))
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/download-artifact@v4
+        with:
+          name: tabby-linux-rocky8-x64-${{ github.event.pull_request.head.sha || github.sha }}
+          path: dist
+      - name: Standard display dependencies, without sandbox policy changes
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends xvfb libgtk-3-0 libnss3 libsecret-1-0 libgbm1 libasound2
+          npm install -g yarn@1.22.22
+          yarn install --frozen-lockfile --ignore-scripts --network-timeout 1000000
+          yarn --cwd tabby-terminal install --frozen-lockfile --ignore-scripts --network-timeout 1000000
+          node --test scripts/test/linux-font-runtime.test.mjs
+          mapfile -t archives < <(find "$PWD/dist" -maxdepth 1 -name '*.tar.gz' -type f -print)
+          test "${#archives[@]}" = 1
+          mkdir -p dist/runtime-appdir
+          tar -xzf "${archives[0]}" -C dist/runtime-appdir
+      - name: Actual packaged Electron sandboxed font and synthetic TUI renderer
+        id: font-runtime
+        run: |
+          xvfb-run --auto-servernum node scripts/test-linux-font-renderer.mjs --app-dir dist/runtime-appdir --report dist/linux-font-runtime.json
+      - uses: actions/upload-artifact@v4
+        if: ${{ (success() || failure()) && (steps.font-runtime.outcome == 'success' || steps.font-runtime.outcome == 'failure') }}
+        with:
+          name: tabby-linux-font-runtime-ubuntu22-${{ github.event.pull_request.head.sha || github.sha }}
+          path: dist/linux-font-runtime.json
+          if-no-files-found: error
+          retention-days: 14

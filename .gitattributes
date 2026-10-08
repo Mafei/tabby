@@ -1,0 +1,3 @@
+# Preserve the exact pinned upstream notice bytes, including original CRLF
+# and trailing spaces, on every checkout. Their hashes enforce integrity.
+scripts/fonts/licenses/* -text -whitespace

@@ -268,6 +268,7 @@ export default class AppModule { // eslint-disable-line @typescript-eslint/no-ex
 }
 
 export { AppRootComponent as bootstrap }
+export * from './bundledFonts'
 export * from './api'
 export { AppHotkeyProvider }
 
