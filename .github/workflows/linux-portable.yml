@@ -37,15 +37,25 @@ jobs:
           grep -q '^VERSION_ID="8.10"$' /etc/os-release
           dnf -y install git make gcc gcc-c++ gcc-toolset-13-gcc gcc-toolset-13-gcc-c++ python39 python39-devel python39-pip pkgconf-pkg-config libsecret-devel fontconfig-devel libX11-devel libXtst-devel libXScrnSaver libXcomposite libXdamage libxkbcommon atk at-spi2-atk gtk3 nss mesa-libgbm alsa-lib cups-libs libdrm dbus-libs xz zip unzip tar gzip curl findutils util-linux binutils
       - uses: actions/checkout@v4
+        env:
+          GIT_CONFIG_COUNT: '1'
+          GIT_CONFIG_KEY_0: safe.directory
+          GIT_CONFIG_VALUE_0: ${{ github.workspace }}
         with:
           fetch-depth: 0
           persist-credentials: false
+          set-safe-directory: false
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - uses: actions/setup-node@v4
         with:
           node-version: 22
       - uses: dtolnay/rust-toolchain@1.90.0
       - name: Verify fonts and build all native/plugin copies against Rocky
+        # Container Git trusts only this checkout, for this process tree.
+        env:
+          GIT_CONFIG_COUNT: '1'
+          GIT_CONFIG_KEY_0: safe.directory
+          GIT_CONFIG_VALUE_0: ${{ github.workspace }}
         run: |
           source /opt/rh/gcc-toolset-13/enable
           export npm_config_python=/usr/bin/python3.9
@@ -58,11 +68,16 @@ jobs:
           python3.9 scripts/fonts/audit-fonts.py --output dist/linux-font-coverage.json
           python3.9 scripts/fonts/test-fonts.py
           python3.9 scripts/test/test_linux_portable.py
+          node --test scripts/test/linux-git-trust.test.mjs
           node scripts/prepare-linux-portable.mjs
           # The real cwd wrapper test loads app dependencies installed above.
           node --test scripts/test/linux-portable.test.mjs
           node scripts/build-linux.mjs
       - name: Audit actual AppDir and AppImage ELF dependency closures
+        env:
+          GIT_CONFIG_COUNT: '1'
+          GIT_CONFIG_KEY_0: safe.directory
+          GIT_CONFIG_VALUE_0: ${{ github.workspace }}
         run: |
           python3.9 scripts/verify-linux-portable.py --app-dir dist/linux-unpacked --output dist/linux-portable-verification.json
           mapfile -t images < <(find "$PWD/dist" -maxdepth 1 -name '*.AppImage' -type f -print)
