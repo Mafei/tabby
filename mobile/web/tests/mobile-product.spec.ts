@@ -93,6 +93,14 @@ test('password is opt-in; native saved authentication carries no password to the
     })
     await expect.poll(() => page.evaluate(() => window.testBridge.commands.some(item => item.command.type === 'authResponse' && item.command.useSavedPassword === true && !('password' in item.command)))).toBe(true)
     expect(await page.evaluate(() => Object.keys(localStorage))).toEqual([])
+    await more(page)
+    await page.getByRole('button', { name: '断开或取消连接', exact: true }).click()
+    await page.getByLabel('密码', { exact: true }).fill('synthetic-only-update')
+    await page.getByLabel('认证成功后保存 / 更新密码（默认不保存）').check()
+    await page.getByRole('button', { name: '连接', exact: true }).click()
+    await more(page)
+    await page.getByRole('button', { name: '断开或取消连接', exact: true }).click()
+    await expect(page.getByLabel('认证成功后保存 / 更新密码（默认不保存）')).not.toBeChecked()
 })
 
 test('background is explicitly enabled and retains ready sessions while suppressing input', async ({ page }) => {

@@ -317,6 +317,8 @@ export class SessionPaneComponent implements AfterViewInit, OnDestroy {
         const password = automatic ? this.volatilePassword ?? '' : this.password
         if (!automatic) { this.volatilePassword = this.sessionMode === 'tmux' && this.authMode === 'password' ? password : undefined }
         this.auth = { password, passphrase: this.passphrase, keyId: this.keyId, saved: this.useSavedPassword && !password, save: this.savePassword }
+        // Consent applies to this authentication only, including a failed one.
+        this.savePassword = false
         this.password = ''; this.passphrase = ''
         this.busy = true; this.connected = false; this.statusText = '连接中'; this.notice = ''
         this.events = []; this.clearModifiers(); this.selectionMode = false; this.hostVerified = false; this.hostKeyBlob = ''; this.lastSequence = -1

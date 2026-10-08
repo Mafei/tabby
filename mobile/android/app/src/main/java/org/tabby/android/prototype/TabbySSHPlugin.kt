@@ -288,6 +288,7 @@ class TabbySSHPlugin : Plugin() {
 
     override fun handleOnStop() {
         if (notificationPermissionPending && !ConnectionService.enabled) {
+            notificationPermissionPending = false
             closeAll("background")
             notifyListeners("lifecycleState", JSObject().put("active", false).put("retained", false).put("reason", "background"))
         }
@@ -336,7 +337,26 @@ class TabbySSHPlugin : Plugin() {
         enableBackground(call)
     }
     @PermissionCallback
-    private fun notificationPermissionResult(call: PluginCall) { notificationPermissionPending = false; enableBackground(call) }
+    private fun notificationPermissionResult(call: PluginCall) {
+        // Activity Result can arrive before onResume. Permission is never
+        // treated as permission to start a foreground service from background.
+        val deadline = android.os.SystemClock.elapsedRealtime() + 5000
+        val handler = android.os.Handler(android.os.Looper.getMainLooper())
+        val observe = object : Runnable {
+            override fun run() {
+                if (!notificationPermissionPending || destroyed || !ConnectionService.notificationsAllowed(context)
+                    || android.os.SystemClock.elapsedRealtime() >= deadline) {
+                    notificationPermissionPending = false
+                    notifyListeners("backgroundState", JSObject().put("enabled", false))
+                    call.reject("Return to the app with visible notifications to enable background connections", "BACKGROUND_UNAVAILABLE")
+                    return
+                }
+                if (foreground) { notificationPermissionPending = false; enableBackground(call); return }
+                handler.postDelayed(this, 25)
+            }
+        }
+        handler.post(observe)
+    }
     private fun enableBackground(call: PluginCall) {
         try {
             require(foreground && !destroyed && sessions.values.any { it.operations.isReady() } && ConnectionService.notificationsAllowed(context))

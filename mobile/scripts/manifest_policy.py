@@ -33,7 +33,9 @@ def components(manifest, kind):
 
 def attribute(component, name):
     indent, lines = component
-    pattern = r'^ {' + str(indent + 2) + r'}A: android:' + re.escape(name) + r'\([^)]*\)=(.*)$'
+    # SDK36 aapt2 prints the namespace URI, while older output uses its alias.
+    namespace = r'(?:android|http://schemas\.android\.com/apk/res/android):'
+    pattern = r'^ {' + str(indent + 2) + r'}A: ' + namespace + re.escape(name) + r'\([^)]*\)=(.*)$'
     values = [match[1] for line in lines if (match := re.match(pattern, line))]
     require(len(values) == 1, 'MISSING_OR_DUPLICATE_COMPONENT_ATTRIBUTE')
     value = values[0]

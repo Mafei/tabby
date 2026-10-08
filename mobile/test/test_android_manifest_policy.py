@@ -22,6 +22,12 @@ RECEIVER = '''    E: receiver
 
 
 class ManifestPolicyTest(unittest.TestCase):
+    def test_sdk36_real_namespace_uri_and_untrusted_namespace(self):
+        manifest = (SERVICE + RECEIVER).replace('A: android:', 'A: http://schemas.android.com/apk/res/android:')
+        self.assertTrue(policy.inspect_connection_components(manifest)['existingDumpProtectedProfileReceiver'])
+        with self.assertRaises(policy.ManifestPolicyError):
+            policy.inspect_connection_components(manifest.replace('http://schemas.android.com/apk/res/android:', 'http://untrusted.invalid/android:'))
+
     def test_exact_service_and_existing_androidx_receiver(self):
         self.assertFalse(policy.inspect_connection_components(SERVICE)['automaticBoot'])
         self.assertTrue(policy.inspect_connection_components(SERVICE + RECEIVER)['existingDumpProtectedProfileReceiver'])
