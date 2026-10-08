@@ -63,10 +63,15 @@ class SSHRuntime private constructor(val context: Context) {
     fun detach() { sink = null; synchronized(sessionLock) { pollTask?.cancel(false); pollTask = null } }
     fun connectionAdded() { synchronized(sessionLock) { if (pollTask == null && sink != null) pollTask = worker.scheduleWithFixedDelay({ pollEvents() }, 0, 16, TimeUnit.MILLISECONDS) } }
     private fun deliver(event: JSONObject) { sink?.invoke(event) }
-    private fun saveSuccessfulPassword(session: Session) {
+    private fun saveSuccessfulPassword(session: Session) = synchronized(sessionLock) {
         val bytes = session.pendingPassword ?: return
         session.pendingPassword = null
-        try { secrets.put(session.host, session.port, session.username, session.verifiedHostKey ?: error("unverified"), bytes) }
+        // Serialize against session removal during deletion. Once removal
+        // completes, a delayed authentication event cannot recreate the entry.
+        try {
+            if (!session.gate.isActive() || sessions[session.id] !== session) return
+            secrets.put(session.host, session.port, session.username, session.verifiedHostKey ?: error("unverified"), bytes)
+        }
         catch (_: Throwable) { deliver(JSONObject().put("type", "credentialStatus").put("code", "save_failed").put("connectionId", session.id.toString()).put("generation", session.gate.generation).put("ownerId", session.ownerId)) }
         finally { bytes.fill(0) }
     }
