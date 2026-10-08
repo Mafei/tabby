@@ -9,6 +9,7 @@ import { Android, TestFailure, check, cancelCommands } from './test-android-util
 const BUDGET_MS = 240000
 const STABLE_MS = 350
 const identities = new WeakMap()
+const googleLauncher = /(?:^|[ \t{])com\.google\.android\.apps\.nexuslauncher\/(?:com\.google\.android\.apps\.nexuslauncher\.|\.)NexusLauncherActivity(?=[ \t}'\]]|$)/
 
 function text (value) {
     return typeof value === 'string' && Buffer.byteLength(value) <= 1024 * 1024
@@ -26,7 +27,7 @@ function id (value) {
     return Number.isSafeInteger(number) && number <= 1000000 ? number : null
 }
 
-function category (value) {
+function category (value, googleHome = false) {
     if (value === undefined || value.trim() === '') { return 'UNKNOWN' }
     const name = value.trim()
     if (name === 'null' || name === '<none>') { return 'NONE' }
@@ -38,6 +39,8 @@ function category (value) {
     if (/^Window\{[a-f0-9]+ u\d+ (?:StatusBar|NotificationShade)\}$/.test(name)
         || /^[a-f0-9]+ (?:StatusBar|NotificationShade)$/.test(name)) { return 'SYSTEM_UI' }
     if (/(?:^|[ \t{])com\.android\.launcher3\/(?:com\.android\.launcher3\.|\.)(?:Launcher|uioverrides\.QuickstepLauncher)(?=[ \t}'\]]|$)/.test(name)) { return 'LAUNCHER' }
+    // Eligible only when the blank emulator resolves this exact system HOME.
+    if (googleHome && googleLauncher.test(name)) { return 'LAUNCHER' }
     return 'OTHER'
 }
 
@@ -61,7 +64,7 @@ function section (body, name) {
     return output.join('\n')
 }
 
-function inputRow (body, name, display) {
+function inputRow (body, name, display, googleHome) {
     const content = section(body, name)
     if (content === '<none>') { return { category: 'NONE', result: 'UNKNOWN' } }
     const expression = name === 'FocusedApplications'
@@ -71,7 +74,7 @@ function inputRow (body, name, display) {
             : /^[ \t]*displayId=(\d+), name='(.*)'[ \t]*$/gm
     const rows = [...content.matchAll(expression)].filter(match => id(match[1]) === display)
     if (rows.length !== 1 || display === null) { return { category: 'UNKNOWN', result: 'UNKNOWN' } }
-    return { category: category(rows[0][2]), name: rows[0][2],
+    return { category: category(rows[0][2], googleHome), name: rows[0][2],
         result: ['OK', 'NO_WINDOW', 'NOT_FOCUSABLE', 'NOT_VISIBLE'].includes(rows[0][3]) ? rows[0][3] : 'UNKNOWN' }
 }
 
@@ -84,7 +87,9 @@ function currentInput (dump) {
 }
 
 /** Only fixed categories, nullable booleans and bounded display IDs escape. */
-export function bootStateResult ({ windows, displays, input, activities }) {
+export function bootStateResult ({ windows, displays, input, activities }, home = '') {
+    const googleHome = homeKind(home) === 'GOOGLE_LAUNCHER'
+    const classify = value => category(value, googleHome)
     windows = text(windows); displays = text(displays); input = currentInput(text(input))
     activities = text(activities)
     const displayBlocks = blocks(displays, /^[ \t]*Display: mDisplayId=(\d+)\b[^\n]*$/gm).filter(block => id(block.value) === 0)
@@ -97,9 +102,9 @@ export function bootStateResult ({ windows, displays, input, activities }) {
     const body = record?.[2] || ''
     const recordID = id(unique(body, /^[ \t]*mDisplayId=(\d+)\b[^\n]*$/gm))
     const inputDisplay = id(unique(input, /^[ \t]*FocusedDisplayId:[ \t]*(\d+)[ \t]*$/gm))
-    const inputWindow = inputRow(input, 'FocusedWindows', 0)
-    const inputApp = inputRow(input, 'FocusedApplications', 0)
-    const request = inputRow(input, 'FocusRequests', 0)
+    const inputWindow = inputRow(input, 'FocusedWindows', 0, googleHome)
+    const inputApp = inputRow(input, 'FocusedApplications', 0, googleHome)
+    const request = inputRow(input, 'FocusRequests', 0, googleHome)
     // WindowState.getName() is its identity hash followed by its window tag.
     const name = /^Window\{([a-f0-9]+) u\d+ ([^{}]+)\}$/.exec(record?.[1] || '')
     const nativeName = name ? `${name[1]} ${name[2]}` : undefined
@@ -108,26 +113,28 @@ export function bootStateResult ({ windows, displays, input, activities }) {
     const resumed = unique(activity, /^[ \t]*Resumed: ([^\n]*)$/gm)
     const visibility = value => boolean(unique(value, /\bisVisible=(true|false)\b/g))
     const errorCategory = value => ['ANR', 'CRASH', 'ERROR'].includes(value)
-    const visibleError = records.some(record => errorCategory(category(record[1]))
+    const visibleError = records.some(record => errorCategory(classify(record[1]))
         && visibility(record[2]) === true)
-    const focusCategories = [category(focused), category(focusedApp), inputWindow.category, inputApp.category, request.category, category(resumed)]
+    const focusCategories = [classify(focused), classify(focusedApp), inputWindow.category, inputApp.category, request.category, classify(resumed)]
     const focusError = focusCategories.some(errorCategory)
     const errorsKnown = windows.startsWith('WINDOW MANAGER WINDOWS (dumpsys window windows)\n')
         && records.length > 0 && displayBlocks.length === 1 && input !== ''
         && focusCategories.every(value => value !== 'UNKNOWN')
-        && records.filter(record => errorCategory(category(record[1]))).every(record => visibility(record[2]) !== null)
+        && records.filter(record => errorCategory(classify(record[1]))).every(record => visibility(record[2]) !== null)
     const draw = unique(body, /\bmDrawState=([A-Z_]+)\b/g)
     const windowType = unique(body, /\bmAttrs=\{[^\n]*\bty=([A-Z_]+|\d+)\b/g)
     const state = {
         displayId: recordID,
-        wmsWindow: category(focused), wmsApplication: category(focusedApp),
+        wmsWindow: classify(focused), wmsApplication: classify(focusedApp),
         inputWindow: inputWindow.category, inputApplication: inputApp.category,
         inputRequest: request.category, inputRequestResult: request.result,
         inputFocusedDisplayId: inputDisplay,
         inputDispatchEnabled: boolean(unique(input, /^[ \t]*DispatchEnabled:[ \t]*(true|false)[ \t]*$/gm)),
         inputDispatchFrozen: boolean(unique(input, /^[ \t]*DispatchFrozen:[ \t]*(true|false)[ \t]*$/gm)),
         sameInputWindow: nativeName === undefined ? null : inputWindow.name === nativeName && request.name === nativeName,
-        activityResumed: category(resumed),
+        activityResumed: classify(resumed),
+        resolvedHomeMatches: googleHome && [focused, focusedApp, inputWindow.name, inputApp.name, request.name, resumed]
+            .every(value => typeof value === 'string' && googleLauncher.test(value)),
         windowMain: windowType === undefined ? null : ['BASE_APPLICATION', '1'].includes(windowType),
         windowSurface: boolean(unique(body, /\bmHasSurface=(true|false)\b/g)),
         windowReadyForDisplay: boolean(unique(body, /\bisReadyForDisplay\(\)=(true|false)\b/g)),
@@ -177,14 +184,7 @@ export function keyguardPolicyResult (dump) {
     return result
 }
 
-/** Read-only blank-emulator diagnostics; no raw component, title or policy value escapes. */
-export function bootSchemaResult (policy, home) {
-    const fields = keyguardDirectFields(policy)
-    const fieldKind = name => {
-        const values = [...fields.matchAll(new RegExp(`^${name}=([^\\n]*)$`, 'gm'))]
-        return values.length === 0 ? 'MISSING' : values.length !== 1 ? 'DUPLICATE'
-            : boolean(values[0][1]) === null ? 'OTHER' : 'BOOLEAN'
-    }
+function homeKind (home) {
     const knownHomes = new Map([
         ['com.android.launcher3/.Launcher', 'AOSP_LAUNCHER'],
         ['com.android.launcher3/com.android.launcher3.Launcher', 'AOSP_LAUNCHER'],
@@ -195,8 +195,46 @@ export function bootSchemaResult (policy, home) {
     ])
     const components = text(home).split('\n').map(line => line.trim())
         .filter(line => /^[a-zA-Z][a-zA-Z0-9_.]*\/[a-zA-Z.][a-zA-Z0-9_.$]*$/.test(line))
-    return { home: components.length !== 1 ? 'UNKNOWN' : knownHomes.get(components[0]) || 'OTHER',
+    return components.length !== 1 ? 'UNKNOWN' : knownHomes.get(components[0]) || 'OTHER'
+}
+
+/** Read-only blank-emulator diagnostics; no raw component, title or policy value escapes. */
+export function bootSchemaResult (policy, home) {
+    const fields = keyguardDirectFields(policy)
+    const fieldKind = name => {
+        const values = [...fields.matchAll(new RegExp(`^${name}=([^\\n]*)$`, 'gm'))]
+        return values.length === 0 ? 'MISSING' : values.length !== 1 ? 'DUPLICATE'
+            : boolean(values[0][1]) === null ? 'OTHER' : 'BOOLEAN'
+    }
+    return { home: homeKind(home),
         secureFields: Object.fromEntries(['secure', 'isSecure', 'mIsSecure', 'secureForCurrentUser'].map(name => [name, fieldKind(name)])) }
+}
+
+/** TrustManagerService.dumpUser: the direct current system-user row only.
+ * KeyguardManager.isDeviceLocked reads the same TrustManager state. This does
+ * not assert that a device has no credential or replace isDeviceSecure.
+ */
+export function currentDeviceLockedResult (dump) {
+    const body = text(dump)
+    if ([...body.matchAll(/^Trust manager state:[ \t]*$/gm)].length !== 1) { return null }
+    const users = [...body.matchAll(/^ User "[^"\r\n]*" \(id=(\d+), flags=0x[0-9a-f]+\)([^\n]*)$/gm)]
+    const current = users.filter(row => /(?:^| )\(current\):/.test(row[2]))
+    if (current.length !== 1 || current[0][1] !== '0' || users.filter(row => row[1] === '0').length !== 1) { return null }
+    const row = current[0][2]
+    if (!/^ \(current\): trustState=[A-Z_]+, trustManaged=[01], deviceLocked=[01],/.test(row)) { return null }
+    const locked = unique(row, /(?:^|, )deviceLocked=([01])(?=,|$)/g)
+    return locked === '0' ? false : locked === '1' ? true : null
+}
+
+function unlockedGoogleHomeReady (api, state, policy, schema, deviceLocked) {
+    // API37's observed Google image no longer dumps the old cached secure field.
+    // An already-unlocked HOME can be observed without dispatching any input.
+    // Malformed/duplicate policy values and keyguard paths remain ineligible.
+    return api === 37 && schema?.home === 'GOOGLE_LAUNCHER' && schema.secureFields.secure === 'MISSING'
+        && policy.secure === null && policy.showing === false && policy.occluded === false
+        && policy.deviceHasKeyguard === true && policy.enabled === true && policy.bootCompleted === true
+        && policy.screenState === 'SCREEN_STATE_ON' && policy.interactiveState === 'INTERACTIVE_STATE_AWAKE'
+        && deviceLocked === false && state.resolvedHomeMatches === true && launcherReady(state)
 }
 
 export function keyguardReady (state, policy) {
@@ -256,6 +294,11 @@ export async function waitForBoot (android, api, { now = () => performance.now()
     let lastState
     let lastPolicy
     let lastSchema
+    let lastDeviceLocked = null
+    let lastComplete
+    let readFailures = []
+    let unlockedHomeSince
+    let unlockedHomeIdentity
     let home = ''
     let beforeMenu
     let preMenuSince
@@ -285,8 +328,8 @@ export async function waitForBoot (android, api, { now = () => performance.now()
                     check(await shell('getprop ro.build.version.sdk') === String(api), 'ANDROID_BOOT_API_MISMATCH')
                     check((await shell('getprop ro.boot.qemu') || await shell('getprop ro.kernel.qemu')) === '1', 'ANDROID_BOOT_REQUIRES_EMULATOR')
                     booted = true
-                    // Observe the system HOME on this disposable emulator before
-                    // installing any app. It does not alter readiness or input.
+                    // Resolve the system HOME before installing any app. Only
+                    // its exact known component can match native focus below.
                     try { home = await shell('cmd package resolve-activity --brief --user 0 -a android.intent.action.MAIN -c android.intent.category.HOME') }
                     catch (error) { inTime(); if (!(error instanceof TestFailure)) { throw error } }
                 }
@@ -294,14 +337,36 @@ export async function waitForBoot (android, api, { now = () => performance.now()
             if (booted) {
                 const commands = { windows: 'dumpsys window windows', displays: 'dumpsys window displays',
                     input: 'dumpsys input', activities: 'dumpsys activity activities',
-                    ...(!menuSent ? { policy: 'dumpsys window policy' } : {}) }
+                    ...(!menuSent ? { policy: 'dumpsys window policy' } : {}),
+                    ...(api === 37 && !menuSent ? { trust: 'dumpsys trust' } : {}) }
                 const readings = await Promise.allSettled(Object.values(commands).map(shell))
                 inTime()
                 const dumps = Object.fromEntries(Object.keys(commands).map((name, index) => [name,
                     readings[index].status === 'fulfilled' ? readings[index].value : '']))
-                lastState = bootStateResult(dumps)
+                readFailures = Object.keys(commands).filter((_name, index) => readings[index].status !== 'fulfilled')
+                lastState = bootStateResult(dumps, home)
                 if (!menuSent) { lastPolicy = keyguardPolicyResult(dumps.policy); lastSchema = bootSchemaResult(dumps.policy, home) }
+                lastDeviceLocked = api === 37 && !menuSent ? currentDeviceLockedResult(dumps.trust) : null
+                if (!readFailures.length && lastState.displayId !== null && lastState.inputFocusedDisplayId !== null
+                    && ['wmsWindow', 'wmsApplication', 'inputWindow', 'inputApplication', 'inputRequest', 'activityResumed']
+                        .every(key => lastState[key] !== 'UNKNOWN')) {
+                    lastComplete = { elapsedMs: Math.min(BUDGET_MS, Math.max(0, Math.floor(now() - started))),
+                        state: lastState, keyguard: lastPolicy, schema: lastSchema, deviceLocked: lastDeviceLocked }
+                }
                 check(lastState.currentError !== true, 'ANDROID_BOOT_CURRENT_ERROR_DIALOG')
+                if (!menuSent && unlockedGoogleHomeReady(api, lastState, lastPolicy, lastSchema, lastDeviceLocked)) {
+                    const identity = `${identities.get(lastState)}:${JSON.stringify(lastPolicy)}:${lastDeviceLocked}`
+                    if (unlockedHomeSince === undefined || unlockedHomeIdentity !== identity) {
+                        unlockedHomeSince = now(); unlockedHomeIdentity = identity
+                    }
+                    if (now() - unlockedHomeSince >= STABLE_MS * 2) {
+                        inTime()
+                        report({ status: 'READY', api, menuSent: false, beforeMenu: null, state: lastState,
+                            keyguard: lastPolicy, schema: lastSchema, deviceLocked: lastDeviceLocked,
+                            proof: 'UNLOCKED_GOOGLE_HOME_WITHOUT_INPUT' })
+                        return
+                    }
+                } else { unlockedHomeSince = undefined; unlockedHomeIdentity = undefined }
                 if (!menuSent) {
                     const target = preMenuTarget(lastState, lastPolicy)
                     const identity = target ? `${target}:${identities.get(lastState)}:${JSON.stringify(lastPolicy)}` : undefined
@@ -336,7 +401,8 @@ export async function waitForBoot (android, api, { now = () => performance.now()
         throw new TestFailure('ANDROID_BOOT_READINESS_DEADLINE_EXCEEDED')
     } catch (error) {
         report({ status: 'FAILED', api, menuSent, beforeMenu: beforeMenu || null, state: lastState || null,
-            keyguard: lastPolicy || null, schema: lastSchema || null })
+            keyguard: lastPolicy || null, schema: lastSchema || null, deviceLocked: lastDeviceLocked,
+            readFailures, lastComplete: lastComplete || null })
         throw error
     }
 }

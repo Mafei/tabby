@@ -140,6 +140,17 @@ the exact agreement text are verified before installation. Preview, Play Store,
 ARM64-image and `google_apis_ps16k` variants are excluded. Compile/target SDK and
 Build Tools remain 36; this does not add a 16 KiB page-size runtime claim.
 API 37 execution requires its own successful runtime receipt and CI conclusion.
+The API37 Google image's declared HOME and native window/input/activity identity
+must agree. If its legacy cached `secure` dump field is absent, startup instead
+requires the direct current-user-0 TrustManager `deviceLocked=0` state, an
+awake/non-occluded/non-showing keyguard policy, fully drawn focused HOME and
+700ms of stable observations. This path sends no MENU or other input and does
+not infer that the device has no credential. Missing/ambiguous lock state,
+malformed policy, ANR or incomplete focus fails. The original API31–36 MENU
+checks and nonsecure keyguard rules remain; application tests separately check
+the actual KeyguardManager state before credential-bearing interaction.
+See [Android's device-lock API](https://developer.android.com/reference/android/app/KeyguardManager#isDeviceLocked())
+and [TrustManager's direct user dump](https://github.com/aosp-mirror/platform_frameworks_base/blob/master/services/core/java/com/android/server/trust/TrustManagerService.java).
 The
 configured API 26 minimum is an installation declaration, not a claim that
 every old Android WebView was tested. The mobile language build explicitly
