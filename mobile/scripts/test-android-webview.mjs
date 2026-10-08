@@ -231,6 +231,7 @@ export async function webviewAcceptance (android, fixture) {
                         scroll: { before: geometry(window.__tabbyCloudObservation?.scroll?.before),
                             after: geometry(window.__tabbyCloudObservation?.scroll?.after),
                             requested: geometry(window.__tabbyCloudObservation?.scroll?.requested),
+                            historyMarkerVisible: window.__tabbyCloudObservation?.scroll?.historyMarkerVisible === true,
                             renderedReady: window.__tabbyCloudObservation?.scroll?.renderedReady === true,
                             renderedChanged: window.__tabbyCloudObservation?.scroll?.renderedChanged === true,
                             geometryStable: window.__tabbyCloudObservation?.scroll?.geometryStable === true,
@@ -764,8 +765,17 @@ export async function webviewAcceptance (android, fixture) {
         await plugin('hideKeyboard')
         await step('parsed-terminal-history-ready', () => until(() => page.evaluate(() => {
             const rows = document.querySelector('.xterm-rows')?.textContent || ''
-            const scroll = window.__tabbyCloudObservation.readScroll()
-            return rows.includes('W_SCROLL_HISTORY_READY') && scroll.sliderCount === 1 && scroll.sliderTop > 0
+            const observation = window.__tabbyCloudObservation
+            const scroll = observation.readScroll()
+            const historyMarkerVisible = rows.includes('W_SCROLL_HISTORY_READY')
+            const ready = historyMarkerVisible && scroll.sliderCount === 1 && scroll.sliderTop > 0
+            // Preserve only the existing bounded geometry and a fixed marker
+            // flag when this gate fails, before the later swipe can initialize
+            // its baseline. Terminal contents never leave the WebView.
+            observation.scroll.before = scroll
+            observation.scroll.historyMarkerVisible = historyMarkerVisible
+            observation.scroll.renderedReady = ready
+            return ready
         }), 'ANDROID_TERMINAL_HISTORY_NOT_RENDERED'))
         const scrollPosition = async () => {
             const [scroll, native] = await Promise.all([

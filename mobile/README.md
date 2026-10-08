@@ -158,7 +158,10 @@ The actual system keyboard show/hide and resize phase remains mandatory. This
 is controlled native composition acceptance, not a real Chinese keyboard test.
 It still requires visible preedit without PTY output and exact committed
 UTF-8/control bytes. Failure diagnostics include only fixed
-input-event categories and focus booleans, never editor text.
+input-event categories and focus booleans, never editor text. The history-render
+gate also retains its last bounded geometry and a fixed synthetic-marker
+visibility flag before the later swipe initializes its baseline. Its original
+readiness predicate and deadline remain; no terminal contents are reported.
 See [Android's device-lock API](https://developer.android.com/reference/android/app/KeyguardManager#isDeviceLocked())
 and [TrustManager's direct user dump](https://github.com/aosp-mirror/platform_frameworks_base/blob/master/services/core/java/com/android/server/trust/TrustManagerService.java).
 The
