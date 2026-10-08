@@ -1,6 +1,7 @@
 import * as os from 'os'
 import { NgZone } from '@angular/core'
 import { marker as _ } from '@biesbjerg/ngx-translate-extract-marker'
+import { getTerminalFontFamily } from './bundledFonts'
 
 export const WIN_BUILD_CONPTY_SUPPORTED = 17692
 export const WIN_BUILD_CONPTY_STABLE = 18309
@@ -20,15 +21,8 @@ export function isWindowsBuild (build: number): boolean {
 }
 
 // eslint-disable-next-line @typescript-eslint/explicit-module-boundary-types
-export function getCSSFontFamily (config: any): string {
-    let fonts: string[] = config.terminal.font.split(',').map(x => x.trim().replaceAll('"', ''))
-    if (config.terminal.fallbackFont) {
-        fonts.push(config.terminal.fallbackFont)
-    }
-    fonts.push('monospace-fallback')
-    fonts.push('monospace')
-    fonts = fonts.map(x => `"${x}"`)
-    return fonts.join(', ')
+export function getCSSFontFamily (config: any, useBundledFonts = process.platform === 'linux'): string {
+    return getTerminalFontFamily(config.terminal.font, config.terminal.fallbackFont, useBundledFonts)
 }
 
 export function wrapPromise <T> (zone: NgZone, promise: Promise<T>): Promise<T> {

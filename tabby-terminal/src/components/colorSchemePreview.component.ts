@@ -1,5 +1,5 @@
 import { Component, Input, ChangeDetectionStrategy, ChangeDetectorRef } from '@angular/core'
-import { BaseComponent, ConfigService, getCSSFontFamily, TerminalColorScheme } from 'tabby-core'
+import { BaseComponent, ConfigService, getCSSFontFamily, HostAppService, Platform, TerminalColorScheme } from 'tabby-core'
 
 /** @hidden */
 @Component({
@@ -15,6 +15,7 @@ export class ColorSchemePreviewComponent extends BaseComponent {
     constructor (
         public config: ConfigService,
         changeDetector: ChangeDetectorRef,
+        private hostApp: HostAppService,
     ) {
         super()
         this.subscribeUntilDestroyed(config.changed$, () => {
@@ -23,6 +24,6 @@ export class ColorSchemePreviewComponent extends BaseComponent {
     }
 
     getPreviewFontFamily (): string {
-        return getCSSFontFamily(this.config.store)
+        return getCSSFontFamily(this.config.store, this.hostApp.platform === Platform.Linux)
     }
 }

@@ -1,9 +1,9 @@
 name: Fork desktop checks and artifacts
 on:
   push:
-    branches: [master, feature/ssh-tmux-recovery]
+    branches: [master, feature/ssh-tmux-recovery, feature/linux-portable-rocky8-fonts]
   pull_request:
-    branches: [master]
+    branches: [master, feature/ssh-tmux-recovery]
   workflow_dispatch:
 permissions:
   contents: read
@@ -40,6 +40,8 @@ jobs:
         run: |
           npm install -g yarn@1.22.22
           yarn --frozen-lockfile --network-timeout 1000000
+      - name: Prepare pinned app-local font resources
+        run: python3 scripts/fonts/fetch-fonts.py
       - run: yarn test:ssh-term
         env:
           TABBY_TEST_TMUX: '1'
@@ -100,6 +102,7 @@ jobs:
         run: |
           npm install -g yarn@1.22.22
           yarn --frozen-lockfile --network-timeout 1000000
+          python3 scripts/fonts/fetch-fonts.py
           yarn build
           node scripts/prepackage-plugins.mjs
       - name: Windows VC runtime and UAC helper

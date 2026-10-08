@@ -2,6 +2,8 @@ h3.mb-3(translate) Appearance
 .form-line
     .header
         .title(translate) Font
+        .description(*ngIf='useBundledFonts', translate) Bundled Mono, CJK, Emoji and Symbols fonts work without installing system fonts. Custom font choices remain first.
+        .description.text-danger(*ngIf='fontLoadError', translate) Bundled font files could not be loaded. Reinstall this build before opening a terminal.
 
     .input-group.w-75
         input.form-control(

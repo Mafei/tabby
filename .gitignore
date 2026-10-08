@@ -40,3 +40,7 @@ crowdin.yml
 
 # built from tabby-uac/ by CI; see .github/workflows/build.yml
 extras/UAC.exe
+
+# Pinned build-time fonts; sources and licenses live in scripts/fonts/.
+/tabby-terminal/src/fonts/bundled/
+/scripts/fonts/__pycache__/

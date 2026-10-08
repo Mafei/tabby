@@ -5,13 +5,12 @@ import * as os from 'os'
 import promiseIpc, { RendererProcessType } from 'electron-promise-ipc'
 import { execFile } from 'mz/child_process'
 import { Injectable, NgZone } from '@angular/core'
-import { PlatformService, ClipboardContent, Platform, MenuItemOptions, MessageBoxOptions, MessageBoxResult, DirectoryUpload, FileUpload, FileDownload, DirectoryDownload, FileUploadOptions, wrapPromise, TranslateService, FileTransfer, PlatformTheme } from 'tabby-core'
+import { BUNDLED_FONT_FAMILIES, PlatformService, ClipboardContent, Platform, MenuItemOptions, MessageBoxOptions, MessageBoxResult, DirectoryUpload, FileUpload, FileDownload, DirectoryDownload, FileUploadOptions, wrapPromise, TranslateService, FileTransfer, PlatformTheme } from 'tabby-core'
 import { ElectronService } from '../services/electron.service'
 import { ElectronHostWindow } from './hostWindow.service'
 import { ShellIntegrationService } from './shellIntegration.service'
 import { ElectronHostAppService } from './hostApp.service'
 import { configPath } from '../../../app/lib/config'
-const fontManager = require('fontmanager-redux') // eslint-disable-line
 
 /* eslint-disable block-scoped-var */
 
@@ -207,23 +206,19 @@ export class ElectronPlatformService extends PlatformService {
     }
 
     async listFonts (): Promise<string[]> {
+        const bundled = this.hostApp.platform === Platform.Linux ? [...BUNDLED_FONT_FAMILIES] : []
         if (this.hostApp.platform === Platform.Windows || this.hostApp.platform === Platform.macOS) {
-            let fonts = await new Promise<any[]>(resolve => fontManager.getAvailableFonts(resolve))
-            fonts = fonts.map(x => x.family.trim())
-            return fonts
+            try {
+                // Linux starts and lists the packaged families without loading
+                // this optional native addon or invoking a host font utility.
+                const fontManager = require('fontmanager-redux') // eslint-disable-line
+                const fonts = await new Promise<any[]>(resolve => fontManager.getAvailableFonts(resolve))
+                return [...new Set([...bundled, ...fonts.map(x => x.family.trim())])]
+            } catch {
+                return bundled
+            }
         }
-        // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
-        if (this.hostApp.platform === Platform.Linux) {
-            const stdout = (await execFile('fc-list', [':spacing=mono']))[0]
-            const fonts = stdout.toString()
-                .split('\n')
-                .filter(x => !!x)
-                .map(x => x.split(':')[1].trim())
-                .map(x => x.split(',')[0].trim())
-            fonts.sort()
-            return fonts
-        }
-        return []
+        return bundled
     }
 
     popupContextMenu (menu: MenuItemOptions[], _event?: MouseEvent): void {

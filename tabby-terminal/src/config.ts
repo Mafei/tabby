@@ -1,4 +1,4 @@
-import { ConfigProvider, Platform } from 'tabby-core'
+import { BUNDLED_FONT_FAMILIES, ConfigProvider, Platform } from 'tabby-core'
 import { DefaultColorSchemes } from './colorSchemes'
 
 /** @hidden */
@@ -177,7 +177,7 @@ export class TerminalConfigProvider extends ConfigProvider {
         },
         [Platform.Linux]: {
             terminal: {
-                font: 'Liberation Mono',
+                font: BUNDLED_FONT_FAMILIES[0],
                 pasteOnMiddleClick: false, // handled by OS
             },
             hotkeys: {

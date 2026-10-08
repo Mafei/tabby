@@ -13,10 +13,16 @@ export default () => {
         ],
         rules: [
             {
+                test: /[\\/]fonts[\\/]bundled[\\/].*\.(ttf|otf)$/i,
+                type: 'asset/resource',
+                generator: { filename: 'fonts/[name]-[contenthash][ext]', publicPath: '' },
+            },
+            {
                 test: /lib[\\/]xterm-addon-image-worker.js$/i,
                 type: 'asset/source',
             },
         ],
     })
+    cfg.node = { ...cfg.node, __dirname: false }
     return cfg
 }
