@@ -19,7 +19,9 @@ function run (program, args, cwd = root) {
 function install (directory, production = false) {
     run('yarn', ['install', '--frozen-lockfile', '--ignore-scripts', '--network-timeout', '1000000',
         ...(production ? ['--production'] : [])], directory)
-    run('yarn', ['patch-package'], directory)
+    // Every package keeps its own patch cwd; the pinned root tool is available
+    // even when that plugin or production copy does not declare patch-package.
+    run(process.execPath, [resolve(root, 'node_modules/patch-package/index.js'), '--error-on-fail'], directory)
 }
 for (const name of ['app', ...vars.allPackages]) { install(resolve(root, name)) }
 for (const name of vars.builtinPlugins) {
