@@ -83,11 +83,18 @@ def main():
     require("minSdkVersion:'26'" in badging and "targetSdkVersion:'36'" in badging, 'Wrong Android SDK range')
     require('application-debuggable' in badging, 'This verifier only describes the prototype debug APK')
     permissions = re.findall(r"^uses-permission: name='([^']+)'", badging, re.M)
-    expected = {'android.permission.INTERNET', APP + '.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION'}
+    expected = {'android.permission.INTERNET', 'android.permission.FOREGROUND_SERVICE', 'android.permission.FOREGROUND_SERVICE_SPECIAL_USE', 'android.permission.POST_NOTIFICATIONS', APP + '.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION'}
     require(set(permissions) == expected, 'Unexpected packaged permission set')
     manifest = run(str(tools / 'aapt2'), 'dump', 'xmltree', '--file', 'AndroidManifest.xml', str(apk))
     for flag in ['allowBackup', 'fullBackupContent', 'usesCleartextTraffic', 'extractNativeLibs']:
         require(re.search(r':' + flag + r'\([^\n]+\)=false', manifest), 'Unsafe or absent packaged flag: ' + flag)
+    service_blocks = re.findall(r'(?m)^( +)E: service[^\n]*\n((?:(?!\1E:)[^\n]*\n)*)', manifest)
+    require(len(service_blocks) == 1, 'Exactly one connection service is required')
+    service = service_blocks[0][1]
+    require('ConnectionService' in service and re.search(r':exported\([^\n]+\)=false', service), 'Connection service must be private')
+    require(re.search(r':foregroundServiceType\([^\n]+\)=0x40000000', service), 'Connection service must use specialUse only')
+    require('android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE' in service, 'Connection service purpose must be declared')
+    require(not re.search(r'E: receiver\b', manifest), 'Automatic receivers are not allowed')
     require('protectionLevel(0x01010009)=0x00000002' in manifest, 'Receiver permission must remain signature protected')
     run(str(tools / 'zipalign'), '-c', '-P', '16', '4', str(apk))
     signature = run(str(tools / 'apksigner'), 'verify', '--verbose', '--print-certs', str(apk))
@@ -109,7 +116,7 @@ def main():
             if name.endswith('.dex'):
                 dex = archive.read(name)
                 for test_class in ['CloudWebViewHarness', 'RealSSHBridgeTest', 'AndroidHostKeyStoreTest',
-                                   'ViewportLifecycleTest', 'SecurityPolicyTest', 'PrivateKeyImportTest',
+                                   'ViewportLifecycleTest', 'EncryptedSecretStoreTest', 'SecurityPolicyTest', 'PrivateKeyImportTest',
                                    'DeferredSSHBridgeTest', 'NativeSessionIsolationTest', 'SessionOperationsTest']:
                     require(('Lorg/tabby/android/prototype/' + test_class + ';').encode() not in dex, 'Instrumentation class packaged in main DEX: ' + test_class)
         config = json.loads(archive.read('assets/capacitor.config.json'))

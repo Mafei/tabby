@@ -259,6 +259,7 @@ jobs:
             mobile/artifacts/Tabby-Android-Emulator.apk.sha256
             mobile/artifacts/android-emulator-apk-verification.json
             mobile/artifacts/android-runtime-report.json
+            mobile/artifacts/runtime-screenshots/*.png
             mobile/artifacts/android-delivery-verification.json
           if-no-files-found: error
           retention-days: 14

@@ -22,15 +22,15 @@ const nextInputOwner = () => ++inputOwnerGeneration
     template: `
     <main class="app-shell" [class.terminal-active]="busy && !selectionOpen" [class.short-pane]="viewportHeight <= 180" [style.height.px]="viewportHeight || null">
       <span class="status pane-status" role="status">{{statusText}}</span>
-      <nav *ngIf="actionsOpen" class="actions-panel" aria-label="终端操作">
+      <nav *ngIf="actionsOpen" class="actions actions-panel" aria-label="终端操作">
         <button (click)="newConnection.emit()" aria-label="新增连接">新增连接</button>
         <button (click)="duplicateConnection.emit()" aria-label="复制连接并重新选择会话">复制连接</button>
-        <button *ngIf="busy" (click)="disconnect()" aria-label="断开或取消连接">断开</button>
-        <button *ngIf="connected" (click)="toggleSelection()" [attr.aria-pressed]="selectionMode">{{selectionMode ? '结束选择' : '选择文字'}}</button>
-        <button *ngIf="connected" (click)="copy()">复制</button>
-        <button *ngIf="connected" [disabled]="readOnly" (pointerdown)="keepInputFocus($event)" (click)="paste()">粘贴</button>
-        <button *ngIf="connected" [disabled]="readOnly" (click)="focusInput()">键盘</button>
-        <button *ngIf="connected" [disabled]="readOnly" (click)="toggleMouse()" [attr.aria-pressed]="mouseMode">{{mouseMode ? '鼠标模式' : '滚动模式'}}</button>
+        <button *ngIf="busy" (click)="actionsOpen = false; disconnect()" aria-label="断开或取消连接">断开</button>
+        <button *ngIf="connected" (click)="actionsOpen = false; toggleSelection()" [attr.aria-pressed]="selectionMode">{{selectionMode ? '结束选择' : '选择文字'}}</button>
+        <button *ngIf="connected" (click)="actionsOpen = false; copy()">复制</button>
+        <button *ngIf="connected" [disabled]="readOnly" (pointerdown)="keepInputFocus($event)" (click)="actionsOpen = false; paste()">粘贴</button>
+        <button *ngIf="connected" [disabled]="readOnly" (click)="actionsOpen = false; focusInput()">键盘</button>
+        <button *ngIf="connected" [disabled]="readOnly" (click)="actionsOpen = false; toggleMouse()" [attr.aria-pressed]="mouseMode">{{mouseMode ? '鼠标模式' : '滚动模式'}}</button>
         <button (click)="changeFont(-1)" [disabled]="fontSize <= 12" aria-label="减小终端字号">A−</button><span>{{fontSize}} sp</span>
         <button (click)="changeFont(1)" [disabled]="fontSize >= 26" aria-label="增大终端字号">A＋</button>
         <button *ngIf="connected" (click)="keysOpen = !keysOpen">全部辅助键</button>
@@ -104,7 +104,7 @@ const nextInputOwner = () => ++inputOwnerGeneration
       </section>
       <label class="input-strip" [hidden]="!busy || selectionOpen"><span>{{readOnly ? '只读' : '终端输入'}}</span><textarea *ngFor="let epoch of inputEpochs; trackBy: trackInputEpoch" #terminalInput rows="1" aria-label="终端输入" autocapitalize="off"
         autocomplete="off" autocorrect="off" spellcheck="false" inputmode="text" enterkeyhint="send"
-        [disabled]="!connected || selectionMode || !!modal || readOnly"></textarea><button [disabled]="readOnly" (pointerdown)="keepInputFocus($event)" (click)="sendKey('Enter')" aria-label="发送回车">↵</button></label>
+        [disabled]="!foreground || !connected || selectionMode || !!modal || readOnly"></textarea><button [disabled]="readOnly" (pointerdown)="keepInputFocus($event)" (click)="sendKey('Enter')" aria-label="发送回车">↵</button></label>
       <div *ngIf="notice" class="notice" role="status">{{notice}}</div>
     </main>
     <section *ngIf="modal && active" class="modal-backdrop" role="dialog" aria-modal="true" [attr.aria-label]="modal === 'hostKey' ? '确认主机密钥' : modal === 'takeover' || modal === 'restoreTakeover' ? '确认接管会话' : 'SSH 交互认证'">
@@ -190,7 +190,7 @@ export class SessionPaneComponent implements AfterViewInit, OnDestroy {
     fontSize = 16; private fontPixels: Record<string, number> = {}; touchSlop = 8
     actionsOpen = false; keysOpen = false; hideKeys = false
     savePassword = false; savedPassword = false; useSavedPassword = false
-    backgroundEnabled = false; backgroundPending = false; private foreground = true
+    backgroundEnabled = false; backgroundPending = false; foreground = true
     readonly auxiliaryKeys = [
         { id: 'Escape', text: 'Esc', label: 'Esc' }, { id: 'Tab', text: 'Tab', label: 'Tab' },
         { id: 'Ctrl', text: 'Ctrl', label: 'Ctrl' }, { id: 'Alt', text: 'Alt', label: 'Alt' },
@@ -263,13 +263,13 @@ export class SessionPaneComponent implements AfterViewInit, OnDestroy {
     private pastePending?: string
     private readonly viewportListener = () => this.zone.run(() => this.updateViewport())
     private readonly visibilityListener = () => {
-        if (document.visibilityState === 'hidden') this.zone.run(() => this.suspend())
+        if (document.visibilityState === 'hidden') this.zone.run(() => this.suspend(true))
     }
-    private suspend(): void {
+    private suspend(deferTransportDecision = false): void {
         this.foreground = false; this.clearModifiers(); this.keyCancel(); this.touchCancel(); this.input?.cancel()
         this.inputElement?.nativeElement.blur(); this.view?.cancelMouseGesture(); ++this.interactionEpoch
         this.volatilePassword = undefined; this.auth = undefined; this.password = ''; this.passphrase = ''
-        if (!this.backgroundEnabled || !this.connected || this.modal) {
+        if (!deferTransportDecision && (!this.backgroundEnabled || !this.connected || this.modal)) {
             this.disconnect(!this.pickerActive); this.notice = '应用进入后台，SSH 已关闭。返回后可重新连接。'
         }
     }
@@ -292,6 +292,8 @@ export class SessionPaneComponent implements AfterViewInit, OnDestroy {
         window.visualViewport?.addEventListener('scroll', this.viewportListener)
         window.addEventListener('resize', this.viewportListener)
         document.addEventListener('visibilitychange', this.visibilityListener)
+        void this.bridge.addListener('backgroundState', state => this.zone.run(() => { this.backgroundEnabled = state.enabled }))
+            .then(handle => { if (this.destroyed) void handle.remove(); else this.handles.push(handle) }).catch(() => {})
         this.updateViewport(); void this.loadTypography(); void this.refreshBackgroundState(); void this.refreshCredentialStatus()
     }
 
@@ -380,7 +382,7 @@ export class SessionPaneComponent implements AfterViewInit, OnDestroy {
                 const auth = this.auth; this.auth = undefined
                 if (!auth) { this.fail('认证已取消或凭据已释放。请重新连接。'); return }
                 void this.command({ type: 'authResponse', requestId: event.requestId!,
-                    ...(event.mode === 'privateKey' ? { keyId: auth.keyId, passphrase: auth.passphrase } : { ...(auth.saved ? { useSavedPassword: true } : { password: auth.password }), savePassword: auth.save }) })
+                    ...(event.mode === 'privateKey' ? { keyId: auth.keyId, passphrase: auth.passphrase } : { ...(auth.saved ? { useSavedPassword: true } : { password: auth.password }), ...(auth.save ? { savePassword: true } : {}) }) })
             }
         } else if (event.type === 'state') {
             if (event.state === 'authenticated') {
@@ -432,6 +434,7 @@ export class SessionPaneComponent implements AfterViewInit, OnDestroy {
     }
 
     private releaseTransport(invalidatePicker: boolean, keepPassword: boolean, error: Error = new MobileTmuxError('exec_cancelled')): void {
+        this.actionsOpen = false; this.keysOpen = false; this.keyCancel()
         if (invalidatePicker) {
             ++this.pickerToken
             if (this.pickerActive && this.pickerRequestId) {
@@ -447,7 +450,7 @@ export class SessionPaneComponent implements AfterViewInit, OnDestroy {
         const keyId = this.keyId
         this.auth = undefined; this.password = ''; this.passphrase = ''; this.prompts = []; this.authInstructions = ''; this.events = []
         this.keyId = ''; this.keyLabel = ''; this.requestId = undefined; this.modal = undefined
-        this.busy = false; this.connected = false; this.statusText = '未连接'; this.ctrlHeld = false
+        this.busy = false; this.connected = false; this.statusText = '未连接'; this.clearModifiers()
         this.selectionOpen = false; this.actionBusy = false; this.sessions = []; this.tmuxAvailable = undefined; this.takeoverSession = undefined
         this.takeoverRestore = false; this.automaticRestore = false; this.listedSocket = undefined; this.transportClosing = false; this.uncertainCreate = false
         this.hostVerified = false; this.commandQueue = Promise.resolve(); this.pendingInputBytes = 0
@@ -619,15 +622,16 @@ export class SessionPaneComponent implements AfterViewInit, OnDestroy {
     }
 
     private command(command: SSHCommand): Promise<void> {
-        const connectionId = this.connectionId; const generation = this.generation
+        const connectionId = this.connectionId; const generation = this.generation; const interaction = this.interactionEpoch
         if (!connectionId || !this.busy) { return Promise.resolve() }
         // Keep keystroke order and cancel queued work after a generation changes.
         const next = this.commandQueue.then(async () => {
             if (connectionId !== this.connectionId || generation !== this.generation) { return }
+            if ((command.type === 'write' || command.type === 'resize') && (!this.foreground || interaction !== this.interactionEpoch)) return
             await this.bridge.command({ connectionId, command })
         })
         this.commandQueue = next.catch(() => {
-            if (generation === this.generation) { this.fail('SSH 操作失败，连接已关闭。') }
+            if (generation === this.generation && !(command.type === 'write' && !this.foreground)) { this.fail('SSH 操作失败，连接已关闭。') }
         })
         return this.commandQueue
     }
@@ -680,7 +684,7 @@ export class SessionPaneComponent implements AfterViewInit, OnDestroy {
 
     sendSpecial(text: string): void {
         if (this.input?.isComposing) { this.notice = '请先完成或取消当前组合输入。'; return }
-        this.ctrlHeld = false
+        this.clearModifiers()
         this.sendText(text, false)
     }
 
@@ -698,6 +702,13 @@ export class SessionPaneComponent implements AfterViewInit, OnDestroy {
         if (this.active && this.foreground && this.connected && !this.readOnly && !this.modal) this.ctrlHeld = !this.ctrlHeld
     }
 
+    dismissOverlay(): boolean {
+        if (this.modal) { if (this.modal === 'takeover' || this.modal === 'restoreTakeover') this.cancelTakeover(); else this.disconnect(); return true }
+        if (this.keysOpen) { this.keysOpen = false; return true }
+        if (this.actionsOpen) { this.actionsOpen = false; return true }
+        if (this.selectionMode) { this.toggleSelection(); return true }
+        return false
+    }
     clearModifiers(): void { this.ctrlHeld = false; this.altHeld = false }
     toggleActions(): void { if (!this.modal) { this.actionsOpen = !this.actionsOpen; this.touchCancel(); this.keyCancel() } }
     canNavigate(): boolean { return !this.modal }
@@ -740,7 +751,8 @@ export class SessionPaneComponent implements AfterViewInit, OnDestroy {
     changeFont(delta: number): void { this.fontSize = Math.max(12, Math.min(26, this.fontSize + delta)); this.view?.setFontSize(this.fontPixels[String(this.fontSize)] ?? this.fontSize) }
     private async loadTypography(): Promise<void> {
         try { const viewport = await this.bridge.getViewport(); if (this.destroyed) return
-            this.zone.run(() => { this.fontPixels = viewport.fontPixels ?? {}; this.touchSlop = viewport.touchSlop ?? 8; this.updateViewport(viewport.viewportHeight); this.view?.setFontSize(this.fontPixels[String(this.fontSize)] ?? this.fontSize) })
+            this.zone.run(() => { this.fontPixels = viewport.fontPixels ?? {};
+                for (const size of [14, 16, 20]) document.documentElement.style.setProperty('--font-' + size, (this.fontPixels[String(size)] ?? size) + 'px'); this.touchSlop = viewport.touchSlop ?? 8; this.updateViewport(viewport.viewportHeight); this.view?.setFontSize(this.fontPixels[String(this.fontSize)] ?? this.fontSize) })
         } catch {}
     }
     private async refreshBackgroundState(): Promise<void> { try { const state = await this.bridge.backgroundState(); this.zone.run(() => { this.backgroundEnabled = state.enabled }) } catch {} }
@@ -765,7 +777,7 @@ export class SessionPaneComponent implements AfterViewInit, OnDestroy {
 
     keepInputFocus(event: PointerEvent): void { event.preventDefault() }
     focusInput(): void {
-        if (this.active && this.connected && !this.modal && !this.selectionMode && !this.readOnly) {
+        if (this.foreground && this.active && this.connected && !this.modal && !this.selectionMode && !this.readOnly) {
             this.inputElement?.nativeElement.focus({ preventScroll: true })
             if (document.activeElement !== this.inputElement?.nativeElement) { return }
             const connectionId = this.connectionId
@@ -774,7 +786,7 @@ export class SessionPaneComponent implements AfterViewInit, OnDestroy {
     }
 
     private resize(cols: number, rows: number): void {
-        if (this.active && this.connected) { void this.command({ type: 'resize', cols, rows }) }
+        if (this.foreground && this.active && this.connected) { void this.command({ type: 'resize', cols, rows }) }
     }
 
     private updateViewport(nativeHeight?: number): void {

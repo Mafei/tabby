@@ -140,6 +140,7 @@ export class TestBridge implements SSHBridge {
     backgroundEnabled = false
     savedPassword = false
     deletedPasswords: unknown[] = []
+    async leaveApp(): Promise<void> {}
     async backgroundState() { return { enabled: this.backgroundEnabled, notificationsAllowed: true } }
     async setBackground(options: { enabled: boolean }) { this.backgroundEnabled = options.enabled; return { enabled: options.enabled } }
     async credentialStatus() { return { saved: this.savedPassword } }
@@ -153,7 +154,7 @@ window.attackMarker = []
 const nativeListeners = new Map<string, { remove: () => Promise<void> }>()
 let callbackSequence = 0
 const methods = ['start', 'command', 'close', 'writeClipboard', 'readClipboard', 'selectPrivateKey',
-    'discardPrivateKey', 'cancelPrivateKeySelection', 'setActiveTab', 'showKeyboard', 'hideKeyboard', 'getViewport', 'backgroundState', 'setBackground', 'credentialStatus', 'deletePassword', 'removeListener']
+    'discardPrivateKey', 'cancelPrivateKeySelection', 'setActiveTab', 'showKeyboard', 'hideKeyboard', 'getViewport', 'backgroundState', 'backAction', 'leaveApp', 'setBackground', 'credentialStatus', 'deletePassword', 'removeListener']
 ;(window as unknown as { Capacitor: unknown }).Capacitor = {
     PluginHeaders: [{ name: 'TabbySSH', methods: [
         ...methods.map(name => ({ name, rtype: 'promise' })), { name: 'addListener', rtype: 'callback' },

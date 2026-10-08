@@ -25,6 +25,7 @@ class ConnectionService : Service() {
             return START_NOT_STICKY
         }
         try {
+            detaching = false
             val manager = getSystemService(NotificationManager::class.java)
             manager.createNotificationChannel(NotificationChannel(CHANNEL, "SSH 后台连接", NotificationManager.IMPORTANCE_LOW))
             val notification = notification(SSHRuntime.get(this).sessions.size)

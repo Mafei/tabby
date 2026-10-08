@@ -27,6 +27,7 @@ class SSHRuntime private constructor(val context: Context) {
         val hostKeys: MutableMap<String, String> = ConcurrentHashMap(),
         val batchPending: AtomicBoolean = AtomicBoolean(false),
         val outputWindow: OutputWindow = OutputWindow(),
+        @Volatile var approvedHostKey: String? = null,
         @Volatile var pendingPassword: ByteArray? = null,
         @Volatile var verifiedHostKey: String? = null,
     )
@@ -38,6 +39,7 @@ class SSHRuntime private constructor(val context: Context) {
     val secrets = EncryptedSecretStore(context)
     private val main = Handler(Looper.getMainLooper())
     private val worker = Executors.newSingleThreadScheduledExecutor()
+    private var pollTask: java.util.concurrent.ScheduledFuture<*>? = null
     @Volatile private var sink: ((JSONObject) -> Unit)? = null
     private lateinit var hostKeyStore: HostKeyStore
     private lateinit var hostKeyPolicy: HostKeyPolicy
@@ -54,12 +56,12 @@ class SSHRuntime private constructor(val context: Context) {
             }
         })
         hostKeyPolicy = HostKeyPolicy(hostKeyStore)
-        worker.scheduleWithFixedDelay({ pollEvents() }, 0, 16, TimeUnit.MILLISECONDS)
     }
     fun knownHost(endpoint: String): String? = hostKeyStore.read(endpoint)
     fun approve(endpoint: String, key: String) = hostKeyPolicy.approve(endpoint, key)
-    fun attach(listener: (JSONObject) -> Unit) { sink = listener }
-    fun detach() { sink = null }
+    fun attach(listener: (JSONObject) -> Unit) { sink = listener; if (sessions.isNotEmpty()) connectionAdded() }
+    fun detach() { sink = null; synchronized(sessionLock) { pollTask?.cancel(false); pollTask = null } }
+    fun connectionAdded() { synchronized(sessionLock) { if (pollTask == null && sink != null) pollTask = worker.scheduleWithFixedDelay({ pollEvents() }, 0, 16, TimeUnit.MILLISECONDS) } }
     private fun deliver(event: JSONObject) { sink?.invoke(event) }
     private fun saveSuccessfulPassword(session: Session) {
         val bytes = session.pendingPassword ?: return
@@ -127,6 +129,7 @@ class SSHRuntime private constructor(val context: Context) {
                             event.put("status", "known")
                             emit(session, event)
                         }
+                        session.approvedHostKey = key
                         NativeSSH.command(session.id, JSONObject()
                             .put("type", "hostKeyResponse").put("requestId", requestId.toLong())
                             .put("generation", session.gate.generation).put("accept", true).toString())
@@ -144,6 +147,8 @@ class SSHRuntime private constructor(val context: Context) {
                 }
             }
             "auth" -> {
+                // Authentication challenges are emitted only after completed host KEX.
+                if (session.verifiedHostKey == null) session.verifiedHostKey = session.approvedHostKey ?: error("unverified")
                 require(session.gate.register(event.get("requestId").toString(), "auth"))
                 emit(session, event)
             }
@@ -208,6 +213,7 @@ class SSHRuntime private constructor(val context: Context) {
 
     fun closeSession(session: Session, reason: String, notify: Boolean = true) {
         if (!synchronized(sessionLock) { sessions.remove(session.id, session) }) return
+        if (sessions.isEmpty()) synchronized(sessionLock) { pollTask?.cancel(false); pollTask = null }
         session.gate.close()
         session.operations.close()
         session.hostKeys.clear()

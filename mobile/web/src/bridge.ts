@@ -64,6 +64,9 @@ export interface SSHBridge {
     addListener(eventName: 'sshEvent', listener: (event: SSHEvent) => void): Promise<PluginListenerHandle>
     addListener(eventName: 'keyboardState', listener: (event: { visible: boolean, height: number, viewportWidth: number, viewportHeight: number }) => void): Promise<PluginListenerHandle>
     addListener(eventName: 'lifecycleState', listener: (event: { active: boolean, reason?: 'privateKeyPicker' | 'background', retained?: boolean }) => void): Promise<PluginListenerHandle>
+    addListener(eventName: 'backAction', listener: (event: Record<string, never>) => void): Promise<PluginListenerHandle>
+    addListener(eventName: 'backgroundState', listener: (event: { enabled: boolean }) => void): Promise<PluginListenerHandle>
+    leaveApp(): Promise<void>
     writeClipboard(options: { text: string }): Promise<void>
     readClipboard(): Promise<{ text: string }>
     selectPrivateKey(options?: { ownerId: string, requestId: string }): Promise<{ keyId: string, label: string }>

@@ -1,3 +1,5 @@
+import { mkdir, writeFile } from 'node:fs/promises'
+import { fileURLToPath } from 'node:url'
 import { createRequire } from 'node:module'
 import { APP, RUNNER, DONE, INPUT, METADATA, check, until, pause, TestFailure, instrumentationResult, observeUntil, observeReadUntil } from './test-android-utils.mjs'
 
@@ -121,6 +123,15 @@ export async function webviewAcceptance (android, fixture) {
     let rotationGeometry
     let systemIME
 
+    async function capture (name) {
+        // Explicitly requested runtime images; synthetic fixture only, never auth forms.
+        const directory = fileURLToPath(new URL('../artifacts/runtime-screenshots/', import.meta.url))
+        await mkdir(directory, { recursive: true })
+        const encoded = await android.command(['exec-out', 'sh', '-c', 'screencap -p | base64'], { timeout: 15000 })
+        const bytes = Buffer.from(encoded.replace(/\s/g, ''), 'base64')
+        check(bytes.length > 8 && bytes.subarray(0, 8).equals(Buffer.from([137,80,78,71,13,10,26,10])), 'ANDROID_SCREENSHOT_INVALID')
+        await writeFile(directory + name + '.png', bytes)
+    }
     const verify = label => { passed.push(label); console.log(`PASS Android WebView: ${label}.`) }
     async function step (name, action) {
         substage = name
@@ -194,7 +205,7 @@ export async function webviewAcceptance (android, fixture) {
                             cssDynamicViewport: typeof window.CSS?.supports === 'function' && window.CSS.supports('height', '100dvh') },
                         bootstrapFallback: document.body?.textContent?.includes('界面无法启动。请重新打开应用。') === true,
                         documentReady: ['loading', 'interactive', 'complete'].includes(document.readyState) ? document.readyState : 'unknown',
-                        status: statusNames.get(document.querySelector('header .status')?.textContent) || 'UNRECOGNIZED',
+                        status: statusNames.get(document.querySelector('.pane-status')?.textContent) || 'UNRECOGNIZED',
                         notice: notice ? noticeNames.get(notice) || 'OTHER_FIXED_UI_NOTICE' : 'NONE',
                         formVisible: visible('.connect-panel form'),
                         hostInputCount: document.querySelectorAll('input[name="host"]').length,
@@ -276,6 +287,11 @@ export async function webviewAcceptance (android, fixture) {
         await until(() => ['clients', 'sessions', 'ptys', 'timers', 'pendingAuth'].every(key => fixture.stats()[key] === 0), 'ANDROID_FIXTURE_RESOURCES_NOT_RELEASED')
     }
     async function nativeTouch (locator, durationMs = 100, enclosingDeadline = Infinity) {
+        if (!await locator.isVisible()) {
+            const more = page.getByRole('button', { name: '更多终端操作', exact: true })
+            if (await more.isVisible() && !await more.isDisabled() && !await page.locator('.actions-panel').isVisible()) await nativeTouch(more)
+        }
+
         const deadline = Math.min(Date.now() + 10000, enclosingDeadline)
         const inTime = () => check(Date.now() < deadline, 'ANDROID_TOUCH_TARGET_DID_NOT_STABILIZE')
         await page.evaluate(() => {
@@ -350,11 +366,12 @@ export async function webviewAcceptance (android, fixture) {
             if (windows.clipboardOverlayVisible) {
                 observed = true; clearSince = undefined
                 if (!dismissalSent) {
-                    const target = page.locator('header .status')
+                    const target = page.getByRole('button', { name: '更多终端操作', exact: true })
                     check(await target.count() === 1, 'ANDROID_CLIPBOARD_DISMISS_TARGET_AMBIGUOUS')
                     inTime()
                     dismissalSent = true
                     await nativeTouch(target, 100, deadline)
+                    if (await page.locator('.actions-panel').isVisible()) await nativeTouch(target, 100, deadline)
                     inTime()
                 }
             }
@@ -582,7 +599,7 @@ export async function webviewAcceptance (android, fixture) {
         harness = undefined
         await quiet()
     }
-    async function connect (known, mode = 'password') {
+    async function connect (known, mode = 'password', credential = 'transient') {
         const authenticatedBefore = fixture.stats().authenticated
         await step('form-host', () => page.getByLabel('主机', { exact: true }).fill('127.0.0.1'))
         await step('form-port', () => page.getByLabel('端口', { exact: true }).fill(String(fixture.metadata.port)))
@@ -591,7 +608,14 @@ export async function webviewAcceptance (android, fixture) {
         // name. Match the actual form control instead of an exact short label.
         await step('form-auth-mode', () => page.locator('select[name="authMode"]').selectOption(mode))
         if (mode === 'password') {
-            await step('form-password', () => page.getByLabel('密码', { exact: true }).fill(fixture.metadata.password))
+            await step('form-password', () => page.getByLabel('密码', { exact: true }).fill(credential === 'saved' ? '' : fixture.metadata.password))
+            if (credential === 'save') await nativeTouch(page.getByLabel('认证成功后保存 / 更新密码（默认不保存）'))
+            if (credential === 'saved') {
+                await page.getByLabel('密码', { exact: true }).focus()
+                await page.getByLabel('使用此设备已保存的密码（留空输入框）').waitFor()
+                await plugin('hideKeyboard')
+                await nativeTouch(page.getByLabel('使用此设备已保存的密码（留空输入框）'))
+            }
         }
         await step('form-hide-ime', () => plugin('hideKeyboard'))
         await step('form-ime-hidden', () => until(async () => !(await viewport()).visible, 'ANDROID_FORM_IME_DID_NOT_HIDE'))
@@ -605,7 +629,7 @@ export async function webviewAcceptance (android, fixture) {
             await step('host-key-native-trust', () => nativeTouch(page.getByRole('button', { name: '核对后信任', exact: true })))
         }
         if (mode === 'password') {
-            await step('ssh-ready', () => until(async () => await page.locator('header .status').textContent() === '已连接', 'ANDROID_WEBVIEW_SSH_NOT_READY'))
+            await step('ssh-ready', () => until(async () => await page.locator('.pane-status').textContent() === '已连接', 'ANDROID_WEBVIEW_SSH_NOT_READY'))
             substage = 'web-storage-password-absence'
             check(await page.evaluate(password => {
                 const saved = [localStorage, sessionStorage].flatMap(storage => Object.keys(storage).map(key => storage.getItem(key) || ''))
@@ -615,7 +639,7 @@ export async function webviewAcceptance (android, fixture) {
     }
     async function disconnect () {
         const button = page.getByRole('button', { name: '断开或取消连接', exact: true })
-        if (await button.count()) { await nativeTouch(button) }
+        if (await page.locator('.connect-panel').count() === 0) { await nativeTouch(page.getByRole('button', { name: '更多终端操作', exact: true })); await nativeTouch(button) }
         await quiet()
     }
     async function setting (namespace, name, value) {
@@ -714,6 +738,7 @@ export async function webviewAcceptance (android, fixture) {
         await sendLine('stty -echo')
         await sendLine("printf '%s%s\\n' 'W_DIRECT_' '中文🙂_OK'")
         await output('W_DIRECT_中文🙂_OK')
+        await capture('terminal')
         verify('actual Angular UI → Capacitor → native SSH → Unicode PTY')
 
         stage = 'native-composition-and-auxiliary-keys'
@@ -898,6 +923,7 @@ export async function webviewAcceptance (android, fixture) {
         check(shown.height > 0 && shown.viewportHeight < hidden.viewportHeight, 'ANDROID_IME_VIEWPORT_DID_NOT_SHRINK')
         substage = 'keyboard-real-pty-rows-decreased'
         check(sizeShown.rows < sizeBefore.rows, 'ANDROID_IME_DID_NOT_RESIZE_REMOTE_PTY')
+        await capture('terminal-keyboard')
         await step('keyboard-hide-after-shown-size', () => plugin('hideKeyboard'))
         await step('keyboard-hidden-before-rotation', () => until(async () => !(await viewport()).visible, 'ANDROID_IME_DID_NOT_HIDE_AFTER_SHOW'))
         await step('rotation-disable-automatic', () => setting('system', 'accelerometer_rotation', 0))
@@ -942,6 +968,7 @@ export async function webviewAcceptance (android, fixture) {
         const sizeRotated = await size(false, 'rotated')
         substage = 'rotation-real-pty-cols-changed'
         check(sizeRotated.cols !== sizeBefore.cols, 'ANDROID_ROTATION_DID_NOT_RESIZE_REMOTE_PTY')
+        await capture('terminal-rotated')
         verify('actual AOSP system keyboard show/hide and rotation update WebView and SSH PTY dimensions')
 
         stage = 'background-and-auth-cancel'
@@ -976,7 +1003,7 @@ export async function webviewAcceptance (android, fixture) {
         await fixture.command({ type: 'dropConnections' })
         await step('network-loss-ui-closed', () => until(async () =>
             await page.getByRole('button', { name: '连接', exact: true }).count() === 1
-            && await page.locator('header .status').textContent() === '未连接'
+            && await page.locator('.pane-status').textContent() === '未连接'
             && await page.locator('textarea[aria-label="终端输入"]:enabled').count() === 0,
         'ANDROID_NETWORK_LOSS_DID_NOT_FAIL_CLOSED'))
         await quiet()
@@ -995,6 +1022,74 @@ export async function webviewAcceptance (android, fixture) {
         verify('real TCP loss closes Android UI/resources, rejects old writes and permits explicit reconnect')
         verify('actual Activity background closes resources; canceled auth rejects old responses and reconnects')
         await endHarness()
+
+        stage = 'foreground-service-notification'
+        await startHarness()
+        await connect(true)
+        const api = Number(await android.shell('getprop ro.build.version.sdk'))
+        async function systemButton (pattern, failure) {
+            // This runner only accepts emulator-* serials. Normal dialog/shade UI;
+            // no pm grant, appops changes, battery changes, or physical device access.
+            let point
+            await until(async () => {
+                await android.shell('uiautomator dump /data/local/tmp/tabby-owned-dialog.xml', { timeout: 12000 })
+                const xml = await android.shell('cat /data/local/tmp/tabby-owned-dialog.xml')
+                const nodes = xml.match(/<node\b[^>]*>/g) || []
+                const node = nodes.find(value => pattern.test(value))
+                const bounds = node && /bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"/.exec(node)
+                if (!bounds) return false
+                point = { x: (Number(bounds[1]) + Number(bounds[3])) / 2, y: (Number(bounds[2]) + Number(bounds[4])) / 2 }
+                return true
+            }, failure, 20000)
+            await android.shell(`input tap ${point.x} ${point.y}`)
+            await android.shell('rm -f /data/local/tmp/tabby-owned-dialog.xml')
+        }
+        async function requestBackground () {
+            await nativeTouch(page.getByRole('button', { name: '更多终端操作', exact: true }))
+            await nativeTouch(page.getByRole('button', { name: '开启后台保持', exact: true }))
+        }
+        if (api >= 33) {
+            await requestBackground()
+            await systemButton(/resource-id="(?:com\.android|com\.google\.android)\.permissioncontroller:id\/permission_deny_button"/, 'ANDROID_NOTIFICATION_DENY_DIALOG_MISSING')
+            await until(async () => !(await plugin('backgroundState')).enabled && await page.getByRole('button', { name: '开启后台保持', exact: true }).isEnabled(), 'ANDROID_NOTIFICATION_DENIAL_NOT_RESOLVED')
+            check(await page.locator('.pane-status').textContent() === '已连接', 'ANDROID_NOTIFICATION_DIALOG_CLOSED_SSH')
+            // Menu remains open after this setting. Close it before opening for retry.
+            await nativeTouch(page.getByRole('button', { name: '更多终端操作', exact: true }))
+        }
+        await requestBackground()
+        if (api >= 33) await systemButton(/resource-id="(?:com\.android|com\.google\.android)\.permissioncontroller:id\/permission_allow_button"/, 'ANDROID_NOTIFICATION_ALLOW_DIALOG_MISSING')
+        await until(async () => (await plugin('backgroundState')).enabled === true, 'ANDROID_FOREGROUND_SERVICE_NOT_ENABLED')
+        await android.shell('input keyevent KEYCODE_HOME')
+        await pause(2000)
+        check(fixture.stats().clients === 1 && fixture.stats().ptys === 1, 'ANDROID_FOREGROUND_SERVICE_LOST_BACKGROUND_SSH')
+        await android.shell(`am start -n ${APP}/.MainActivity`)
+        await until(async () => await page.locator('.pane-status').textContent() === '已连接', 'ANDROID_FOREGROUND_SERVICE_LOST_FOREGROUND_SSH')
+        await nativeTouch(page.getByRole('button', { name: '更多终端操作', exact: true }))
+        await sendLine("printf '%s%s\\n' 'W_BACKGROUND_' 'RETAINED'")
+        await output('W_BACKGROUND_RETAINED')
+        await android.shell('cmd statusbar expand-notifications')
+        await capture('connection-notification')
+        await systemButton(/text="停止全部"[^>]*package="com\.android\.systemui"|package="com\.android\.systemui"[^>]*text="停止全部"/, 'ANDROID_NOTIFICATION_STOP_ACTION_MISSING')
+        await quiet()
+        await android.shell('cmd statusbar collapse')
+        await android.shell(`am start -n ${APP}/.MainActivity`)
+        await until(async () => !(await plugin('backgroundState')).enabled, 'ANDROID_USER_STOP_DID_NOT_DISABLE_SERVICE')
+        await endHarness()
+        verify('normal notification permission decisions, real background foreground retention and notification Stop All')
+
+        stage = 'native-encrypted-password'
+        await startHarness()
+        await connect(true, 'password', 'save')
+        check((await plugin('credentialStatus', { host: '127.0.0.1', port: fixture.metadata.port, username: fixture.metadata.username })).saved === true, 'ANDROID_PASSWORD_NOT_SAVED')
+        await disconnect()
+        await connect(true, 'password', 'saved')
+        await sendLine("printf '%s%s\\n' 'W_VAULT_' 'NATIVE_LOGIN'")
+        await output('W_VAULT_NATIVE_LOGIN')
+        await disconnect()
+        await plugin('deletePassword', { host: '127.0.0.1', port: fixture.metadata.port, username: fixture.metadata.username })
+        check((await plugin('credentialStatus', { host: '127.0.0.1', port: fixture.metadata.port, username: fixture.metadata.username })).saved === false, 'ANDROID_PASSWORD_NOT_DELETED')
+        await endHarness()
+        verify('optional native Keystore password save, secret-free saved login and deletion')
 
         stage = 'durable-pin-fresh-process'
         await step('durable-first-process-force-stop', () => android.shell(`am force-stop ${APP}`))

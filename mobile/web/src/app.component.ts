@@ -19,7 +19,7 @@ interface SessionTab { id: string, endpoint?: SessionEndpoint, binding?: TmuxBin
           <strong>{{homeOpen ? '连接工作台' : tabLabel(activeTab)}} · {{activeIndex + 1}}/{{tabs.length}}</strong>
           <span>{{activePane?.username}}&#64;{{activePane?.host}} · {{activePane?.statusText}}</span>
         </button>
-        <nav class="session-tabs" role="tablist" aria-label="SSH 会话标签页">
+        <nav [hidden]="homeOpen || chooserOpen" class="session-tabs" role="tablist" aria-label="SSH 会话标签页">
           <button *ngFor="let tab of tabs; trackBy: trackTab" role="tab" [attr.aria-selected]="!homeOpen && tab.id === activeTabID" [attr.aria-controls]="'pane-' + tab.id" (click)="selectTab(tab.id)">{{tabLabel(tab)}}</button>
         </nav>
         <button [disabled]="homeOpen || !!activePane?.modal" (click)="activePane?.toggleActions()" aria-label="更多终端操作">⋯</button>
@@ -28,7 +28,7 @@ interface SessionTab { id: string, endpoint?: SessionEndpoint, binding?: TmuxBin
         <h1>{{homeOpen ? '连接工作台' : '选择会话'}}</h1>
         <p>切换会话会保留终端输出；返回工作台不会断开连接。</p>
         <div *ngFor="let tab of tabs; trackBy: trackTab" class="workbench-session">
-          <button (click)="selectTab(tab.id)">{{tabLabel(tab)}} · {{paneFor(tab.id)?.statusText || '未连接'}}</button>
+          <button role="tab" [attr.aria-label]="tabLabel(tab)" [attr.aria-selected]="tab.id === activeTabID" (click)="selectTab(tab.id)">{{tabLabel(tab)}} · {{paneFor(tab.id)?.statusText || '未连接'}}</button>
           <button (click)="closeTab(tab.id)" [attr.aria-label]="'关闭标签页 ' + tabLabel(tab)">关闭</button>
         </div>
         <button (click)="newTab()">新增连接</button><button *ngIf="chooserOpen" (click)="chooserOpen = false">取消选择</button>
@@ -51,6 +51,7 @@ export class AppComponent implements OnDestroy {
     private readonly registry = new MobileTmuxRegistry<string>()
     private readonly bridge = inject(SSH_BRIDGE)
     private leaseEpoch = Date.now() * 1000
+    private backHandle?: PluginListenerHandle
     private leaseHandle?: PluginListenerHandle
     private destroyed = false
     private readonly visibilityListener = () => { if (document.visibilityState === 'visible') { this.lease(this.homeOpen || this.chooserOpen ? '' : this.activeTabID) } }
@@ -79,6 +80,11 @@ export class AppComponent implements OnDestroy {
                 this.activeTabID = this.tabs[0].id
             }
         } catch { this.notice = '此设备无法读取保存的会话身份；仍可直接连接。' }
+        void this.bridge.addListener('backAction', () => {
+            if (this.activePane?.dismissOverlay()) return
+            if (this.homeOpen) { void this.bridge.leaveApp().catch(() => {}); return }
+            this.home()
+        }).then(handle => { if (this.destroyed) void handle.remove(); else this.backHandle = handle }).catch(() => {})
         this.lease(this.homeOpen || this.chooserOpen ? '' : this.activeTabID)
         document.addEventListener('visibilitychange', this.visibilityListener)
         void this.bridge.addListener('lifecycleState', event => {
@@ -110,6 +116,7 @@ export class AppComponent implements OnDestroy {
         point.direction ||= direction
     }
     titleEnd(event: PointerEvent): void {
+        this.titleMove(event)
         const point = this.titlePointer; this.titlePointer = undefined
         if (!point || point.id !== event.pointerId || !point.moved || point.cancelled || this.activePane?.modal) return
         const dx = event.clientX - point.x
@@ -118,7 +125,7 @@ export class AppComponent implements OnDestroy {
         if (next >= 0 && next < this.tabs.length) this.selectTab(this.tabs[next].id)
         this.suppressTitleClick = true
     }
-    cancelTitle(): void { this.titlePointer = undefined; this.suppressTitleClick = true }
+    cancelTitle(): void { if (this.titlePointer) this.suppressTitleClick = true; this.titlePointer = undefined }
     titleClick(event: MouseEvent): void {
         if (this.suppressTitleClick && event.detail) { this.suppressTitleClick = false; return }
         if (this.homeOpen || this.activePane?.modal) return
@@ -162,7 +169,7 @@ export class AppComponent implements OnDestroy {
         return tab.binding ? `${tab.binding.mode === 'readonly' ? '只读 · ' : ''}${tab.title || tab.binding.sessionID}` : pane?.host || tab.endpoint?.host || '新连接'
     }
     ngOnDestroy(): void {
-        this.destroyed = true; this.lease(''); void this.leaseHandle?.remove()
+        this.destroyed = true; void this.backHandle?.remove(); this.lease(''); void this.leaseHandle?.remove()
         document.removeEventListener('visibilitychange', this.visibilityListener)
     }
 }

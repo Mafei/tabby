@@ -99,3 +99,10 @@ input, select { min-height: 48px; padding: .45rem; width: 100%; background: #212
 .check-label { flex-direction: row; align-items: center; min-height: 48px; font-size: 14px; }
 .check-label input { width: 24px; min-height: 24px; flex: 0 0 24px; }
 @media (min-width: 760px) { .session-title { flex: 0 1 260px; } .session-tabs { display: flex; flex: 1; min-width: 0; } .session-tabs button { flex: 0 0 auto; } }
+
+:root { font-size: var(--font-16, 16px); }
+.session-title strong, .input-strip textarea { font-size: var(--font-16, 16px); }
+.session-title span, .hint, .check-label, .actions-panel p { font-size: var(--font-14, 14px); }
+.connection-workbench h1 { font-size: var(--font-20, 20px); }
+
+.session-tabs[hidden] { display: none; }

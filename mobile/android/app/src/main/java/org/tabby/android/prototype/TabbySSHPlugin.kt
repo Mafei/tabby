@@ -50,6 +50,7 @@ class TabbySSHPlugin : Plugin() {
     private val privateKeys get() = runtime.privateKeys
     @Volatile private var foreground = true
     @Volatile private var destroyed = false
+    @Volatile private var notificationPermissionPending = false
     private val pickerPending = AtomicBoolean(false)
     private val selectionLock = Any()
     private val selection = AtomicReference<Selection?>()
@@ -135,6 +136,7 @@ class TabbySSHPlugin : Plugin() {
                 call.reject("The app is in the background", "BACKGROUND")
                 return
             }
+            runtime.connectionAdded()
             ConnectionService.connectionsChanged(context, sessions.size)
             call.resolve(JSObject().put("connectionId", session.id.toString()))
         } catch (_: Throwable) {
@@ -170,6 +172,7 @@ class TabbySSHPlugin : Plugin() {
                     require(session.gate.take(requestId, "hostKey", generation))
                     val key = session.hostKeys.remove(requestId) ?: error("request")
                     val accepted = input.optBoolean("accept", false) && runtime.approve(session.endpoint, key)
+                    if (accepted) session.approvedHostKey = key
                     output.put("requestId", requestId.toLong()).put("accept", accepted)
                 }
                 "authResponse" -> {
@@ -275,12 +278,19 @@ class TabbySSHPlugin : Plugin() {
         // Opening SAF pauses this Activity. A selected document is different:
         // its import is cancelled by the next genuine foreground loss.
         if (selection.get()?.returned == true) cancelSelection()
-        if (!ConnectionService.enabled) closeAll("background")
+        if (!ConnectionService.enabled && !notificationPermissionPending) closeAll("background")
         else sessions.values.filter { !it.operations.isReady() }.forEach { closeSession(it, "background_auth_cancelled") }
         sessions.values.forEach { it.pendingPassword?.fill(0); it.pendingPassword = null }
         privateKeys.clear()
-        notifyListeners("lifecycleState", JSObject().put("active", false).put("retained", ConnectionService.enabled)
+        notifyListeners("lifecycleState", JSObject().put("active", false).put("retained", ConnectionService.enabled || notificationPermissionPending)
             .put("reason", if (pickerPending.get() && selection.get()?.cancelled?.get() == false) "privateKeyPicker" else "background"))
+    }
+
+    override fun handleOnStop() {
+        if (notificationPermissionPending && !ConnectionService.enabled) {
+            closeAll("background")
+            notifyListeners("lifecycleState", JSObject().put("active", false).put("retained", false).put("reason", "background"))
+        }
     }
 
     override fun handleOnResume() {
@@ -308,36 +318,41 @@ class TabbySSHPlugin : Plugin() {
         notifyListeners("keyboardState", value)
     }
 
+    fun emitBack() { notifyListeners("backAction", JSObject()) }
+    @PluginMethod
+    fun leaveApp(call: PluginCall) { activity.runOnUiThread { activity.moveTaskToBack(true); call.resolve() } }
+
     @PluginMethod
     fun backgroundState(call: PluginCall) { call.resolve(JSObject().put("enabled", ConnectionService.enabled).put("notificationsAllowed", ConnectionService.notificationsAllowed(context))) }
 
     @PluginMethod
     fun setBackground(call: PluginCall) {
         if (!foreground || destroyed) { call.reject("Return to the app first", "BACKGROUND"); return }
-        if (call.getBoolean("enabled", false) != true) { ConnectionService.disable(context); call.resolve(JSObject().put("enabled", false)); return }
+        if (call.getBoolean("enabled", false) != true) { ConnectionService.disable(context); notifyListeners("backgroundState", JSObject().put("enabled", false)); call.resolve(JSObject().put("enabled", false)); return }
         if (Build.VERSION.SDK_INT >= 33 && getPermissionState("notifications") != PermissionState.GRANTED) {
+            notificationPermissionPending = true
             requestPermissionForAlias("notifications", call, "notificationPermissionResult"); return
         }
         enableBackground(call)
     }
     @PermissionCallback
-    private fun notificationPermissionResult(call: PluginCall) { enableBackground(call) }
+    private fun notificationPermissionResult(call: PluginCall) { notificationPermissionPending = false; enableBackground(call) }
     private fun enableBackground(call: PluginCall) {
         try {
-            require(foreground && !destroyed && ConnectionService.notificationsAllowed(context))
+            require(foreground && !destroyed && sessions.values.any { it.operations.isReady() } && ConnectionService.notificationsAllowed(context))
             ConnectionService.start(context)
             val deadline = android.os.SystemClock.elapsedRealtime() + 5000
             val handler = android.os.Handler(android.os.Looper.getMainLooper())
             val observe = object : Runnable {
                 override fun run() {
                     if (!foreground || destroyed) { ConnectionService.disable(context); call.reject("Return to the app first", "BACKGROUND"); return }
-                    if (ConnectionService.enabled) { call.resolve(JSObject().put("enabled", true)); return }
+                    if (ConnectionService.enabled) { notifyListeners("backgroundState", JSObject().put("enabled", true)); call.resolve(JSObject().put("enabled", true)); return }
                     if (android.os.SystemClock.elapsedRealtime() >= deadline) { ConnectionService.disable(context); call.reject("Background service did not start", "BACKGROUND_UNAVAILABLE"); return }
                     handler.postDelayed(this, 25)
                 }
             }
             handler.post(observe)
-        } catch (_: Throwable) { call.reject("Visible notifications are required to enable background connections", "BACKGROUND_UNAVAILABLE") }
+        } catch (_: Throwable) { notifyListeners("backgroundState", JSObject().put("enabled", false)); call.reject("Visible notifications and a ready connection are required to enable background connections", "BACKGROUND_UNAVAILABLE") }
     }
     @PluginMethod
     fun credentialStatus(call: PluginCall) {

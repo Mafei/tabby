@@ -236,6 +236,11 @@ export async function tmuxWebviewAcceptance (android, fixture) {
         page = undefined
     }
     async function nativeTouch (locator) {
+        if (!await locator.isVisible()) {
+            const more = page.getByRole('button', { name: '更多终端操作', exact: true })
+            if (await more.isVisible() && !await more.isDisabled() && !await page.locator('.actions-panel').isVisible()) await nativeTouch(more)
+        }
+
         const deadline = deadlineFor(10000)
         await observeReadUntil(() => locator.scrollIntoViewIfNeeded({ timeout: Math.min(3000, deadline - Date.now()) }), deadline, 'ANDROID_TMUX_TOUCH_TARGET_DID_NOT_STABILIZE')
         let previous
@@ -316,7 +321,7 @@ export async function tmuxWebviewAcceptance (android, fixture) {
         await refresh()
     }
     async function ready () {
-        await wait(async () => await active().locator('header .status').textContent() === '已连接'
+        await wait(async () => await active().locator('.pane-status').textContent() === '已连接'
             && await active().getByLabel('终端输入', { exact: true }).isEnabled(), 'ANDROID_TMUX_TERMINAL_NOT_READY')
         return observe(() => page.evaluate(() => {
             // Called immediately after this pane becomes ready. Switching back
@@ -333,7 +338,7 @@ export async function tmuxWebviewAcceptance (android, fixture) {
         await active().getByLabel('访问方式', { exact: true }).selectOption(mode)
         await nativeTouch(active().getByRole('button', { name: `连接 ${name}`, exact: true }))
         if (mode === 'readonly') {
-            await wait(async () => await active().locator('header .status').textContent() === '已连接'
+            await wait(async () => await active().locator('.pane-status').textContent() === '已连接'
                 && await active().getByLabel('终端输入', { exact: true }).isDisabled(), 'ANDROID_TMUX_READONLY_NOT_READY')
         } else { await ready() }
     }
@@ -398,7 +403,7 @@ export async function tmuxWebviewAcceptance (android, fixture) {
                         arrayAt: typeof Array.prototype.at === 'function', abortSignalAny: typeof window.AbortSignal?.any === 'function',
                         cssDynamicViewport: typeof window.CSS?.supports === 'function' && window.CSS.supports('height', '100dvh') },
                     bootstrapFallback: document.body?.textContent?.includes('界面无法启动。请重新打开应用。') === true,
-                    status: statusNames.get(pane?.querySelector('header .status')?.textContent) || 'UNRECOGNIZED',
+                    status: statusNames.get(pane?.querySelector('.pane-status')?.textContent) || 'UNRECOGNIZED',
                     notice: notice ? noticeNames.get(notice) || 'OTHER_FIXED_UI_NOTICE' : 'NONE',
                     tmuxUnavailableHint: [...(pane?.querySelectorAll('.tmux-panel .hint') || [])].some(element =>
                         element.textContent === '服务器没有 tmux。可使用普通 SSH；应用不会安装软件。'),
@@ -469,7 +474,7 @@ export async function tmuxWebviewAcceptance (android, fixture) {
                 await disconnect()
                 await active().getByLabel('恢复访问方式', { exact: true }).selectOption('readonly')
                 await connect({ restore: true })
-                await wait(async () => await active().locator('header .status').textContent() === '已连接' && await active().getByLabel('终端输入', { exact: true }).isDisabled(), 'ANDROID_TMUX_READONLY_NOT_READY')
+                await wait(async () => await active().locator('.pane-status').textContent() === '已连接' && await active().getByLabel('终端输入', { exact: true }).isDisabled(), 'ANDROID_TMUX_READONLY_NOT_READY')
                 check(await active().getByRole('button', { name: '粘贴', exact: true }).isDisabled(), 'ANDROID_TMUX_READONLY_INPUT_ENABLED')
                 const flags = (await run(`${base} list-clients -F ${quote('#{client_readonly}')}`)).trim().split('\n').sort()
                 check(JSON.stringify(flags) === JSON.stringify(['0', '1']) && !other.closed(), 'ANDROID_TMUX_REAL_READONLY_FLAG_MISSING')
@@ -562,6 +567,7 @@ export async function tmuxWebviewAcceptance (android, fixture) {
                     } catch (error) { return error?.code === 'SSH_COMMAND_REJECTED' }
                 }, old))
                 check(rejected, 'ANDROID_TMUX_CANCELLED_OLD_GENERATION_ACCEPTED')
+                if (!await page.getByRole('tab', { name: 'isolation_android', exact: true }).isVisible()) await nativeTouch(page.getByRole('button', { name: '选择会话', exact: true }))
                 await nativeTouch(page.getByRole('tab', { name: 'isolation_android', exact: true }))
                 await ready(); await marker('isolation_android', '__ANDROID_OTHER_TAB_ALIVE__')
                 await wait(() => fixture.stats().timers === 0 && fixture.stats().execs === 0, 'ANDROID_TMUX_CANCELLED_EXEC_RESOURCES_REMAIN')
