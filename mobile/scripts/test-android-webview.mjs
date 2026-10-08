@@ -66,6 +66,34 @@ export function quarterTurnTarget (rotation) {
     return { requested, expected: values[requested] }
 }
 
+/** Observe a served, focused editor after the real IME finishes resizing it.
+ * This grants no focus and never reads editor text or changes input events.
+ */
+export class IMEEditorReadiness {
+    previous
+    since
+
+    observe ({ native, browser, focus }, now) {
+        const geometry = { nativeWidth: native.viewportWidth, nativeHeight: native.viewportHeight,
+            width: browser.width, height: browser.height, visualHeight: browser.visualHeight }
+        const valid = native.visible === true && browser.documentFocused === true
+            && browser.editorFocused === true && browser.editorEnabled === true && browser.editorCount === 1
+            && Object.values(geometry).every(value => Number.isFinite(value) && value > 0)
+            && Math.abs(geometry.nativeWidth - geometry.width) <= 1
+            && Math.abs(geometry.nativeHeight - geometry.height) <= 1
+            && Number.isSafeInteger(focus.appDisplayId) && focus.appDisplayId >= 0 && focus.appDisplayId <= 1000000
+            && focus.appDisplayId === focus.inputFocusedDisplayId
+            && focus.appOnInputFocusedDisplay === true && focus.inputDispatchEnabled === true && focus.inputDispatchFrozen === false
+            && focus.inputFocusRequestResult === 'OK'
+            && ['wmsFocusedWindowCategory', 'wmsFocusedAppCategory', 'inputFocusedWindowCategory',
+                'inputFocusedApplicationCategory', 'inputFocusRequestCategory', 'activityDisplayResumedCategory']
+                .every(key => focus[key] === 'APP')
+        const current = JSON.stringify({ geometry, display: focus.appDisplayId, inputDisplay: focus.inputFocusedDisplayId })
+        if (!valid || current !== this.previous || !Number.isFinite(now)) { this.since = now; this.previous = current }
+        return valid && Number.isFinite(now) && Number.isFinite(this.since) && now - this.since >= 350
+    }
+}
+
 /** Uses the real Android app, real Capacitor plugin and native SSH transport. */
 export async function webviewAcceptance (android, fixture) {
     // Playwright debug/protocol logging can contain arguments. Never enable it
@@ -147,6 +175,10 @@ export async function webviewAcceptance (android, fixture) {
                     const pointerTypes = new Set(['touch', 'mouse', 'pen'])
                     const pointerEvents = new Set(['pointerdown', 'pointermove', 'pointerup', 'pointercancel'])
                     const pointerTargets = new Set(['terminal', 'auxiliary', 'terminal-input', 'form', 'modal', 'other'])
+                    const inputEvents = new Set(['compositionstart', 'compositionupdate', 'compositionend', 'beforeinput', 'input', 'focus', 'blur'])
+                    const inputTypes = new Set(['insertCompositionText', 'insertFromComposition', 'insertText', 'deleteCompositionText',
+                        'deleteContentBackward', 'deleteContentForward', 'insertLineBreak', 'insertParagraph'])
+                    const editors = [...document.querySelectorAll('textarea[aria-label="终端输入"]')]
                     const geometry = values => Object.fromEntries(['sliderCount', 'sliderTop', 'legacyViewportCount', 'legacyScrollTop',
                         'x', 'y', 'width', 'height', 'fromX', 'fromY', 'toX', 'toY', 'terminalX', 'terminalY', 'terminalWidth', 'terminalHeight',
                         'screenWidth', 'screenHeight', 'rowCount', 'scrollbarHeight', 'sliderHeight', 'viewportWidth', 'viewportHeight',
@@ -171,6 +203,12 @@ export async function webviewAcceptance (android, fixture) {
                         hostDialogVisible: visible('[role="dialog"][aria-label="确认主机密钥"]'),
                         authDialogVisible: visible('[role="dialog"][aria-label="SSH 交互认证"]'),
                         terminalInputEnabled: !!document.querySelector('textarea[aria-label="终端输入"]:enabled'),
+                        editorFocused: editors.length === 1 && document.activeElement === editors[0],
+                        inputEvents: (window.__tabbyCloudObservation?.inputEvents || []).slice(-16).map(event => ({
+                            type: inputEvents.has(event.type) ? event.type : 'OTHER',
+                            inputType: inputTypes.has(event.inputType) ? event.inputType : 'OTHER',
+                            isComposing: event.isComposing === true,
+                        })),
                         selectionActive: !!document.querySelector('.terminal-area.selection-active'),
                         mouseActive: !!document.querySelector('.terminal-area.mouse-active'),
                         viewport: { width: Math.round(innerWidth), height: Math.round(innerHeight),
@@ -366,7 +404,7 @@ export async function webviewAcceptance (android, fixture) {
                     if (observation.output.length > 2 * 1024 * 1024) { observation.output = observation.output.slice(-1024 * 1024) }
                 }
             })
-            for (const type of ['compositionstart', 'compositionupdate', 'compositionend', 'beforeinput', 'input']) {
+            for (const type of ['compositionstart', 'compositionupdate', 'compositionend', 'beforeinput', 'input', 'focus', 'blur']) {
                 document.addEventListener(type, event => {
                     if (event.target?.matches?.('textarea[aria-label="终端输入"]') && observation.inputEvents.length < 256) {
                         observation.inputEvents.push({ type, inputType: event.inputType, isComposing: !!event.isComposing })
@@ -665,8 +703,25 @@ export async function webviewAcceptance (android, fixture) {
         const expected = Buffer.from('中文🙂\x7f\x03\x1b\t\x1b[D\x1b[A\x1b[B\x1b[C')
         await rawProbe('W_INPUT', expected.length)
         await nativeTouch(page.getByRole('button', { name: '键盘', exact: true }))
+        const editorDeadline = Math.min(harnessDeadline, Date.now() + 10000)
+        const editorReadiness = new IMEEditorReadiness()
+        await step('composition-real-ime-and-editor-stable', () => until(async () => {
+            const [native, browser, focus] = await observeReadUntil(() => Promise.all([
+                viewport(), page.evaluate(() => {
+                    const editors = [...document.querySelectorAll('textarea[aria-label="终端输入"]')]
+                    return { width: innerWidth, height: innerHeight, visualHeight: window.visualViewport?.height ?? innerHeight,
+                        documentFocused: document.hasFocus(), editorCount: editors.length,
+                        editorFocused: editors.length === 1 && document.activeElement === editors[0],
+                        editorEnabled: editors.length === 1 && !editors[0].disabled }
+                }), android.focusState({ deadline: editorDeadline }),
+            ]), editorDeadline, 'ANDROID_COMPOSITION_EDITOR_DID_NOT_STABILIZE')
+            return editorReadiness.observe({ native, browser, focus }, Date.now())
+        }, 'ANDROID_COMPOSITION_EDITOR_DID_NOT_STABILIZE', Math.max(1, editorDeadline - Date.now())))
+        await page.evaluate(() => { window.__tabbyCloudObservation.inputEvents = [] })
+        substage = 'composition-start'
         await android.input({ type: 'composeStart', text: '中' })
         await until(() => page.evaluate(() => window.__tabbyCloudObservation.inputEvents.some(event => event.type === 'compositionstart')), 'ANDROID_NATIVE_COMPOSITION_EVENT_MISSING')
+        substage = 'composition-update'
         await android.input({ type: 'composeUpdate', text: '中文🙂' })
         await until(() => page.evaluate(() => document.querySelector('textarea[aria-label="终端输入"]').value.includes('中文🙂')), 'ANDROID_NATIVE_PREEDIT_NOT_DISPLAYED')
         await pause(250)

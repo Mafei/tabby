@@ -60,7 +60,7 @@ jobs:
         run: npm run test:fixture --prefix mobile
       - name: Native emulator startup readiness guards
         if: always() && steps.install.outcome == 'success'
-        run: node --test mobile/test/emulator-prepare.test.mjs
+        run: node --test mobile/test/emulator-prepare.test.mjs mobile/test/ime-editor-readiness.test.mjs
       - name: Stable SDK image selection and agreement rejection tests
         if: always() && steps.install.outcome == 'success'
         run: python3 -m unittest discover -s mobile/test -p test_android_sdk_selection.py -v
