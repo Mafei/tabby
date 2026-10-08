@@ -914,6 +914,15 @@ export async function webviewAcceptance (android, fixture) {
         await step('clipboard-exact-real-pty-bytes', () => output(`W_CLIP_HEX_${Buffer.from(selected).toString('hex')}`))
         verify('native Android swipe/long-press selection → system clipboard → real PTY paste')
 
+        // Keep every owned instrumentation phase inside its existing 180s
+        // lifetime. Menu navigation adds real touches; it must not consume the
+        // later IME/lifecycle phase's input deadline on slower API37 engines.
+        stage = 'ime-phase-restart'
+        await step('ime-phase-disconnect', () => disconnect())
+        await step('ime-phase-end-owned-harness', () => endHarness())
+        await step('ime-phase-begin-owned-harness', () => beginHarness())
+        await connect(true)
+
         stage = 'system-keyboard-and-rotation-resize'
         await step('keyboard-enable-system-ime', () => setting('secure', 'show_ime_with_hard_keyboard', 1))
         await step('keyboard-hide-for-baseline', () => plugin('hideKeyboard'))
