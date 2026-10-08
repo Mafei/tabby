@@ -1,0 +1,264 @@
+name: Android prototype checks and APK
+on:
+  push:
+    branches: [prototype/android-direct-ssh]
+    paths: [mobile/**, tabby-ssh/src/session/tmux*, tabby-ssh/src/session/reconnect.ts, .github/workflows/android-prototype.yml]
+  pull_request:
+    branches: [feature/ssh-tmux-recovery]
+    paths: [mobile/**, tabby-ssh/src/session/tmux*, tabby-ssh/src/session/reconnect.ts, .github/workflows/android-prototype.yml]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: android-prototype-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+jobs:
+  checks:
+    if: github.event.repository.visibility == 'public' && github.repository == 'Mafei/tabby' && ((github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == 'Mafei/tabby' && github.event.pull_request.head.ref == 'prototype/android-direct-ssh') || (github.event_name != 'pull_request' && github.ref == 'refs/heads/prototype/android-direct-ssh'))
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.19.0
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - name: Install official real tmux test dependency
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends tmux
+      - name: Pinned Rust toolchain
+        run: rustup toolchain install 1.90.0 --profile minimal --component rustfmt && rustup default 1.90.0
+      - name: Install isolated mobile dependencies
+        id: install
+        run: npm ci --ignore-scripts --prefix mobile
+      - name: Dependency security and Capacitor compatibility
+        run: |
+          npm audit --omit=dev --audit-level=low --prefix mobile
+          npm audit --audit-level=low --prefix mobile
+          npm run test:toolchain --prefix mobile
+      - name: Web typecheck and production build
+        run: |
+          npm run check --prefix mobile
+          npm run build --prefix mobile
+      - name: Tmux controller identity and cancellation tests
+        run: npm run test:tmux-controller --prefix mobile
+      - name: Synthetic browser input and lifecycle tests
+        env:
+          CHROMIUM_PATH: /usr/bin/google-chrome
+        run: npm run test:web --prefix mobile
+      - name: Disposable real SSH fixture self-tests
+        if: always() && steps.install.outcome == 'success'
+        run: npm run test:fixture --prefix mobile
+      - name: Native emulator startup readiness guards
+        if: always() && steps.install.outcome == 'success'
+        run: node --test mobile/test/emulator-prepare.test.mjs mobile/test/ime-editor-readiness.test.mjs
+      - name: Stable SDK image selection and agreement rejection tests
+        if: always() && steps.install.outcome == 'success'
+        run: python3 -m unittest discover -s mobile/test -p test_android_sdk_selection.py -v
+      - name: Real SSH control channels and tmux server acceptance
+        env:
+          TABBY_TEST_TMUX: /usr/bin/tmux
+        run: npm run test:tmux-fixture --prefix mobile
+      - name: ARM64 delivery binding and rejection tests
+        if: always() && steps.install.outcome == 'success'
+        run: npm run test:delivery --prefix mobile
+      - name: Packaged WebView policy rejection tests
+        if: always() && steps.install.outcome == 'success'
+        run: python3 -m unittest discover -s mobile/test -p test_android_web_security.py -v
+      - name: Rust safety and real SSH integration
+        id: native
+        if: always() && steps.install.outcome == 'success'
+        run: |
+          python3 mobile/scripts/verify-russh-vendor.py
+          cargo fmt --check --manifest-path mobile/android-ssh/Cargo.toml
+          cargo test --locked --features jni --manifest-path mobile/android-ssh/Cargo.toml
+          cargo build --locked --features jni --manifest-path mobile/android-ssh/Cargo.toml
+      - name: Actual application Kotlin to JNI to SSH smoke
+        if: always() && steps.native.outcome == 'success'
+        run: node mobile/scripts/test-fixture-jni.mjs
+      - name: Actual application JNI deferred control and tmux smoke
+        if: always() && steps.native.outcome == 'success'
+        env:
+          TABBY_TEST_TMUX: /usr/bin/tmux
+        run: node mobile/scripts/test-fixture-jni.mjs --deferred
+      - name: JVM host-key, generation and backpressure policies
+        if: always() && steps.install.outcome == 'success'
+        run: node mobile/scripts/test-jvm-policy.mjs
+  arm64-core:
+    if: github.event.repository.visibility == 'public' && github.repository == 'Mafei/tabby' && ((github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == 'Mafei/tabby' && github.event.pull_request.head.ref == 'prototype/android-direct-ssh') || (github.event_name != 'pull_request' && github.ref == 'refs/heads/prototype/android-direct-ssh'))
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Require actual ARM64 host
+        run: test "$(uname -m)" = aarch64
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.19.0
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - name: Install official real tmux test dependency
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends tmux
+      - name: Pinned ARM64 Rust toolchain
+        run: rustup toolchain install 1.90.0 --profile minimal && rustup default 1.90.0
+      - name: Install isolated fixture dependencies
+        id: install
+        run: npm ci --ignore-scripts --prefix mobile
+      - name: Execute Rust safety and real SSH on ARM64 Linux
+        id: native
+        run: |
+          cargo test --locked --features jni --manifest-path mobile/android-ssh/Cargo.toml
+          cargo build --locked --features jni --manifest-path mobile/android-ssh/Cargo.toml
+      - name: Execute actual application Kotlin JNI SSH on ARM64 Linux
+        if: always() && steps.native.outcome == 'success' && steps.install.outcome == 'success'
+        run: node mobile/scripts/test-fixture-jni.mjs
+      - name: Execute actual application JNI deferred control and tmux on ARM64 Linux
+        if: always() && steps.native.outcome == 'success' && steps.install.outcome == 'success'
+        env:
+          TABBY_TEST_TMUX: /usr/bin/tmux
+        run: node mobile/scripts/test-fixture-jni.mjs --deferred
+  android:
+    if: github.event.repository.visibility == 'public' && github.repository == 'Mafei/tabby' && ((github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == 'Mafei/tabby' && github.event.pull_request.head.ref == 'prototype/android-direct-ssh') || (github.event_name != 'pull_request' && github.ref == 'refs/heads/prototype/android-direct-ssh'))
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { api: 31, platform: '31', tag: default, device: pixel_7, form: phone }
+          - { api: 32, platform: '32', tag: default, device: pixel_tablet, form: tablet }
+          - { api: 33, platform: '33', tag: default, device: pixel_7, form: phone }
+          - { api: 34, platform: '34', tag: default, device: pixel_tablet, form: tablet }
+          - { api: 35, platform: '35', tag: default, device: pixel_7, form: phone }
+          - { api: 36, platform: '36', tag: default, device: pixel_7, form: phone }
+          - { api: 36, platform: '36', tag: default, device: pixel_tablet, form: tablet }
+          - { api: 37, platform: '37.0', tag: google_apis, device: pixel_7, form: phone }
+          - { api: 37, platform: '37.0', tag: google_apis, device: pixel_tablet, form: tablet }
+    env:
+      # Explicit user approval: 2026-10-07 09:12 UTC, Android SDK agreement.
+      # A changed or additional agreement fails closed; no --licenses command.
+      TABBY_ANDROID_SDK_LICENSE_APPROVED_SHA256: 1f8729233617b193fd619213792ae16a41b95d2bbbf525dfe66998252ba68b16
+      TABBY_EMULATOR_API: ${{ matrix.api }}
+      TABBY_EMULATOR_PLATFORM: ${{ matrix.platform }}
+      TABBY_EMULATOR_TAG: ${{ matrix.tag }}
+      TABBY_EMULATOR_DEVICE: ${{ matrix.device }}
+      TABBY_EMULATOR_FORM: ${{ matrix.form }}
+      TABBY_TEST_TMUX: /usr/bin/tmux
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Configure disposable Android tool directories
+        run: |
+          printf 'ANDROID_HOME=%s/tabby-android-sdk\nANDROID_SDK_ROOT=%s/tabby-android-sdk\nANDROID_USER_HOME=%s/tabby-android-user\nANDROID_AVD_HOME=%s/tabby-android-avd\nGRADLE_USER_HOME=%s/tabby-android-gradle\n' "$RUNNER_TEMP" "$RUNNER_TEMP" "$RUNNER_TEMP" "$RUNNER_TEMP" "$RUNNER_TEMP" >> "$GITHUB_ENV"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.19.0
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - name: Install approved stable Android SDK packages
+        run: python3 mobile/scripts/install-android-ci.py --emulator-api "$TABBY_EMULATOR_API" --emulator-platform "$TABBY_EMULATOR_PLATFORM" --emulator-tag "$TABBY_EMULATOR_TAG"
+      - name: Install official real tmux test dependency
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends tmux
+      - name: Pinned Rust Android toolchain
+        run: |
+          rustup toolchain install 1.90.0 --profile minimal
+          rustup default 1.90.0
+          rustup target add aarch64-linux-android x86_64-linux-android
+      - name: Build real SSH native libraries
+        env:
+          ANDROID_NDK_HOME: ${{ runner.temp }}/tabby-android-sdk/ndk/27.3.13750724
+        run: |
+          mobile/android-ssh/build-android.sh arm64-v8a
+          mobile/android-ssh/build-android.sh x86_64
+          mkdir -p mobile/android/app/src/main/jniLibs/arm64-v8a mobile/android/app/src/main/jniLibs/x86_64
+          cp mobile/android-ssh/target/aarch64-linux-android/release/libtabby_ssh.so mobile/android/app/src/main/jniLibs/arm64-v8a/
+          cp mobile/android-ssh/target/x86_64-linux-android/release/libtabby_ssh.so mobile/android/app/src/main/jniLibs/x86_64/
+      - name: Build web assets and synchronize Capacitor
+        run: |
+          npm ci --ignore-scripts --prefix mobile
+          npm run check --prefix mobile
+          npm run build --prefix mobile
+          npm run sync:android --prefix mobile
+      - name: Android compilation, unit tests, lint and test APKs
+        working-directory: mobile/android
+        run: ./gradlew --no-daemon -PtabbyAbis=arm64-v8a,x86_64 testDebugUnitTest lintDebug assembleDebug assembleDebugAndroidTest
+      - name: Inspect the actual emulator APK
+        run: |
+          mkdir -p mobile/artifacts
+          cp mobile/android/app/build/outputs/apk/debug/app-debug.apk mobile/artifacts/Tabby-Android-Emulator.apk
+          python3 mobile/scripts/verify-android-apk.py --expected-abis arm64-v8a,x86_64 --apk mobile/artifacts/Tabby-Android-Emulator.apk --report mobile/artifacts/android-emulator-apk-verification.json
+      - name: Start disposable non-Play emulator with KVM
+        run: |
+          node mobile/scripts/prepare-android-emulator.mjs --check-capacity
+          test -c /dev/kvm
+          tabby_runner_uid="$(id -u)"
+          sudo setfacl -m "u:${tabby_runner_uid}:rw" /dev/kvm
+          mkdir -p "$ANDROID_USER_HOME" "$ANDROID_AVD_HOME"
+          tabby_avd_name="tabby-prototype-api${TABBY_EMULATOR_API}"
+          printf 'no\n' | "$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager" create avd --force --name "$tabby_avd_name" --package "system-images;android-${TABBY_EMULATOR_PLATFORM};${TABBY_EMULATOR_TAG};x86_64" --device "$TABBY_EMULATOR_DEVICE"
+          test -f "$ANDROID_AVD_HOME/$tabby_avd_name.avd/config.ini"
+          # Let the supported emulator select its software backend. This keeps
+          # the actual tablet geometry and all native-focus/ANR gates intact.
+          "$ANDROID_HOME/emulator/emulator" -no-window -no-audio -version
+          "$ANDROID_HOME/emulator/emulator" -avd "$tabby_avd_name" -no-window -no-audio -no-snapshot -no-boot-anim -gpu software -accel on -memory 4096 -cores 4 -port 5554 > "$RUNNER_TEMP/tabby-emulator.log" 2>&1 &
+          "$ANDROID_HOME/platform-tools/adb" start-server
+          node mobile/scripts/prepare-android-emulator.mjs --serial emulator-5554 --api "$TABBY_EMULATOR_API"
+      - name: Actual Android JNI, host keys, lifecycle and WebView SSH tests
+        run: node mobile/scripts/test-android.mjs --serial emulator-5554 --app-apk mobile/artifacts/Tabby-Android-Emulator.apk --report mobile/artifacts/android-runtime-report.json
+      - name: Stop only the disposable emulator
+        if: always()
+        run: |
+          if [ -x "$ANDROID_HOME/platform-tools/adb" ]; then
+            "$ANDROID_HOME/platform-tools/adb" -s emulator-5554 emu kill || true
+          fi
+      - name: Build the ARM64 delivery APK
+        working-directory: mobile/android
+        run: ./gradlew --no-daemon -PtabbyAbis=arm64-v8a assembleDebug
+      - name: Inspect and bind the ARM64 delivery to accepted common payload
+        id: delivery
+        run: |
+          cp mobile/android/app/build/outputs/apk/debug/app-debug.apk mobile/artifacts/Tabby-Android-Prototype-ARM64.apk
+          python3 mobile/scripts/verify-android-apk.py --apk mobile/artifacts/Tabby-Android-Prototype-ARM64.apk --report mobile/artifacts/android-apk-verification.json
+          python3 mobile/scripts/verify-android-delivery.py --apk mobile/artifacts/Tabby-Android-Prototype-ARM64.apk --emulator-apk mobile/artifacts/Tabby-Android-Emulator.apk --apk-report mobile/artifacts/android-apk-verification.json --emulator-report mobile/artifacts/android-emulator-apk-verification.json --runtime-report mobile/artifacts/android-runtime-report.json --report mobile/artifacts/android-delivery-verification.json
+      - name: Upload verified ARM64 prototype and public evidence
+        if: always() && steps.delivery.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: Tabby-Android-Prototype-ARM64-api${{ matrix.api }}-${{ matrix.form }}-${{ github.event.pull_request.head.sha || github.sha }}
+          path: |
+            mobile/artifacts/Tabby-Android-Prototype-ARM64.apk
+            mobile/artifacts/Tabby-Android-Prototype-ARM64.apk.sha256
+            mobile/artifacts/android-apk-verification.json
+            mobile/artifacts/Tabby-Android-Emulator.apk
+            mobile/artifacts/Tabby-Android-Emulator.apk.sha256
+            mobile/artifacts/android-emulator-apk-verification.json
+            mobile/artifacts/android-runtime-report.json
+            mobile/artifacts/android-delivery-verification.json
+          if-no-files-found: error
+          retention-days: 14

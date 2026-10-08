@@ -1,0 +1,38 @@
+buildscript {
+    repositories {
+        google()
+        mavenCentral()
+    }
+    dependencies {
+        classpath 'com.android.tools.build:gradle:8.13.0'
+        classpath 'org.jetbrains.kotlin:kotlin-gradle-plugin:2.2.20'
+    }
+}
+
+allprojects {
+    repositories {
+        google()
+        mavenCentral()
+    }
+}
+
+ext {
+    minSdkVersion = 26
+    compileSdkVersion = 36
+    targetSdkVersion = 36
+}
+
+subprojects {
+    plugins.withId('com.android.library') {
+        android {
+            // Use the same already-installed tools for Capacitor's module; its
+            // AGP defaults would otherwise request an additional SDK package.
+            buildToolsVersion = '36.0.0'
+            ndkVersion = '27.3.13750724'
+        }
+    }
+}
+
+tasks.register('clean', Delete) {
+    delete rootProject.layout.buildDirectory
+}

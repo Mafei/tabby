@@ -1,0 +1,33 @@
+{
+  "$schema": "./node_modules/@angular/cli/lib/config/schema.json",
+  "version": 1,
+  "cli": { "analytics": false },
+  "projects": {
+    "mobile": {
+      "projectType": "application",
+      "root": "",
+      "sourceRoot": "web/src",
+      "architect": {
+        "build": {
+          "builder": "@angular/build:application",
+          "options": {
+            "browser": "web/src/main.ts",
+            "index": "web/index.html",
+            "tsConfig": "web/tsconfig.app.json",
+            "outputPath": { "base": "www", "browser": "" },
+            "styles": ["web/src/styles.css"],
+            "aot": true,
+            "sourceMap": false,
+            "subresourceIntegrity": false,
+            "optimization": { "scripts": true, "styles": { "minify": true, "inlineCritical": false }, "fonts": false },
+            "outputHashing": "all",
+            "statsJson": true,
+            "extractLicenses": true
+          },
+          "configurations": { "production": {} },
+          "defaultConfiguration": "production"
+        }
+      }
+    }
+  }
+}

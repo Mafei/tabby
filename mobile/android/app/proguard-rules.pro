@@ -1,0 +1,2 @@
+-keep class org.tabby.android.ssh.NativeSSH { *; }
+-keep class org.tabby.android.prototype.TabbySSHPlugin { *; }
