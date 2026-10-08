@@ -22,6 +22,41 @@ env:
   KEYGEN_TOKEN: ''
   APPLE_TEAM_ID: ''
 jobs:
+  tab-strip-contrast:
+    if: github.repository == 'Mafei/tabby' && github.event.repository.visibility == 'public' && ((github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == 'Mafei/tabby' && github.event.pull_request.head.ref == 'feature/linux-portable-rocky8-fonts') || (github.event_name != 'pull_request' && github.ref == 'refs/heads/feature/linux-portable-rocky8-fonts'))
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install locked non-native fixture tools
+        run: |
+          npm install -g yarn@1.22.22
+          yarn install --frozen-lockfile --ignore-scripts --network-timeout 1000000
+          yarn --cwd tabby-core install --frozen-lockfile --ignore-scripts --network-timeout 1000000
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends python3-pil
+          google-chrome --version
+      - name: Default dark/light chrome and actual CSS screenshots
+        id: tab-strip
+        run: |
+          yarn test:ui-chrome
+          node scripts/test-linux-tab-strip.mjs
+          python3 scripts/test/quantize-tab-strip.py
+          git diff --exit-code
+      - uses: actions/upload-artifact@v4
+        if: ${{ (success() || failure()) && (steps.tab-strip.outcome == 'success' || steps.tab-strip.outcome == 'failure') }}
+        with:
+          name: tabby-linux-tab-strip-rgb565-${{ github.event.pull_request.head.sha || github.sha }}
+          path: dist/linux-tab-strip
+          if-no-files-found: error
+          retention-days: 14
   rocky-baseline:
     if: github.repository == 'Mafei/tabby' && github.event.repository.visibility == 'public' && ((github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == 'Mafei/tabby' && github.event.pull_request.head.ref == 'feature/linux-portable-rocky8-fonts') || (github.event_name != 'pull_request' && github.ref == 'refs/heads/feature/linux-portable-rocky8-fonts'))
     runs-on: ubuntu-24.04

@@ -55,6 +55,29 @@ CI separates Rocky native build/ELF closure from execution in a standard Ubuntu 
 
 Before marking Rocky GUI compatibility accepted, exercise the actual portable product on Rocky 8.10 as an ordinary user with SELinux enforcing: PTY/SSH/tmux, restart, clipboard, Chinese IME, multiple DPI settings, GPU fallback, and X11; report Wayland separately. AppImage packaging, ELF inspection, Ubuntu renderer tests, or a version command cannot substitute for this result.
 
+## Tab strip contrast on remote displays
+
+The default Linux theme derives opaque tab strip, active tab, hover, label and
+boundary colors from the selected terminal scheme. Solid luminance differences,
+one-pixel boundaries, a three-pixel active marker and readable tab indices make
+the strip distinguishable in both default dark and light schemes. Configured
+terminal background/text/ANSI colors remain unchanged. Third-party themes and
+Windows/macOS chrome retain their existing behavior. Custom CSS can override the
+`--tabby-tab-*` tokens on `app-root` or its descendants.
+
+`yarn test:ui-chrome` checks surface/text contrast before and after RGB565
+quantization. `node scripts/test-linux-tab-strip.mjs` renders a browser fixture
+with the actual theme service, Sass, Pug header and Angular CSS encapsulation;
+it checks top/bottom/left/right tabs, hover, keyboard focus, vibrancy, custom
+schemes/CSS and unchanged non-Linux styles. It is a fixture, not the complete
+application. `python3 scripts/test/quantize-tab-strip.py` quantizes the actual
+browser PNGs using R5/G6/B5 truncation and bit replication, samples real surface
+pixels, and saves dark/light before/after comparison sheets. This simulation
+does not establish an actual xrdp codec, dithering, native focus, display
+calibration or physical 16-bit result. Actual xrdp screenshots and user
+acceptance remain necessary for those claims. Normal browser sandbox policy
+is preserved; startup denial is a failure, not a reason to change policy.
+
 ## References
 
 - [AppImage payload and baseline guidance](https://docs.appimage.org/reference/best-practices.html)

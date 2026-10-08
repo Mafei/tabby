@@ -5,6 +5,7 @@ import { ConfigService } from '../services/config.service'
 import { TerminalColorScheme, Theme } from '../api/theme'
 import { PlatformService, PlatformTheme } from '../api/platform'
 import { NewTheme } from '../theme'
+import { tabStripColors } from '../tabStripColors'
 
 @Injectable({ providedIn: 'root' })
 export class ThemesService {
@@ -78,6 +79,7 @@ export class ThemesService {
 
         vars['--body-bg'] = background.string()
         if (this.findCurrentTheme().followsColorScheme) {
+            Object.assign(vars, tabStripColors(Color(theme.background).rgb().array(), Color(theme.foreground).rgb().array(), isDark))
             vars['--bs-body-bg'] = theme.background
             vars['--bs-body-color'] = theme.foreground
             vars['--bs-black'] = theme.colors[0]

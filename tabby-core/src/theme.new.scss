@@ -69,6 +69,111 @@ app-root {
     }
 }
 
+// The default Linux theme needs solid boundaries even when a remote desktop
+// reduces color depth or does not composite transparency. Keep terminal colors
+// and third-party themes untouched; user CSS can override these chrome tokens.
+app-root:where(.platform-linux) .main.content {
+    > .tab-bar {
+        box-sizing: border-box;
+        background: var(--tabby-tab-strip-bg);
+        border-top: 1px solid var(--tabby-tab-border);
+
+        > .tabs tab-header {
+            background: var(--tabby-tab-strip-bg);
+            color: var(--tabby-tab-fg);
+            border-left-color: var(--tabby-tab-border);
+            border-right-color: var(--tabby-tab-border);
+
+            .index {
+                color: inherit;
+                opacity: 1;
+            }
+
+            &:hover:not(.active) {
+                background: var(--tabby-tab-hover-bg);
+                color: var(--tabby-tab-hover-fg);
+            }
+
+            &.active {
+                background: var(--tabby-tab-active-bg);
+                color: var(--tabby-tab-active-fg);
+
+                .name {
+                    font-weight: 600;
+                }
+            }
+
+            .current-tab-indicator {
+                height: 3px;
+                background: var(--tabby-tab-active-fg);
+            }
+
+            .activity-indicator {
+                background: var(--tabby-tab-fg);
+                opacity: 1;
+            }
+
+            button {
+                color: inherit;
+
+                &:hover, &:active {
+                    background: var(--tabby-tab-hover-bg) !important;
+                    color: var(--tabby-tab-hover-fg);
+                }
+
+                &:focus-visible {
+                    outline: 2px solid currentColor;
+                    outline-offset: -3px;
+                }
+            }
+
+            &:focus-within .buttons {
+                opacity: 1;
+            }
+        }
+
+        .btn-tab-bar {
+            color: var(--tabby-tab-fg);
+
+            svg, path {
+                fill: currentColor;
+                fill-opacity: 1;
+            }
+
+            &:focus-visible {
+                outline: 2px solid currentColor;
+                outline-offset: -3px;
+            }
+        }
+    }
+
+    &.tabs-on-top > .tab-bar {
+        border-top: 0;
+        border-bottom: 1px solid var(--tabby-tab-border);
+    }
+
+    // Match the specificity of Angular's encapsulated vertical layout rules.
+    &.tabs-on-left > .tab-bar.tab-bar, &.tabs-on-right > .tab-bar.tab-bar {
+        background: var(--tabby-tab-strip-bg);
+        border-top: 0;
+        border-bottom: 0;
+
+        > .tabs tab-header {
+            border-left: 0;
+            border-right: 0;
+            border-bottom: 1px solid var(--tabby-tab-border);
+        }
+    }
+
+    &.tabs-on-left > .tab-bar {
+        border-right: 1px solid var(--tabby-tab-border);
+    }
+
+    &.tabs-on-right > .tab-bar {
+        border-left: 1px solid var(--tabby-tab-border);
+    }
+}
+
 tab-body {
     background: var(--body-bg);
 }
