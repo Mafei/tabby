@@ -66,17 +66,18 @@ export function quarterTurnTarget (rotation) {
     return { requested, expected: values[requested] }
 }
 
-/** Observe a served, focused editor after the real IME finishes resizing it.
+/** Observe a focused editor once the expected IME visibility/geometry is stable.
  * This grants no focus and never reads editor text or changes input events.
  */
 export class IMEEditorReadiness {
     previous
     since
+    constructor (expectedIMEVisible = true) { this.expectedIMEVisible = expectedIMEVisible }
 
     observe ({ native, browser, focus }, now) {
         const geometry = { nativeWidth: native.viewportWidth, nativeHeight: native.viewportHeight,
             width: browser.width, height: browser.height, visualHeight: browser.visualHeight }
-        const valid = native.visible === true && browser.documentFocused === true
+        const valid = typeof this.expectedIMEVisible === 'boolean' && native.visible === this.expectedIMEVisible && browser.documentFocused === true
             && browser.editorFocused === true && browser.editorEnabled === true && browser.editorCount === 1
             && Object.values(geometry).every(value => Number.isFinite(value) && value > 0)
             && Math.abs(geometry.nativeWidth - geometry.width) <= 1
@@ -118,6 +119,7 @@ export async function webviewAcceptance (android, fixture) {
     let substage = 'initializing'
     let sizeSequence = 0
     let rotationGeometry
+    let systemIME
 
     const verify = label => { passed.push(label); console.log(`PASS Android WebView: ${label}.`) }
     async function step (name, action) {
@@ -134,6 +136,7 @@ export async function webviewAcceptance (android, fixture) {
             javascriptBoot: bootObservations.map(value => value.snapshot()),
             ...(rotationGeometry ? { rotationGeometry } : {}),
             nativeInput: android.lastInput,
+            ...(systemIME ? { systemIME } : {}),
             errorKind: error instanceof TestFailure ? 'FIXED_TEST_FAILURE'
                 : error?.name === 'TimeoutError' ? 'PLAYWRIGHT_TIMEOUT'
                     : String(error?.message || '').includes('strict mode violation') ? 'LOCATOR_AMBIGUOUS' : 'UNEXPECTED',
@@ -703,20 +706,36 @@ export async function webviewAcceptance (android, fixture) {
         const expected = Buffer.from('中文🙂\x7f\x03\x1b\t\x1b[D\x1b[A\x1b[B\x1b[C')
         await rawProbe('W_INPUT', expected.length)
         await nativeTouch(page.getByRole('button', { name: '键盘', exact: true }))
-        const editorDeadline = Math.min(harnessDeadline, Date.now() + 10000)
-        const editorReadiness = new IMEEditorReadiness()
-        await step('composition-real-ime-and-editor-stable', () => until(async () => {
-            const [native, browser, focus] = await observeReadUntil(() => Promise.all([
-                viewport(), page.evaluate(() => {
-                    const editors = [...document.querySelectorAll('textarea[aria-label="终端输入"]')]
-                    return { width: innerWidth, height: innerHeight, visualHeight: window.visualViewport?.height ?? innerHeight,
-                        documentFocused: document.hasFocus(), editorCount: editors.length,
-                        editorFocused: editors.length === 1 && document.activeElement === editors[0],
-                        editorEnabled: editors.length === 1 && !editors[0].disabled }
-                }), android.focusState({ deadline: editorDeadline }),
-            ]), editorDeadline, 'ANDROID_COMPOSITION_EDITOR_DID_NOT_STABILIZE')
-            return editorReadiness.observe({ native, browser, focus }, Date.now())
-        }, 'ANDROID_COMPOSITION_EDITOR_DID_NOT_STABILIZE', Math.max(1, editorDeadline - Date.now())))
+        async function editorStable (expectedIMEVisible) {
+            const editorDeadline = Math.min(harnessDeadline, Date.now() + 10000)
+            const editorReadiness = new IMEEditorReadiness(expectedIMEVisible)
+            await until(async () => {
+                const [native, browser, focus] = await observeReadUntil(() => Promise.all([
+                    viewport(), page.evaluate(() => {
+                        const editors = [...document.querySelectorAll('textarea[aria-label="终端输入"]')]
+                        return { width: innerWidth, height: innerHeight, visualHeight: window.visualViewport?.height ?? innerHeight,
+                            documentFocused: document.hasFocus(), editorCount: editors.length,
+                            editorFocused: editors.length === 1 && document.activeElement === editors[0],
+                            editorEnabled: editors.length === 1 && !editors[0].disabled }
+                    }), android.focusState({ deadline: editorDeadline }),
+                ]), editorDeadline, 'ANDROID_COMPOSITION_EDITOR_DID_NOT_STABILIZE')
+                return editorReadiness.observe({ native, browser, focus }, Date.now())
+            }, 'ANDROID_COMPOSITION_EDITOR_DID_NOT_STABILIZE', Math.max(1, editorDeadline - Date.now()))
+        }
+        await step('composition-real-ime-and-editor-stable', () => editorStable(true))
+        const imeDeadline = Math.min(harnessDeadline, Date.now() + 5000)
+        const ime = await observeReadUntil(() => android.shell('settings get secure default_input_method',
+            { timeout: Math.max(1, Math.min(5000, imeDeadline - Date.now())) }), imeDeadline, 'ANDROID_IME_OBSERVATION_DEADLINE_EXCEEDED')
+        // Fixed categories only: never retain the raw setting in diagnostics.
+        systemIME = /^com\.android\.inputmethod\.latin\//.test(ime) ? 'AOSP_LATIN'
+            : /^com\.google\.android\.inputmethod\.latin\//.test(ime) ? 'GOOGLE_LATIN' : 'OTHER'
+        // The harness acts as a second IME through the real InputConnection.
+        // Start this controlled composer with the screen keyboard normally
+        // hidden; early compositionend still fails the actual preedit check.
+        // Keep real editor/native focus without IME settings, events or DOM
+        // input overrides. System keyboard behavior is tested separately below.
+        await step('composition-hide-competing-screen-keyboard', () => plugin('hideKeyboard'))
+        await step('composition-focused-editor-with-hidden-ime-stable', () => editorStable(false))
         await page.evaluate(() => { window.__tabbyCloudObservation.inputEvents = [] })
         substage = 'composition-start'
         await android.input({ type: 'composeStart', text: '中' })

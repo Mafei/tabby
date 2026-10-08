@@ -51,3 +51,17 @@ test('native display changes and a lost editor reset stability rather than reusi
     assert.equal(ready.observe(lost, 701), false)
     assert.equal(ready.observe(sample(), 702), false)
 })
+
+test('controlled InputConnection preparation requires explicit hidden-IME mode and still retains real editor focus', () => {
+    const hidden = sample(); hidden.native.visible = false
+    const shownMode = new IMEEditorReadiness(); shownMode.observe(hidden, 0)
+    assert.equal(shownMode.observe(hidden, 350), false)
+    const hiddenMode = new IMEEditorReadiness(false); hiddenMode.observe(hidden, 0)
+    assert.equal(hiddenMode.observe(hidden, 350), true)
+    const blurred = sample(); blurred.native.visible = false; blurred.browser.editorFocused = false
+    assert.equal(hiddenMode.observe(blurred, 351), false)
+    assert.equal(hiddenMode.observe(hidden, 352), false)
+    assert.equal(hiddenMode.observe(hidden, 702), true)
+    const unknown = sample(); unknown.native.visible = null
+    assert.equal(hiddenMode.observe(unknown, 703), false)
+})

@@ -151,8 +151,13 @@ checks and nonsecure keyguard rules remain; application tests separately check
 the actual KeyguardManager state before credential-bearing interaction.
 Native composition acceptance waits for the real IME resize and the single
 enabled editor's native/browser focus to remain stable for 350ms, within the
-existing harness budget. It still requires visible preedit without PTY output
-and exact committed UTF-8/control bytes. Failure diagnostics include only fixed
+existing harness budget. For the controlled InputConnection composition phase,
+it then normally hides the screen keyboard and waits for the still-focused
+editor to stabilize, separating this external composer from the system IME.
+The actual system keyboard show/hide and resize phase remains mandatory. This
+is controlled native composition acceptance, not a real Chinese keyboard test.
+It still requires visible preedit without PTY output and exact committed
+UTF-8/control bytes. Failure diagnostics include only fixed
 input-event categories and focus booleans, never editor text.
 See [Android's device-lock API](https://developer.android.com/reference/android/app/KeyguardManager#isDeviceLocked())
 and [TrustManager's direct user dump](https://github.com/aosp-mirror/platform_frameworks_base/blob/master/services/core/java/com/android/server/trust/TrustManagerService.java).
