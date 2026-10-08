@@ -15,11 +15,28 @@ const codes = new Set([
     'TERMINAL_SELECTION_COPY_FAILED', 'TERMINAL_ACTIVE_LINE_RESIZE_FAILED', 'TERMINAL_COMPLETED_LINE_REFLOW_FAILED',
     'TERMINAL_REPAINT_FAILED', 'TERMINAL_LAYOUT_FAILED',
 ])
+const kinds = new Set(['Error', 'TypeError', 'ReferenceError', 'RangeError', 'SyntaxError', 'URIError', 'EvalError',
+    'SecurityError', 'NotSupportedError', 'InvalidStateError', 'NetworkError', 'AbortError', 'OperationError', 'DataError'])
+const substages = new Set(['INITIALIZATION', 'NATIVE_PROBE', 'PRODUCT_FONT_PROBE', 'RENDERER_SETUP', 'RENDERER_LOAD',
+    'RENDERER_WAIT', 'RENDERER_RESULT', 'PLATFORM_FONT_ATTACH', 'PLATFORM_FONT_DOM', 'PLATFORM_FONT_CSS',
+    'PLATFORM_FONT_SAMPLE', 'CAPTURE', 'PREFERENCES', 'SANDBOX', 'FONT_LOAD', 'FONT_MATCH', 'SAMPLES',
+    'PIXELS', 'MONO', 'COLOR_EMOJI', 'WEBGL_PROBE', 'WEBGL_ADDON',
+    ...['DOM', 'WEBGL'].flatMap(backend => ['OPEN', 'CELLS', 'WRAP', 'COPY', 'ACTIVE_RESIZE', 'REFLOW', 'REPAINT', 'LAYOUT']
+        .map(operation => `${backend}_${operation}`))])
 export function failureCode (error) {
     const value = typeof error === 'string' ? error : error?.message
     return codes.has(value) ? value : 'UNKNOWN_FAILURE'
 }
+export function normalizeDiagnostic (value) {
+    return { failureCode: failureCode(value?.failureCode),
+        failureOrigin: ['MAIN', 'RENDERER'].includes(value?.failureOrigin) ? value.failureOrigin : 'UNKNOWN',
+        failureKind: kinds.has(value?.failureKind) ? value.failureKind : 'UNKNOWN',
+        substage: substages.has(value?.substage) ? value.substage : 'UNKNOWN' }
+}
+export function failureDiagnostic (error, substage, origin) {
+    return normalizeDiagnostic({ failureCode: failureCode(error), failureKind: error?.name, substage, failureOrigin: origin })
+}
 export function runtimeFailure (value) {
     const stage = runtimeStages.includes(value?.stage) ? value.stage : 'STARTUP'
-    return { passed: false, stage, code: `FONT_RUNTIME_FAILED_${stage}`, failureCode: failureCode(value?.failureCode) }
+    return { passed: false, stage, code: `FONT_RUNTIME_FAILED_${stage}`, ...normalizeDiagnostic(value) }
 }

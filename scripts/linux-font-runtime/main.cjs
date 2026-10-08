@@ -11,7 +11,9 @@ app.setPath('userData', config.userData)
 app.setPath('crashDumps', path.join(config.userData, 'crashes'))
 let finished = false
 let stage = 'STARTUP'
-let failureCode = () => 'UNKNOWN_FAILURE'
+let substage = 'INITIALIZATION'
+let failureDiagnostic = () => ({ failureCode: 'UNKNOWN_FAILURE', failureOrigin: 'MAIN', failureKind: 'UNKNOWN', substage: 'INITIALIZATION' })
+let normalizeDiagnostic = failureDiagnostic
 const windows = new Set()
 const hash = value => crypto.createHash('sha256').update(value).digest('hex')
 function check (value, code) { if (!value) { throw new Error(code) } }
@@ -30,7 +32,10 @@ function finish (result) {
     for (const window of windows) { if (!window.isDestroyed()) { window.destroy() } }
     app.exit(result.passed ? 0 : 1)
 }
-function fail (error) { finish({ passed: false, stage, failureCode: failureCode(error) }) }
+function fail (error) {
+    const details = error?.runtimeDiagnostic ? normalizeDiagnostic(error.runtimeDiagnostic) : failureDiagnostic(error, substage, 'MAIN')
+    finish({ passed: false, stage, ...details })
+}
 const timer = setTimeout(() => fail(new Error('FONT_RUNTIME_DEADLINE')), 90000)
 timer.unref()
 process.on('uncaughtException', fail)
@@ -116,14 +121,19 @@ async function packagedPlugin () {
     return { sources, productFontLoaderPassed: true, productRendererSandboxed: false }
 }
 async function platformFonts (window, ids) {
+    substage = 'PLATFORM_FONT_ATTACH'
     const debuggerAPI = window.webContents.debugger
     debuggerAPI.attach('1.3')
     try {
+        substage = 'PLATFORM_FONT_DOM'
         await bounded(debuggerAPI.sendCommand('DOM.enable'))
+        substage = 'PLATFORM_FONT_CSS'
         await bounded(debuggerAPI.sendCommand('CSS.enable'))
+        substage = 'PLATFORM_FONT_DOM'
         const { root } = await bounded(debuggerAPI.sendCommand('DOM.getDocument'))
         const results = []
         for (const id of ids) {
+            substage = 'PLATFORM_FONT_SAMPLE'
             const { nodeId } = await bounded(debuggerAPI.sendCommand('DOM.querySelector', { nodeId: root.nodeId, selector: `#sample-${id}` }))
             check(nodeId > 0, 'FONT_SAMPLE_NODE_MISSING')
             const response = await bounded(debuggerAPI.sendCommand('CSS.getPlatformFontsForNode', { nodeId }))
@@ -136,15 +146,19 @@ async function platformFonts (window, ids) {
 }
 async function main () {
     const diagnostics = await import('./font-diagnostics.mjs')
-    failureCode = diagnostics.failureCode
+    failureDiagnostic = diagnostics.failureDiagnostic
+    normalizeDiagnostic = diagnostics.normalizeDiagnostic
     await app.whenReady()
     check(process.versions.electron.split('.')[0] === '43', 'ELECTRON_43_REQUIRED')
     check(!['no-sandbox', 'disable-setuid-sandbox', 'disable-gpu-sandbox'].some(value => app.commandLine.hasSwitch(value)), 'SANDBOX_BYPASS_FORBIDDEN')
     session.defaultSession.setPermissionRequestHandler((_webContents, _permission, callback) => callback(false))
     session.defaultSession.webRequest.onBeforeRequest((details, callback) => callback({ cancel: !details.url.startsWith('file://') && !details.url.startsWith('data:') }))
+    substage = 'NATIVE_PROBE'
     const natives = await activeNativeModules()
+    substage = 'PRODUCT_FONT_PROBE'
     const plugin = await packagedPlugin()
     stage = 'SANDBOXED_FONT_RENDERER'
+    substage = 'RENDERER_SETUP'
     const html = fs.readFileSync(path.join(__dirname, 'font-test.html'), 'utf8').replace('/* FONT_SOURCES */', `const FONT_SOURCES=${JSON.stringify(plugin.sources)};`)
     fs.writeFileSync(path.join(__dirname, 'font-test.ready.html'), html)
     const window = secureWindow({ show: true, width: 1400, height: 1000,
@@ -153,15 +167,20 @@ async function main () {
     const rendererResult = new Promise((resolve, reject) => {
         ipcMain.once('font-runtime-result', (event, result) => event.sender === window.webContents ? resolve(result) : reject(new Error('FONT_REPORT_SOURCE_REJECTED')))
     })
+    substage = 'RENDERER_LOAD'
     await bounded(window.loadFile(path.join(__dirname, 'font-test.ready.html')))
+    substage = 'RENDERER_WAIT'
     const result = await bounded(rendererResult, 30000)
-    if (result?.passed !== true) { throw new Error(failureCode(result?.failureCode)) }
+    substage = 'RENDERER_RESULT'
+    if (result?.passed !== true) { throw Object.assign(new Error('FONT_RENDERER_FAILED'), { runtimeDiagnostic: normalizeDiagnostic(result) }) }
     check(result.passed === true && result.sandboxed === true && result.contextIsolated === true && result.nodeUnavailable === true && result.facesLoaded === 5, 'FONT_RENDERER_FAILED')
     const sampleIDs = ['regular', 'bold', 'box', 'block', 'powerline', 'icons', 'cjk', 'braille', 'emoji']
     check(JSON.stringify(result.sampleIDs) === JSON.stringify(sampleIDs), 'FONT_SAMPLE_LIST_FAILED')
     const usage = await platformFonts(window, sampleIDs)
+    substage = 'CAPTURE'
     const screenshot = await bounded(window.webContents.capturePage())
     check(!screenshot.isEmpty(), 'FONT_RENDERER_CAPTURE_EMPTY')
+    substage = 'PREFERENCES'
     const preferences = window.webContents.getLastWebPreferences()
     check(preferences.sandbox === true && preferences.nodeIntegration === false && preferences.contextIsolation === true, 'FONT_RENDERER_PREFERENCES_FAILED')
     finish({ passed: true, stage: 'COMPLETE', electron: process.versions.electron, chromium: process.versions.chrome,

@@ -63,7 +63,8 @@ U+20000 is absent from the bundled fonts. Unicode 11 code-point widths still
 allow ZWJ and flag grapheme sequences to occupy multiple terminal cells.
 
 Failures retain the fixed stage and an allowlisted error category, such as
-`FONT_MONO_WIDTH_FAILED` or `TERMINAL_COMPLETED_LINE_REFLOW_FAILED`. Unknown
-exceptions become `UNKNOWN_FAILURE`; arbitrary messages, console output,
+`FONT_MONO_WIDTH_FAILED` or `TERMINAL_COMPLETED_LINE_REFLOW_FAILED`. They also
+retain an allowlisted main/renderer origin, operation substage and built-in
+exception kind. Unknown exceptions become `UNKNOWN_FAILURE`; arbitrary messages, console output,
 paths, stacks and user text never enter the failure receipt. CI also uploads
 this bounded failure receipt when the runtime probe fails.

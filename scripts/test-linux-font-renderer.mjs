@@ -213,7 +213,10 @@ if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === imp
         const failure = error?.runtimeFailure ? validateFailure(error.runtimeFailure) : { passed: false, code }
         if (output) { await mkdir(path.dirname(output), { recursive: true }); await writeFile(output, JSON.stringify(failure) + '\n') }
         console.error(code)
-        if (failure.failureCode) { console.error(failure.failureCode) }
+        if (failure.failureCode) {
+            console.error(failure.failureCode)
+            console.error(JSON.stringify({ origin: failure.failureOrigin, kind: failure.failureKind, substage: failure.substage }))
+        }
         process.exitCode = 1
     }
 }
