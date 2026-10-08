@@ -1,7 +1,9 @@
 name: Android prototype checks and APK
 on:
   push:
-    branches: [prototype/android-direct-ssh, candidate/android-mobile-product-20261008]
+    # Product commits are checked by their draft PR with an exact head checkout.
+    # Keep the original prototype push route; avoid duplicate candidate runs.
+    branches: [prototype/android-direct-ssh]
     paths: [mobile/**, tabby-ssh/src/session/tmux*, tabby-ssh/src/session/reconnect.ts, .github/workflows/android-prototype.yml]
   pull_request:
     branches: [feature/ssh-tmux-recovery, candidate/android-mobile-ux-20261008]
