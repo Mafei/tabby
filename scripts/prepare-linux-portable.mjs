@@ -12,8 +12,8 @@ if (process.platform !== 'linux' || process.arch !== 'x64' || process.env.TABBY_
     throw new Error('LINUX_PORTABLE_BASELINE_REQUIRED')
 }
 const root = fileURLToPath(new URL('..', import.meta.url))
-function run (program, args, cwd = root) {
-    const result = spawnSync(program, args, { cwd, stdio: 'inherit', env: process.env })
+function run (program, args, cwd = root, env = process.env) {
+    const result = spawnSync(program, args, { cwd, stdio: 'inherit', env })
     if (result.error || result.status !== 0) { throw new Error('LINUX_PORTABLE_BUILD_COMMAND_FAILED') }
 }
 function install (directory, production = false) {
@@ -21,7 +21,10 @@ function install (directory, production = false) {
         ...(production ? ['--production'] : [])], directory)
     // Every package keeps its own patch cwd; the pinned root tool is available
     // even when that plugin or production copy does not declare patch-package.
-    run(process.execPath, [resolve(root, 'node_modules/patch-package/index.js'), '--error-on-fail'], directory)
+    // Let the tool classify missing direct devDependencies after the completed
+    // development build. Present incompatible dependencies still fail normally.
+    run(process.execPath, [resolve(root, 'node_modules/patch-package/index.js'), '--error-on-fail'], directory,
+        production ? { ...process.env, NODE_ENV: 'production' } : process.env)
 }
 for (const name of ['app', ...vars.allPackages]) { install(resolve(root, name)) }
 for (const name of vars.builtinPlugins) {

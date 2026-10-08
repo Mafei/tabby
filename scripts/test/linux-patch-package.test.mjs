@@ -8,9 +8,9 @@ import test from 'node:test'
 
 const root = fileURLToPath(new URL('../..', import.meta.url))
 const tool = path.join(root, 'node_modules/patch-package/index.js')
-function patch (directory, extra = []) {
+function patch (directory, extra = [], env = process.env) {
     const result = spawnSync(process.execPath, [tool, '--error-on-fail', ...extra], {
-        cwd: directory, encoding: 'utf8', timeout: 10000,
+        cwd: directory, env, encoding: 'utf8', timeout: 10000,
     })
     assert.ifError(result.error)
     return result
@@ -26,6 +26,54 @@ test('pinned root patch tool runs in a dependency-empty plugin cwd without a loc
         assert.match(result.stdout, /patch-package 6\.5\.1/)
         assert.match(result.stdout, /Applying patches/)
         assert.equal(existsSync(path.join(directory, 'node_modules')), false)
+    } finally {
+        rmSync(directory, { recursive: true, force: true })
+    }
+})
+
+function terminalFixture (directory) {
+    const metadata = JSON.parse(readFileSync(path.join(root, 'tabby-terminal/package.json'), 'utf8'))
+    assert.equal(metadata.devDependencies['zmodem.js'], '^0.1.9')
+    assert.equal(metadata.dependencies?.['zmodem.js'], undefined)
+    writeFileSync(path.join(directory, 'package.json'), JSON.stringify(metadata))
+    mkdirSync(path.join(directory, 'patches'))
+    copyFileSync(path.join(root, 'tabby-terminal/patches/zmodem.js+0.1.10.patch'), path.join(directory, 'patches/zmodem.js+0.1.10.patch'))
+    return metadata
+}
+
+test('real terminal patch permits missing direct dev dependencies only in production and still rejects absent runtime dependencies', () => {
+    const directory = mkdtempSync(path.join(tmpdir(), 'tabby-patch-production-'))
+    try {
+        const metadata = terminalFixture(directory)
+        const production = { ...process.env, NODE_ENV: 'production' }
+        const accepted = patch(directory, [], production)
+        assert.equal(accepted.status, 0)
+        assert.match(accepted.stdout, /Skipping dev-only zmodem\.js@0\.1\.10/)
+        assert.equal(patch(directory, [], { ...process.env, NODE_ENV: 'development' }).status, 1)
+        delete metadata.devDependencies['zmodem.js']
+        metadata.dependencies = { ...metadata.dependencies, 'zmodem.js': '^0.1.9' }
+        writeFileSync(path.join(directory, 'package.json'), JSON.stringify(metadata))
+        const missingRuntime = patch(directory, [], production)
+        assert.equal(missingRuntime.status, 1)
+        assert.match(missingRuntime.stdout + missingRuntime.stderr, /not present at node_modules\/zmodem\.js/)
+    } finally {
+        rmSync(directory, { recursive: true, force: true })
+    }
+})
+
+test('production mode still rejects a present incompatible target for the real terminal dev dependency patch', () => {
+    const directory = mkdtempSync(path.join(tmpdir(), 'tabby-patch-production-conflict-'))
+    try {
+        terminalFixture(directory)
+        const module = path.join(directory, 'node_modules/zmodem.js')
+        mkdirSync(path.join(module, 'src'), { recursive: true })
+        writeFileSync(path.join(module, 'package.json'), JSON.stringify({ name: 'zmodem.js', version: '0.1.10' }))
+        const target = path.join(module, 'src/zsession.js')
+        writeFileSync(target, '// incompatible public production fixture\n')
+        const failed = patch(directory, [], { ...process.env, NODE_ENV: 'production' })
+        assert.equal(failed.status, 1)
+        assert.match(failed.stdout + failed.stderr, /Failed to apply patch for package zmodem\.js/)
+        assert.equal(readFileSync(target, 'utf8'), '// incompatible public production fixture\n')
     } finally {
         rmSync(directory, { recursive: true, force: true })
     }
