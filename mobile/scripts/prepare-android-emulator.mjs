@@ -311,7 +311,7 @@ export async function waitForBoot (android, api, { now = () => performance.now()
 async function main () {
     const args = process.argv.slice(2)
     if (args.length === 1 && args[0] === '--check-capacity') { await capacity(); return }
-    check(args.length === 4 && args[0] === '--serial' && /^emulator-\d+$/.test(args[1]) && args[2] === '--api' && /^(31|32|33|34|35|36)$/.test(args[3]), 'ANDROID_BOOT_INVALID_ARGUMENTS')
+    check(args.length === 4 && args[0] === '--serial' && /^emulator-\d+$/.test(args[1]) && args[2] === '--api' && /^(31|32|33|34|35|36|37)$/.test(args[3]), 'ANDROID_BOOT_INVALID_ARGUMENTS')
     let cancelled = false
     const cancel = () => { cancelled = true; cancelCommands() }
     process.once('SIGINT', cancel); process.once('SIGTERM', cancel)

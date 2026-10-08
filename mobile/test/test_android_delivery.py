@@ -258,16 +258,34 @@ class DeliveryBindingTest(unittest.TestCase):
                 self.reject('TMUX_WEBVIEW_TESTS_INCOMPLETE')
                 self.runtime['tmux']['webview'] = original
 
-    def test_runtime_requires_verified_stable_api_31_to_36_and_x86_64(self):
-        for api in [31, 32, 33, 34, 35, 36]:
+    def test_runtime_requires_verified_stable_api_31_to_37_and_x86_64(self):
+        for api in [31, 32, 33, 34, 35, 36, 37]:
             self.runtime['android']['api'] = api
+            self.runtime['compatibility']['requestedImage'] = {
+                'platform': '37.0' if api == 37 else str(api),
+                'tag': 'google_apis' if api == 37 else 'default', 'abi': 'x86_64',
+            }
             self.assertEqual(self.check()['runtime']['api'], api)
-        for field, value in [('api', 30), ('api', 37), ('api', '35'), ('api', True), ('abi', 'arm64-v8a')]:
+        self.runtime['compatibility'].pop('requestedImage')
+        for field, value in [('api', 30), ('api', 38), ('api', '35'), ('api', '37.0'), ('api', True), ('abi', 'arm64-v8a')]:
             with self.subTest(field=field):
                 original = self.runtime['android'].copy()
                 self.runtime['android'][field] = value
                 self.reject('RUNTIME_PLATFORM_INVALID')
                 self.runtime['android'] = original
+
+    def test_api_37_requires_explicit_stable_non_play_image_profile(self):
+        self.runtime['android']['api'] = 37
+        profile = {'platform': '37.0', 'tag': 'google_apis', 'abi': 'x86_64'}
+        self.runtime['compatibility']['requestedImage'] = profile.copy()
+        self.assertEqual(self.check()['runtime']['api'], 37)
+        for field, value in [('platform', '37'), ('tag', 'default'), ('tag', 'google_apis_playstore'),
+                             ('tag', 'google_apis_ps16k'), ('abi', 'arm64-v8a')]:
+            with self.subTest(field=field):
+                self.runtime['compatibility']['requestedImage'] = {**profile, field: value}
+                self.reject('RUNTIME_SELECTED_IMAGE_INVALID')
+        self.runtime['compatibility'].pop('requestedImage')
+        self.reject('RUNTIME_SELECTED_IMAGE_INVALID')
 
     def test_compatibility_requires_actual_bounded_geometry_and_webview_identity(self):
         for field, value in [('requestedForm', 'foldable-oppo'), ('width', True), ('height', 0),

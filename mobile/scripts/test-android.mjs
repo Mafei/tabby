@@ -29,7 +29,7 @@ async function webviewIdentity () {
     return { webViewPackage: match[1], webViewVersion: match[2] }
 }
 const report = { suite: 'real-android-emulator', passed: false, limitations: [
-    'Cloud AOSP emulator; physical-device touch behavior and a specific Chinese IME candidate UI remain unverified.',
+    'Cloud emulator; physical-device touch behavior and a specific Chinese IME candidate UI remain unverified.',
     'InputConnection composition is a native synthetic test of the Android WebView input path.',
 ] }
 let fixture
@@ -55,6 +55,17 @@ try {
     const encryptedKey = await readFile(fixture.metadata.encryptedPrivateKeyFile, 'utf8')
     android = new Android(serial, [fixture.metadata.password, fixture.metadata.privateKeyPassphrase, plainKey, encryptedKey])
     report.android = await android.verifyEmulator()
+    const requestedAPI = process.env.TABBY_EMULATOR_API
+    let requestedImage
+    if (requestedAPI !== undefined) {
+        check(/^(31|32|33|34|35|36|37)$/.test(requestedAPI) && report.android.api === Number(requestedAPI)
+            && report.android.abi === 'x86_64', 'RUNTIME_SELECTED_PLATFORM_MISMATCH')
+        const platform = process.env.TABBY_EMULATOR_PLATFORM
+        const tag = process.env.TABBY_EMULATOR_TAG
+        check(platform === (requestedAPI === '37' ? '37.0' : requestedAPI)
+            && tag === (requestedAPI === '37' ? 'google_apis' : 'default'), 'RUNTIME_SELECTED_IMAGE_INVALID')
+        requestedImage = { platform, tag, abi: 'x86_64' }
+    }
     const dimensions = /(?:Override|Physical) size: (\d+)x(\d+)/gu
     const screen = [...(await android.shell('wm size')).matchAll(dimensions)].at(-1)
     const density = [...(await android.shell('wm density')).matchAll(/(?:Override|Physical) density: (\d+)/gu)].at(-1)
@@ -65,7 +76,7 @@ try {
     check(requestedForm !== 'tablet' || minimumDP >= 600, 'RUNTIME_TABLET_TOO_SMALL')
     report.compatibility = { requestedForm,
         width: Number(screen[1]), height: Number(screen[2]), density: Number(density[1]),
-        physicalDevice: false }
+        physicalDevice: false, ...(requestedImage ? { requestedImage } : {}) }
     report.apks = {
         appSHA256: createHash('sha256').update(await readFile(appAPK)).digest('hex'),
         testsSHA256: createHash('sha256').update(await readFile(testAPK)).digest('hex'),

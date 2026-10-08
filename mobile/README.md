@@ -129,10 +129,18 @@ approved the
 on 2026-10-07 at 09:12 UTC. Installation accepted only `android-sdk-license`
 (agreement dated January 16, 2019). Installed tools include SDK/Build Tools 36,
 NDK 27.3.13750724 and a stable emulator with an AOSP API 35 x86_64 image.
-The workflow installs stable AOSP API 31–36 images and runs phone/tablet jobs;
-all selected package references were verified against the same already-approved
-SDK agreement. The current official metadata has no matching default or Google
-APIs x86_64 API 37 image, so Android 17 runtime remains an acceptance gap. The
+The workflow preserves the seven stable AOSP API 31–36 phone/tablet rows and
+adds API 37 phone and tablet compatibility rows. These select the non-Play
+`system-images;android-37.0;google_apis;x86_64` package; SDK platform `37.0`
+and actual runtime API `37` are distinct values. The
+[official Google APIs metadata](https://dl.google.com/android/repository/sys-img/google_apis/sys-img2-4.xml)
+was checked on 2026-10-08: this package is stable channel 0 and refers only to
+the same already-approved `android-sdk-license`. Every selected package and
+the exact agreement text are verified before installation. Preview, Play Store,
+ARM64-image and `google_apis_ps16k` variants are excluded. Compile/target SDK and
+Build Tools remain 36; this does not add a 16 KiB page-size runtime claim.
+API 37 execution requires its own successful runtime receipt and CI conclusion.
+The
 configured API 26 minimum is an installation declaration, not a claim that
 every old Android WebView was tested. The mobile language build explicitly
 targets Chrome 89+, while actual emulator reports record their WebView version
@@ -212,7 +220,7 @@ Debug keystores and disposable fixture credentials must never be uploaded.
 The dedicated fork-guarded Android workflow builds the exact requested head,
 keeps `contents: read`, and uses standard free runners for this public fork.
 It runs Rust and application Kotlin/JNI SSH tests on an actual ARM64 Linux
-host, separately from Android runtime acceptance. API 31–36 Android jobs
+host, separately from Android runtime acceptance. API 31–37 Android jobs
 run the complete native and WebView suites on disposable x86_64 phone/tablet
 emulators. The original native 7 and WebView 7 gates remain mandatory, with
 separate supplemental native 4 and tmux WebView 5 gates. No suite may skip;
@@ -230,7 +238,7 @@ main APK contains no fixture, test harness or keystore. Only the ARM64 APK is
 the user installation deliverable.
 Its fresh SDK installer checks the already-approved agreement text and package
 license references; additional or changed agreements stop installation.
-Android runtime tests use a disposable AOSP emulator, generated loopback SSH
+Android runtime tests use a disposable non-Play emulator, generated loopback SSH
 credentials injected through stdin into app-private files, and a test-APK-only
 WebView harness. Run them with:
 

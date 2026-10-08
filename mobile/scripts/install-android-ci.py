@@ -21,20 +21,89 @@ BASE_PACKAGES = [
     'platform-tools', 'platforms;android-36', 'build-tools;36.0.0',
     'ndk;27.3.13750724', 'emulator',
 ]
+REPOSITORY_URL = 'https://dl.google.com/android/repository/repository2-3.xml'
+IMAGE_URLS = {
+    'default': 'https://dl.google.com/android/repository/sys-img/android/sys-img2-3.xml',
+    'google_apis': 'https://dl.google.com/android/repository/sys-img/google_apis/sys-img2-4.xml',
+}
 
 
-def download(url, destination):
+def children(element, name):
+    return [child for child in element if child.tag.split('}')[-1] == name]
+
+
+def image_selection(api, platform=None, tag=None):
+    """Runtime API and SDK package platform are deliberately separate values."""
+    if type(api) is not int or api not in [31, 32, 33, 34, 35, 36, 37]:
+        raise SystemExit('SDK_IMAGE_SELECTION_INVALID')
+    expected = (str(api), 'default') if api <= 36 else ('37.0', 'google_apis')
+    # Preserve the original API31--36 CLI default. API37 must explicitly name
+    # the stable decimal-platform Google APIs image, never a guessed fallback.
+    if api <= 36:
+        platform = str(api) if platform is None else platform
+        tag = 'default' if tag is None else tag
+    if (platform, tag) != expected:
+        raise SystemExit('SDK_IMAGE_SELECTION_INVALID')
+    return {'runtimeAPI': api, 'platform': platform, 'tag': tag,
+            'package': f'system-images;android-{platform};{tag};x86_64',
+            'metadataURL': IMAGE_URLS[tag],
+            'systemImage': f'system-images/android-{platform}/{tag}/x86_64/system.img'}
+
+
+def verified_packages(root, requested, image=None):
+    """Verify selected stable packages, ignoring unrelated agreements/images."""
+    licenses = [item for item in children(root, 'license') if item.get('id') == 'android-sdk-license']
+    if len(licenses) != 1 or type(licenses[0].text) is not str \
+            or hashlib.sha256(licenses[0].text.encode()).hexdigest() != LICENSE_SHA256:
+        raise SystemExit('SDK_APPROVED_LICENSE_CHANGED')
+    selected = set()
+    for name in requested:
+        stable = [package for package in children(root, 'remotePackage') if package.get('path') == name
+                  and len(children(package, 'channelRef')) == 1
+                  and children(package, 'channelRef')[0].get('ref') == 'channel-0']
+        if len(stable) > 1:
+            raise SystemExit('SDK_STABLE_PACKAGE_AMBIGUOUS')
+        if not stable:
+            continue
+        package = stable[0]
+        revisions = children(package, 'revision')
+        if package.get('obsolete') == 'true' or len(revisions) != 1 or children(revisions[0], 'preview'):
+            raise SystemExit('SDK_SELECTED_PACKAGE_NOT_STABLE')
+        agreements = [item.get('ref') for item in children(package, 'uses-license')]
+        if agreements != ['android-sdk-license']:
+            raise SystemExit('SDK_SELECTED_PACKAGE_ADDITIONAL_AGREEMENT')
+        if image and name == image['package']:
+            details = children(package, 'type-details')
+            if len(details) != 1:
+                raise SystemExit('SDK_IMAGE_METADATA_INVALID')
+            api_values = children(details[0], 'api-level')
+            abis = children(details[0], 'abi')
+            tags = [item.text for entry in children(details[0], 'tag') for item in children(entry, 'id')]
+            if len(api_values) != 1 or api_values[0].text != image['platform'] \
+                    or len(abis) != 1 or abis[0].text != 'x86_64' or tags.count(image['tag']) != 1:
+                raise SystemExit('SDK_IMAGE_METADATA_INVALID')
+        selected.add(name)
+    return selected
+
+
+def download(url, destination, maximum=512 * 1024 * 1024):
     with urllib.request.urlopen(url, timeout=90) as response, destination.open('wb') as output:
+        total = 0
         while block := response.read(1024 * 1024):
+            total += len(block)
+            if total > maximum:
+                raise SystemExit('SDK_DOWNLOAD_SIZE_LIMIT')
             output.write(block)
 
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--emulator-api', type=int, choices=[31, 32, 33, 34, 35, 36], default=35)
+    parser.add_argument('--emulator-api', type=int, choices=[31, 32, 33, 34, 35, 36, 37], default=35)
+    parser.add_argument('--emulator-platform', choices=['31', '32', '33', '34', '35', '36', '37.0'])
+    parser.add_argument('--emulator-tag', choices=['default', 'google_apis'])
     args = parser.parse_args()
-    image = f'system-images;android-{args.emulator_api};default;x86_64'
-    packages = BASE_PACKAGES + [image]
+    image = image_selection(args.emulator_api, args.emulator_platform, args.emulator_tag)
+    packages = BASE_PACKAGES + [image['package']]
     metadata_packages = set(packages + ['cmdline-tools;22.0'])
     if os.environ.get('TABBY_ANDROID_SDK_LICENSE_APPROVED_SHA256') != LICENSE_SHA256:
         raise SystemExit('The explicit approval for this exact SDK agreement is required')
@@ -46,25 +115,13 @@ def main():
     downloads.mkdir(exist_ok=True)
     selected = set()
     for name, url in [
-        ('repository.xml', 'https://dl.google.com/android/repository/repository2-3.xml'),
-        ('system-images.xml', 'https://dl.google.com/android/repository/sys-img/android/sys-img2-3.xml'),
+        ('repository.xml', REPOSITORY_URL),
+        ('system-images.xml', image['metadataURL']),
     ]:
         path = downloads / name
-        download(url, path)
+        download(url, path, maximum=8 * 1024 * 1024)
         root = ET.parse(path).getroot()
-        license = next(x for x in root if x.tag.endswith('license') and x.get('id') == 'android-sdk-license')
-        if hashlib.sha256(license.text.encode()).hexdigest() != LICENSE_SHA256:
-            raise SystemExit('The Android SDK agreement changed; no agreement was accepted')
-        for package in root:
-            if not package.tag.endswith('remotePackage') or package.get('path') not in metadata_packages:
-                continue
-            channel = next((x.get('ref') for x in package if x.tag.endswith('channelRef')), 'channel-0')
-            if channel != 'channel-0':
-                continue
-            agreements = [x.get('ref') for x in package if x.tag.endswith('uses-license')]
-            if set(agreements) != {'android-sdk-license'}:
-                raise SystemExit('A selected package requires an additional agreement; installation stopped')
-            selected.add(package.get('path'))
+        selected.update(verified_packages(root, metadata_packages, image))
     if selected != metadata_packages:
         raise SystemExit('The exact stable package set could not be verified')
     archive = downloads / 'commandlinetools-linux-15859902_latest.zip'
@@ -92,10 +149,10 @@ def main():
     ], stdin=subprocess.DEVNULL, check=True)
     for relative in ['platform-tools/adb', 'platforms/android-36/android.jar', 'build-tools/36.0.0/aapt2',
                      'ndk/27.3.13750724/source.properties', 'emulator/emulator',
-                     f'system-images/android-{args.emulator_api}/default/x86_64/system.img']:
+                     image['systemImage']]:
         if not (sdk / relative).is_file():
             raise SystemExit('SDK installation incomplete: ' + relative)
-    print('Approved stable SDK, NDK and AOSP emulator image installed')
+    print(f"Approved stable SDK 36, NDK and {image['package']} installed (runtime API {image['runtimeAPI']})")
 
 
 if __name__ == '__main__':

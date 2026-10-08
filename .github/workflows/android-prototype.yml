@@ -61,6 +61,9 @@ jobs:
       - name: Native emulator startup readiness guards
         if: always() && steps.install.outcome == 'success'
         run: node --test mobile/test/emulator-prepare.test.mjs
+      - name: Stable SDK image selection and agreement rejection tests
+        if: always() && steps.install.outcome == 'success'
+        run: python3 -m unittest discover -s mobile/test -p test_android_sdk_selection.py -v
       - name: Real SSH control channels and tmux server acceptance
         env:
           TABBY_TEST_TMUX: /usr/bin/tmux
@@ -140,18 +143,22 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { api: 31, device: pixel_7, form: phone }
-          - { api: 32, device: pixel_tablet, form: tablet }
-          - { api: 33, device: pixel_7, form: phone }
-          - { api: 34, device: pixel_tablet, form: tablet }
-          - { api: 35, device: pixel_7, form: phone }
-          - { api: 36, device: pixel_7, form: phone }
-          - { api: 36, device: pixel_tablet, form: tablet }
+          - { api: 31, platform: '31', tag: default, device: pixel_7, form: phone }
+          - { api: 32, platform: '32', tag: default, device: pixel_tablet, form: tablet }
+          - { api: 33, platform: '33', tag: default, device: pixel_7, form: phone }
+          - { api: 34, platform: '34', tag: default, device: pixel_tablet, form: tablet }
+          - { api: 35, platform: '35', tag: default, device: pixel_7, form: phone }
+          - { api: 36, platform: '36', tag: default, device: pixel_7, form: phone }
+          - { api: 36, platform: '36', tag: default, device: pixel_tablet, form: tablet }
+          - { api: 37, platform: '37.0', tag: google_apis, device: pixel_7, form: phone }
+          - { api: 37, platform: '37.0', tag: google_apis, device: pixel_tablet, form: tablet }
     env:
       # Explicit user approval: 2026-10-07 09:12 UTC, Android SDK agreement.
       # A changed or additional agreement fails closed; no --licenses command.
       TABBY_ANDROID_SDK_LICENSE_APPROVED_SHA256: 1f8729233617b193fd619213792ae16a41b95d2bbbf525dfe66998252ba68b16
       TABBY_EMULATOR_API: ${{ matrix.api }}
+      TABBY_EMULATOR_PLATFORM: ${{ matrix.platform }}
+      TABBY_EMULATOR_TAG: ${{ matrix.tag }}
       TABBY_EMULATOR_DEVICE: ${{ matrix.device }}
       TABBY_EMULATOR_FORM: ${{ matrix.form }}
       TABBY_TEST_TMUX: /usr/bin/tmux
@@ -173,7 +180,7 @@ jobs:
           distribution: temurin
           java-version: 21
       - name: Install approved stable Android SDK packages
-        run: python3 mobile/scripts/install-android-ci.py --emulator-api "$TABBY_EMULATOR_API"
+        run: python3 mobile/scripts/install-android-ci.py --emulator-api "$TABBY_EMULATOR_API" --emulator-platform "$TABBY_EMULATOR_PLATFORM" --emulator-tag "$TABBY_EMULATOR_TAG"
       - name: Install official real tmux test dependency
         run: |
           sudo apt-get update -qq
@@ -206,7 +213,7 @@ jobs:
           mkdir -p mobile/artifacts
           cp mobile/android/app/build/outputs/apk/debug/app-debug.apk mobile/artifacts/Tabby-Android-Emulator.apk
           python3 mobile/scripts/verify-android-apk.py --expected-abis arm64-v8a,x86_64 --apk mobile/artifacts/Tabby-Android-Emulator.apk --report mobile/artifacts/android-emulator-apk-verification.json
-      - name: Start disposable AOSP emulator with KVM
+      - name: Start disposable non-Play emulator with KVM
         run: |
           node mobile/scripts/prepare-android-emulator.mjs --check-capacity
           test -c /dev/kvm
@@ -214,11 +221,11 @@ jobs:
           sudo setfacl -m "u:${tabby_runner_uid}:rw" /dev/kvm
           mkdir -p "$ANDROID_USER_HOME" "$ANDROID_AVD_HOME"
           tabby_avd_name="tabby-prototype-api${TABBY_EMULATOR_API}"
-          printf 'no\n' | "$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager" create avd --force --name "$tabby_avd_name" --package "system-images;android-${TABBY_EMULATOR_API};default;x86_64" --device "$TABBY_EMULATOR_DEVICE"
+          printf 'no\n' | "$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager" create avd --force --name "$tabby_avd_name" --package "system-images;android-${TABBY_EMULATOR_PLATFORM};${TABBY_EMULATOR_TAG};x86_64" --device "$TABBY_EMULATOR_DEVICE"
           test -f "$ANDROID_AVD_HOME/$tabby_avd_name.avd/config.ini"
           # Let the supported emulator select its software backend. This keeps
           # the actual tablet geometry and all native-focus/ANR gates intact.
-          "$ANDROID_HOME/emulator/emulator" -version
+          "$ANDROID_HOME/emulator/emulator" -no-window -no-audio -version
           "$ANDROID_HOME/emulator/emulator" -avd "$tabby_avd_name" -no-window -no-audio -no-snapshot -no-boot-anim -gpu software -accel on -memory 4096 -cores 4 -port 5554 > "$RUNNER_TEMP/tabby-emulator.log" 2>&1 &
           "$ANDROID_HOME/platform-tools/adb" start-server
           node mobile/scripts/prepare-android-emulator.mjs --serial emulator-5554 --api "$TABBY_EMULATOR_API"

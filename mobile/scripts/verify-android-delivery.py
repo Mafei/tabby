@@ -178,7 +178,7 @@ def verify_runtime(runtime, tested_sha):
     require(type(apks) is dict and apks.get('appSHA256') == tested_sha, 'RUNTIME_APK_MISMATCH')
     android = runtime.get('android')
     require(type(android) is dict and type(android.get('api')) is int
-            and android['api'] in [31, 32, 33, 34, 35, 36] and android.get('abi') == 'x86_64', 'RUNTIME_PLATFORM_INVALID')
+            and android['api'] in [31, 32, 33, 34, 35, 36, 37] and android.get('abi') == 'x86_64', 'RUNTIME_PLATFORM_INVALID')
     compatibility = runtime.get('compatibility')
     require(type(compatibility) is dict and compatibility.get('physicalDevice') is False
             and compatibility.get('requestedForm') in ['phone', 'tablet', 'unspecified']
@@ -195,6 +195,12 @@ def verify_runtime(runtime, tested_sha):
     minimum_dp = min(compatibility['width'], compatibility['height']) * 160 / compatibility['density']
     require(compatibility['requestedForm'] != 'tablet' or minimum_dp >= 600,
             'RUNTIME_TABLET_TOO_SMALL')
+    requested_image = compatibility.get('requestedImage')
+    if android['api'] == 37 or requested_image is not None:
+        require(type(requested_image) is dict and requested_image == {
+            'platform': '37.0' if android['api'] == 37 else str(android['api']),
+            'tag': 'google_apis' if android['api'] == 37 else 'default', 'abi': 'x86_64',
+        }, 'RUNTIME_SELECTED_IMAGE_INVALID')
     return {'api': android['api'], 'abi': android['abi']}
 
 

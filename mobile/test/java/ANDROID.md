@@ -21,7 +21,15 @@ Override with `--app-apk` and `--test-apk`. `ADB`, `ANDROID_HOME` or
 `ANDROID_SDK_ROOT` select the installed adb executable. The root worker/CI
 must install the approved SDK/system image, create and boot the emulator, and
 build Rust Android libraries and the APKs. **This runner does none of those.**
-The CI matrix executes this suite on API 35 and 36. It preserves the accepted
+The CI matrix preserves its seven API 31–36 AOSP rows and adds API 37 phone and
+tablet rows using stable `system-images;android-37.0;google_apis;x86_64`.
+The image package's decimal platform and the device's integer runtime API are
+checked separately; no Play Store, preview or 16 KiB system image is selected.
+Compile/target SDK remains 36. The runtime report records the requested image
+alongside the actual API, ABI, WebView provider and geometry, and requires the
+same complete native 7/WebView 7 plus supplemental native 4/tmux WebView 5 gates.
+API 37 is a compatibility matrix target until its actual CI acceptance passes.
+It preserves the accepted
 dual-ABI APK before building the ARM64 delivery APK and verifies identical
 common payload and ARM64 library bytes. That binding does not mean the ARM64
 Android binary or an OPPO Find N6 has been executed.
