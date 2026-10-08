@@ -71,7 +71,7 @@ jobs:
           node --test scripts/test/linux-git-trust.test.mjs scripts/test/linux-patch-package.test.mjs
           node scripts/prepare-linux-portable.mjs
           # The real cwd wrapper test loads app dependencies installed above.
-          node --test scripts/test/linux-portable.test.mjs
+          node --test scripts/test/linux-portable.test.mjs scripts/test/linux-ansi-color.test.mjs
           node scripts/build-linux.mjs
       - name: Audit actual AppDir and AppImage ELF dependency closures
         env:
