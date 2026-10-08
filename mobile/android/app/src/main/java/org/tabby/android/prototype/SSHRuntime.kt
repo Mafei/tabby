@@ -30,6 +30,7 @@ class SSHRuntime private constructor(val context: Context) {
         @Volatile var approvedHostKey: String? = null,
         @Volatile var pendingPassword: ByteArray? = null,
         @Volatile var verifiedHostKey: String? = null,
+        @Volatile var deviceKeyId: String? = null,
     )
 
 
@@ -37,6 +38,7 @@ class SSHRuntime private constructor(val context: Context) {
     val sessionLock = Any()
     val privateKeys = PrivateKeyVault()
     val secrets = EncryptedSecretStore(context)
+    val deviceKeys = EncryptedDeviceKeyStore(context)
     private val main = Handler(Looper.getMainLooper())
     private val worker = Executors.newSingleThreadScheduledExecutor()
     private var pollTask: java.util.concurrent.ScheduledFuture<*>? = null

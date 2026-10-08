@@ -1185,7 +1185,7 @@ async fn authenticate(
             if key.algorithm().is_rsa() && hash.is_none() {
                 return Err(BridgeError("rsa_sha2_required"));
             }
-            bounded(&shared.cancel, AUTH_TIMEOUT, "auth_timeout", async {
+            let result = bounded(&shared.cancel, AUTH_TIMEOUT, "auth_timeout", async {
                 session
                     .authenticate_publickey(
                         &options.username,
@@ -1194,8 +1194,17 @@ async fn authenticate(
                     .await
                     .map_err(|_| BridgeError("auth_failed"))
             })
-            .await?
-            .success()
+            .await?;
+            if matches!(
+                result,
+                client::AuthResult::Failure {
+                    partial_success: true,
+                    ..
+                }
+            ) {
+                return Err(BridgeError("auth_partial_success"));
+            }
+            result.success()
         }
         AuthMode::KeyboardInteractive => {
             let mut response = bounded(&shared.cancel, AUTH_TIMEOUT, "auth_timeout", async {

@@ -7,9 +7,10 @@ import { TerminalInput, arrowSequence, controlSequence, pasteSequence } from './
 import { TerminalView } from './terminal-view'
 import { secureUUID } from './web-platform'
 import { MobileTmuxController, MobileTmuxError, MobileTmuxRecovery, type TmuxBinding, type TmuxSessionInfo, type TmuxSocket } from './tmux-controller'
+import { enrollmentCommand, verifyDeviceKey, type DeviceKey, type EnrollmentPlan } from './key-enrollment'
 
 export interface SessionEndpoint { host: string, port: number, username: string, authMode: AuthMode, sessionMode: 'direct' | 'tmux' }
-interface AuthFields { password: string, passphrase: string, keyId: string, saved?: boolean, save?: boolean }
+interface AuthFields { password: string, passphrase: string, keyId: string, deviceKeyId?: string, saved?: boolean, save?: boolean }
 interface Prompt { text: string, echo: boolean, response: string }
 let paneGeneration = 0
 const nextGeneration = () => ++paneGeneration
@@ -34,6 +35,7 @@ const nextInputOwner = () => ++inputOwnerGeneration
         <button (click)="changeFont(-1)" [disabled]="fontSize <= 12" aria-label="减小终端字号">A−</button><span>{{fontSize}} sp</span>
         <button (click)="changeFont(1)" [disabled]="fontSize >= 26" aria-label="增大终端字号">A＋</button>
         <button *ngIf="connected" (click)="keysOpen = !keysOpen">全部辅助键</button>
+        <button *ngIf="connected" (click)="openKeyManager()">设置密钥登录</button>
         <button (click)="hideKeys = !hideKeys">{{hideKeys ? '显示辅助键栏' : '隐藏辅助键栏'}}</button>
         <p>后台保持需要可见的连接通知，包含停止全部操作。系统或网络仍可能断开；不会修改省电设置。</p>
         <button [disabled]="backgroundPending || !connected && !backgroundEnabled" (click)="toggleBackground()">{{backgroundEnabled ? '关闭后台保持' : '开启后台保持'}}</button>
@@ -44,7 +46,8 @@ const nextInputOwner = () => ++inputOwnerGeneration
           <div class="endpoint-row"><label>主机<input name="host" [(ngModel)]="host" [readOnly]="!!boundBinding" required autocapitalize="off" spellcheck="false" inputmode="url"></label>
             <label class="port">端口<input name="port" [(ngModel)]="port" [readOnly]="!!boundBinding" type="number" min="1" max="65535" required></label></div>
           <label>用户名<input name="username" [(ngModel)]="username" [readOnly]="!!boundBinding" required autocapitalize="off" spellcheck="false"></label>
-          <label>认证方式<select name="authMode" [(ngModel)]="authMode"><option value="password">密码</option><option value="privateKey">私钥文件</option><option value="keyboardInteractive">交互认证</option></select></label>
+          <label>认证方式<select name="authMode" [(ngModel)]="authMode" (ngModelChange)="refreshDeviceKeys()"><option value="password">密码</option><option value="deviceKey">此设备的密钥</option><option value="privateKey">私钥文件</option><option value="keyboardInteractive">交互认证</option></select></label>
+          <div *ngIf="authMode === 'deviceKey'"><button type="button" (click)="refreshDeviceKeys()">刷新此目标的密钥</button><label>设备密钥<select name="deviceKeyId" [(ngModel)]="deviceKeyId"><option *ngFor="let key of deviceKeyList" [value]="key.id">{{key.public.fingerprint}}</option></select></label><p class="hint">仅使用绑定此主机、账号和已验证主机密钥的密钥；不会退回密码认证。</p></div>
           <label *ngIf="!boundBinding">会话方式<select name="sessionMode" aria-label="会话方式" [(ngModel)]="sessionMode"><option value="direct">直接 SSH</option><option value="tmux">tmux 会话</option></select></label>
           <label *ngIf="authMode === 'password'">密码<input name="password" type="password" [(ngModel)]="password" autocomplete="new-password" (focus)="refreshCredentialStatus()"></label>
           <label *ngIf="authMode === 'password'" class="check-label"><input name="savePassword" type="checkbox" [(ngModel)]="savePassword">认证成功后保存 / 更新密码（默认不保存）</label>
@@ -107,7 +110,18 @@ const nextInputOwner = () => ++inputOwnerGeneration
         [disabled]="!foreground || !connected || selectionMode || !!modal || readOnly"></textarea><button [disabled]="readOnly" (pointerdown)="keepInputFocus($event)" (click)="sendKey('Enter')" aria-label="发送回车">↵</button></label>
       <div *ngIf="notice" class="notice" role="status">{{notice}}</div>
     </main>
-    <section *ngIf="modal && active" class="modal-backdrop" role="dialog" aria-modal="true" [attr.aria-label]="modal === 'hostKey' ? '确认主机密钥' : modal === 'takeover' || modal === 'restoreTakeover' ? '确认接管会话' : 'SSH 交互认证'">
+    <section *ngIf="modal && active" class="modal-backdrop" role="dialog" aria-modal="true" [attr.aria-label]="modal === 'keys' ? '设置密钥登录' : modal === 'hostKey' ? '确认主机密钥' : modal === 'takeover' || modal === 'restoreTakeover' ? '确认接管会话' : 'SSH 交互认证'">
+      <div *ngIf="modal === 'keys'" class="modal-card key-manager">
+        <h2>设置密钥登录</h2><p>{{username}}&#64;{{host}}:{{port}}</p><p>已验证的服务器指纹</p><code>{{hostKeyFingerprint}}</code>
+        <p *ngIf="keyPhase === 'list'">可选在此设备生成 Ed25519 私钥。使用 Android Keystore 加密保管，不备份、不导出。生成后须另外确认才能写入服务器。</p>
+        <button *ngIf="keyPhase === 'list'" [disabled]="keyBusy" (click)="keyPhase = 'generate'">生成新的设备密钥…</button>
+        <div *ngIf="keyPhase === 'generate'"><p>确认生成并加密保存在此设备？这是软件密钥，由 Keystore 加密保护。</p><button [disabled]="keyBusy" (click)="generateKey()">确认生成并保存</button></div>
+        <ul *ngIf="keyPhase === 'list'"><li *ngFor="let key of deviceKeyList"><code>{{key.public.fingerprint}}</code><p>{{key.createdAt | date:'yyyy-MM-dd HH:mm'}} · 此目标</p><p>{{keyStatus(key)}}</p><button [disabled]="keyBusy" (click)="copyPublicKey(key)">复制公钥给管理员</button><button [disabled]="keyBusy" (click)="prepareEnrollment(key)">准备安装公钥…</button><button [disabled]="keyBusy" (click)="verifyKey(key)">仅验证密钥认证</button><button [disabled]="keyBusy" (click)="selectedDeviceKey = key; keyPhase = 'delete'">删除本机密钥…</button></li></ul>
+        <div *ngIf="keyPhase === 'install' && enrollmentPlan && selectedDeviceKey"><p>仅向以下账号和文件追加此公钥。保留已有条目和权限；不使用 sudo、不修改 SSH 服务设置。</p><p>Unix 账号 {{enrollmentPlan.account}} · UID {{enrollmentPlan.uid}}</p><code>{{enrollmentPlan.path}}</code><p>Ed25519 公钥指纹</p><code>{{selectedDeviceKey.public.fingerprint}}</code><button [disabled]="keyBusy" (click)="installKey()">确认向此账号安装公钥</button></div>
+        <div *ngIf="keyPhase === 'delete' && selectedDeviceKey"><code>{{selectedDeviceKey.public.fingerprint}}</code><p>删除会断开使用此密钥的本机连接，并停止相关恢复。服务器的公钥条目仍保留，须由你或管理员另行撤销。</p><button [disabled]="keyBusy" (click)="deleteKey()">确认删除本机密钥</button></div>
+        <p *ngIf="keyBusy" role="status">正在处理，请勿重复操作…</p><p *ngIf="keyNotice" role="status">{{keyNotice}}</p>
+        <button *ngIf="keyPhase !== 'list' && !keyBusy" (click)="keyPhase = 'list'; enrollmentPlan = undefined">返回密钥列表</button><button (click)="closeKeyManager()">{{keyBusy ? '取消操作并关闭' : '关闭密钥设置'}}</button>
+      </div>
       <div class="modal-card" *ngIf="modal === 'hostKey'">
         <h2>首次连接：确认主机密钥</h2><p>{{host}}:{{port}}</p><p>{{hostKeyAlgorithm}}</p><code>{{hostKeyFingerprint}}</code>
         <p>请通过可信渠道核对指纹。确认后会在此设备记录；密钥变化时拒绝连接。</p>
@@ -201,7 +215,10 @@ export class SessionPaneComponent implements AfterViewInit, OnDestroy {
     private keyPointer?: { id: number, x: number, y: number, button: HTMLButtonElement, moved: boolean }
     private suppressKeyClick = false
     private wantedKeyboard = false
-    modal?: 'hostKey' | 'auth' | 'takeover' | 'restoreTakeover'
+    modal?: 'hostKey' | 'auth' | 'takeover' | 'restoreTakeover' | 'keys'
+    deviceKeyList: DeviceKey[] = []; deviceKeyId = ''; selectedDeviceKey?: DeviceKey
+    keyPhase: 'list' | 'generate' | 'install' | 'delete' = 'list'; keyBusy = false; keyNotice = ''; enrollmentPlan?: EnrollmentPlan
+    private keyControl?: MobileTmuxController; private keyOperation?: AbortController; private keyEpoch = 0
     hostKeyFingerprint = ''; hostKeyAlgorithm = ''; prompts: Prompt[] = []
     authInstructions = ''
     private readonly bridge = inject(SSH_BRIDGE)
@@ -247,7 +264,7 @@ export class SessionPaneComponent implements AfterViewInit, OnDestroy {
             try { await this.connect(true); await ready }
             finally { signal.removeEventListener('abort', abort) }
         },
-        credentialsAvailable: () => this.authMode === 'password' && (this.volatilePassword !== undefined || this.savedPassword && this.useSavedPassword),
+        credentialsAvailable: () => this.authMode === 'deviceKey' ? !!this.deviceKeyId : this.authMode === 'password' && (this.volatilePassword !== undefined || this.savedPassword && this.useSavedPassword),
         foreground: () => this.foreground && !this.destroyed && document.visibilityState !== 'hidden',
         hasBinding: () => !!this.boundBinding,
         paused: reason => this.zone.run(() => { this.releaseTransport(false, false); this.notice = this.tmuxMessage(reason) }),
@@ -288,6 +305,11 @@ export class SessionPaneComponent implements AfterViewInit, OnDestroy {
             if (!event.active) { this.backgroundEnabled = event.retained === true; this.suspend(false, event.reason !== 'privateKeyPicker') }
             else { this.foreground = true; void this.loadTypography(); void this.refreshBackgroundState() }
         })).then(handle => { if (this.destroyed) { void handle.remove() } else { this.handles.push(handle) } }).catch(() => {})
+        this.bridge.addListener('deviceKeyDeleted', event => this.zone.run(() => {
+            this.deviceKeyList = this.deviceKeyList.filter(key => key.id !== event.keyId)
+            if (this.deviceKeyId === event.keyId) { this.deviceKeyId = ''; this.recovery.cancel(); if (this.authMode === 'deviceKey' && this.busy) this.disconnect() }
+            this.changes.markForCheck()
+        })).then(handle => { if (this.destroyed) void handle.remove(); else this.handles.push(handle) }).catch(() => {})
         window.visualViewport?.addEventListener('resize', this.viewportListener)
         window.visualViewport?.addEventListener('scroll', this.viewportListener)
         window.addEventListener('resize', this.viewportListener)
@@ -307,6 +329,7 @@ export class SessionPaneComponent implements AfterViewInit, OnDestroy {
             this.notice = '恢复必须使用保存的主机、端口和账号。更换目标请先改选会话。'; return
         }
         if (this.authMode === 'privateKey' && !this.keyId) { this.notice = '请先选择私钥文件。'; return }
+        if (this.authMode === 'deviceKey' && !this.deviceKeyId) { this.notice = '请选择绑定此目标的设备密钥。'; return }
         ++this.pickerToken
         this.host = host; this.username = username
         if (!automatic) { this.recovery.cancel(); this.recovery.reset() }
@@ -316,7 +339,7 @@ export class SessionPaneComponent implements AfterViewInit, OnDestroy {
         this.requestedEndpoint = this.endpointValue
         const password = automatic ? this.volatilePassword ?? '' : this.password
         if (!automatic) { this.volatilePassword = this.sessionMode === 'tmux' && this.authMode === 'password' ? password : undefined }
-        this.auth = { password, passphrase: this.passphrase, keyId: this.keyId, saved: this.useSavedPassword && !password, save: this.savePassword }
+        this.auth = { password, passphrase: this.passphrase, keyId: this.keyId, deviceKeyId: this.authMode === 'deviceKey' ? this.deviceKeyId : undefined, saved: this.useSavedPassword && !password, save: this.savePassword }
         // Consent applies to this authentication only, including a failed one.
         this.savePassword = false
         this.password = ''; this.passphrase = ''
@@ -350,6 +373,7 @@ export class SessionPaneComponent implements AfterViewInit, OnDestroy {
             return
         }
         if (event.connectionId !== this.connectionId) { return }
+        if (this.keyControl?.onEvent(event)) return
         if (this.tmux?.onEvent(event)) { return }
         if (event.type === 'credentialStatus') { this.notice = '密码保存失败。连接仍可使用，请手动重试保存。'; return }
         if (event.type === 'data' && event.data) {
@@ -366,6 +390,7 @@ export class SessionPaneComponent implements AfterViewInit, OnDestroy {
         } else if (event.type === 'hostKey') {
             if (event.status === 'changed') { this.fail('主机密钥已变化，连接已拒绝。请先通过可信渠道核实。'); return }
             this.hostKeyBlob = event.keyBase64 ?? ''
+            this.hostKeyFingerprint = event.fingerprint ?? ''; this.hostKeyAlgorithm = event.algorithm ?? ''
             if (this.boundBinding && this.hostKeyBlob !== this.boundBinding.hostKey) { this.pauseTmux('endpoint_changed'); return }
             if (this.automaticRestore && event.status !== 'known') { this.pauseTmux('host_verification_required'); return }
             if (event.status === 'known') { this.hostVerified = true; return }
@@ -387,7 +412,7 @@ export class SessionPaneComponent implements AfterViewInit, OnDestroy {
                 const auth = this.auth; this.auth = undefined
                 if (!auth) { this.fail('认证已取消或凭据已释放。请重新连接。'); return }
                 void this.command({ type: 'authResponse', requestId: event.requestId!,
-                    ...(event.mode === 'privateKey' ? { keyId: auth.keyId, passphrase: auth.passphrase } : { ...(auth.saved ? { useSavedPassword: true } : { password: auth.password }), ...(auth.save ? { savePassword: true } : {}) }) })
+                    ...(event.mode === 'privateKey' ? auth.deviceKeyId ? { deviceKeyId: auth.deviceKeyId } : { keyId: auth.keyId, passphrase: auth.passphrase } : { ...(auth.saved ? { useSavedPassword: true } : { password: auth.password }), ...(auth.save ? { savePassword: true } : {}) }) })
             }
         } else if (event.type === 'state') {
             if (event.state === 'authenticated') {
@@ -439,6 +464,8 @@ export class SessionPaneComponent implements AfterViewInit, OnDestroy {
     }
 
     private releaseTransport(invalidatePicker: boolean, keepPassword: boolean, error: Error = new MobileTmuxError('exec_cancelled')): void {
+        this.closeKeyManager()
+        this.keyControl?.dispose(); this.keyControl = undefined
         this.actionsOpen = false; this.keysOpen = false; this.keyCancel()
         if (invalidatePicker) {
             ++this.pickerToken
@@ -476,6 +503,116 @@ export class SessionPaneComponent implements AfterViewInit, OnDestroy {
 
     private fail(message: string): void { this.zone.run(() => { this.disconnect(); this.notice = message }) }
     private setNotice(message: string): void { this.zone.run(() => { this.notice = message }) }
+
+    async refreshDeviceKeys(): Promise<void> {
+        const target = { host: this.host.trim(), port: Number(this.port), username: this.username.trim() }
+        try {
+            const result = await this.bridge.deviceKeys(target)
+            if (this.host.trim() !== target.host || Number(this.port) !== target.port || this.username.trim() !== target.username) return
+            this.deviceKeyList = result.keys
+            if (!result.keys.some(key => key.id === this.deviceKeyId)) this.deviceKeyId = result.keys[0]?.id ?? ''
+        } catch { this.deviceKeyList = []; this.deviceKeyId = '' }
+        this.changes.markForCheck()
+    }
+    async openKeyManager(): Promise<void> {
+        if (!this.connected || !this.foreground || !this.connectionId || !this.hostVerified) return
+        this.actionsOpen = false; this.modal = 'keys'; this.keyPhase = 'list'; this.keyNotice = ''
+        this.input?.cancel(); this.inputElement?.nativeElement.blur(); this.clearModifiers()
+        await this.refreshDeviceKeys()
+    }
+    closeKeyManager(): void {
+        if (this.keyBusy && this.keyPhase === 'install') this.notice = '安装操作已取消或连接关闭，服务器可能已添加公钥。不会自动重试或删除；请重新检查并验证。'
+        ++this.keyEpoch; this.keyOperation?.abort(); this.keyOperation = undefined
+        this.keyBusy = false; this.enrollmentPlan = undefined; this.selectedDeviceKey = undefined
+        if (this.modal === 'keys') this.modal = undefined
+    }
+    private keyScope(): { connectionId: string, generation: number, ownerId: string } {
+        if (!this.connectionId || !this.connected || !this.foreground || this.modal !== 'keys') throw new Error('key_target_unavailable')
+        return { connectionId: this.connectionId, generation: this.generation, ownerId: this.tabID }
+    }
+    private async keyAction(action: (signal: AbortSignal) => Promise<void>, failure: string): Promise<void> {
+        if (this.keyBusy || this.modal !== 'keys' || !this.foreground) return
+        const epoch = ++this.keyEpoch; const operation = this.keyOperation = new AbortController()
+        this.keyBusy = true; this.keyNotice = ''
+        try { await action(operation.signal) }
+        catch { if (epoch === this.keyEpoch) this.keyNotice = failure }
+        finally { if (epoch === this.keyEpoch) { this.keyBusy = false; this.keyOperation = undefined; this.changes.markForCheck() } }
+    }
+    private async publicKey(key: DeviceKey): Promise<DeviceKey> {
+        return (await this.bridge.deviceKeyPublic({ ...this.keyScope(), keyId: key.id })).key
+    }
+    keyStatus(key: DeviceKey): string {
+        return ({ local_only: '仅本机生成', installed: '上次已观察到公钥条目', verified: '上次独立认证通过', uncertain: '上次安装结果不确定' })[key.enrollment ?? 'local_only'] + '；当前服务器状态须重新验证'
+    }
+    private async rememberKeyStatus(key: DeviceKey, status: 'installed' | 'verified' | 'uncertain'): Promise<void> {
+        try {
+            const result = await this.bridge.markDeviceKey({ ...this.keyScope(), keyId: key.id, status })
+            this.deviceKeyList = this.deviceKeyList.map(item => item.id === key.id ? result.key : item)
+        } catch { this.keyNotice += ' 上次状态未能保存在本机。' }
+    }
+    async generateKey(): Promise<void> {
+        if (this.keyPhase !== 'generate') return
+        await this.keyAction(async signal => {
+            const result = await this.bridge.generateDeviceKey({ ...this.keyScope(), confirmed: true })
+            if (signal.aborted) return
+            this.deviceKeyList = [...this.deviceKeyList.filter(key => key.id !== result.key.id), result.key]; this.deviceKeyId = result.key.id
+            this.keyPhase = 'list'; this.keyNotice = '设备密钥已加密保存。尚未写入服务器。'
+        }, '密钥生成或加密保存失败；不会使用未保存的私钥。')
+    }
+    async copyPublicKey(key: DeviceKey): Promise<void> {
+        await this.keyAction(async signal => { const validated = await this.publicKey(key); if (!signal.aborted) { await this.bridge.writeClipboard({ text: validated.public.publicKey }); this.keyNotice = '已复制公钥。私钥留在此设备。' } }, '无法验证或复制此公钥。')
+    }
+    private control(): MobileTmuxController {
+        const scope = this.keyScope()
+        if (this.tmux) return this.tmux
+        return this.keyControl ??= new MobileTmuxController(this.bridge, { ...scope, host: this.host, port: Number(this.port), account: this.username, hostKey: this.hostKeyBlob })
+    }
+    async prepareEnrollment(key: DeviceKey): Promise<void> {
+        await this.keyAction(async signal => {
+            const validated = await this.publicKey(key)
+            if (signal.aborted) return
+            const result = await this.control().exec(enrollmentCommand(validated.public.publicKey), signal)
+            if (signal.aborted) return
+            if (result.status !== 0) throw new Error('preflight_failed')
+            const plan: EnrollmentPlan = JSON.parse(result.output)
+            if (!Number.isSafeInteger(plan.uid) || plan.uid <= 0 || typeof plan.account !== 'string' || typeof plan.home !== 'string' || !plan.home.startsWith('/') || plan.path !== `${plan.home}/.ssh/authorized_keys` || !/^[a-f0-9]{64}$/u.test(plan.token)) throw new Error('invalid_preflight')
+            this.enrollmentPlan = plan; this.selectedDeviceKey = validated; this.keyPhase = 'install'
+        }, '服务器环境或目标路径无法安全验证。需要普通用户、Linux、Python 3 和 libacl；未安装公钥。可复制公钥给管理员。')
+    }
+    async installKey(): Promise<void> {
+        const key = this.selectedDeviceKey; const plan = this.enrollmentPlan
+        if (this.keyPhase !== 'install' || !key || !plan) return
+        await this.keyAction(async signal => {
+            const validated = await this.publicKey(key)
+            if (signal.aborted) return
+            const result = await this.control().exec(enrollmentCommand(validated.public.publicKey, plan), signal)
+            if (signal.aborted) return
+            if (result.status !== 0) throw new Error('installation_failed')
+            const status = JSON.parse(result.output).status
+            if (status !== 'added' && status !== 'already_present') throw new Error('installation_uncertain')
+            this.keyNotice = status === 'already_present' ? '此公钥已存在，保留原有选项与限制。正在独立验证…' : '公钥已追加。正在独立验证…'
+            this.enrollmentPlan = undefined; this.keyPhase = 'list'; this.changes.markForCheck()
+            await this.rememberKeyStatus(validated, 'installed')
+            try {
+                await verifyDeviceKey(this.bridge, validated, signal)
+                if (!signal.aborted) { this.keyNotice = '新的独立连接已通过仅公钥认证。终端、强制命令或 MFA 策略须另行确认；当前终端继续可用。'; await this.rememberKeyStatus(validated, 'verified') }
+            } catch {
+                if (!signal.aborted) this.keyNotice = '服务器已有此公钥，但独立公钥认证未通过或仍需额外认证。请检查 SSH/MFA/强制命令策略；保留密钥与当前连接，不自动回滚。'
+            }
+        }, '安装未确认完成，服务器可能已添加公钥。路径或权限变化会停止；不会自动重试、覆盖或删除。请检查现有条目并独立验证。')
+    }
+    async verifyKey(key: DeviceKey): Promise<void> {
+        await this.keyAction(async signal => {
+            const validated = await this.publicKey(key); if (signal.aborted) return
+            await verifyDeviceKey(this.bridge, validated, signal)
+            if (!signal.aborted) { this.keyNotice = '新的独立连接已通过仅公钥认证。终端及强制命令策略尚未测试。'; await this.rememberKeyStatus(validated, 'verified') }
+        }, '独立公钥认证未通过、主机身份变化或仍需额外认证。密钥和当前连接保留。')
+    }
+    async deleteKey(): Promise<void> {
+        const key = this.selectedDeviceKey
+        if (this.keyPhase !== 'delete' || !key) return
+        await this.keyAction(async signal => { await this.bridge.deleteDeviceKey({ keyId: key.id }); if (!signal.aborted) { this.deviceKeyList = this.deviceKeyList.filter(item => item.id !== key.id); if (this.deviceKeyId === key.id) { this.deviceKeyId = ''; this.recovery.cancel() }; this.selectedDeviceKey = undefined; this.keyPhase = 'list'; this.keyNotice = '本机密钥已删除。服务器条目仍保留。' } }, '无法确认本机密钥删除，请重试检查。')
+    }
 
     private authenticated(event: SSHEvent): void {
         const requested = this.requestedEndpoint; const endpoint = event.nativeEndpoint
@@ -709,7 +846,7 @@ export class SessionPaneComponent implements AfterViewInit, OnDestroy {
     }
 
     dismissOverlay(): boolean {
-        if (this.modal) { if (this.modal === 'takeover' || this.modal === 'restoreTakeover') this.cancelTakeover(); else this.disconnect(); return true }
+        if (this.modal) { if (this.modal === 'keys') this.closeKeyManager(); else if (this.modal === 'takeover' || this.modal === 'restoreTakeover') this.cancelTakeover(); else this.disconnect(); return true }
         if (this.keysOpen) { this.keysOpen = false; return true }
         if (this.actionsOpen) { this.actionsOpen = false; return true }
         if (this.selectionMode) { this.toggleSelection(); return true }

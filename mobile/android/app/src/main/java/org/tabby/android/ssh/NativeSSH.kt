@@ -8,4 +8,7 @@ object NativeSSH {
     external fun command(id: Long, commandJson: String)
     external fun poll(id: Long): String
     external fun destroy(id: Long)
+    /** Native callers only; JavaScript receives public metadata, never these bytes. */
+    external fun generateEd25519(): ByteArray
+    external fun describeDeviceKey(privateKey: ByteArray): String
 }

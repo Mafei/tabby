@@ -1,6 +1,7 @@
 import { mkdir, writeFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import { createRequire } from 'node:module'
+import { createHash } from 'node:crypto'
 import { systemUIActionPoint } from './android-system-ui.mjs'
 import { APP, RUNNER, DONE, READY, INPUT, METADATA, check, until, pause, TestFailure, instrumentationResult, observeUntil, observeReadUntil } from './test-android-utils.mjs'
 
@@ -133,6 +134,11 @@ export async function webviewAcceptance (android, fixture) {
         const bytes = Buffer.from(encoded.replace(/\s/g, ''), 'base64')
         check(bytes.length > 8 && bytes.subarray(0, 8).equals(Buffer.from([137,80,78,71,13,10,26,10])), 'ANDROID_SCREENSHOT_INVALID')
         await writeFile(directory + name + '.png', bytes)
+        check(bytes.length >= 24 && bytes.subarray(12, 16).toString('ascii') === 'IHDR', 'ANDROID_SCREENSHOT_IHDR_INVALID')
+        await writeFile(directory + name + '.json', JSON.stringify({ name: name + '.png',
+            capturedAtUTC: new Date().toISOString(), width: bytes.readUInt32BE(16), height: bytes.readUInt32BE(20),
+            bytes: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex'),
+            source: 'actual adb screencap on the selected cloud Android emulator; synthetic account only' }) + '\n')
     }
     const verify = label => { passed.push(label); console.log(`PASS Android WebView: ${label}.`) }
     async function step (name, action) {
@@ -689,6 +695,7 @@ export async function webviewAcceptance (android, fixture) {
         // A wrapping select label includes its option text in the accessible
         // name. Match the actual form control instead of an exact short label.
         await step('form-auth-mode', () => page.locator('select[name="authMode"]').selectOption(mode))
+        if (mode === 'deviceKey') await until(async () => (await page.locator('select[name="deviceKeyId"] option').count()) > 0, 'ANDROID_DEVICE_KEY_FORM_EMPTY')
         if (mode === 'password') {
             await step('form-password', () => page.getByLabel('密码', { exact: true }).fill(credential === 'saved' ? '' : fixture.metadata.password))
             if (credential === 'save') await nativeTouch(page.getByLabel('认证成功后保存 / 更新密码（默认不保存）'))
@@ -1238,6 +1245,45 @@ export async function webviewAcceptance (android, fixture) {
         check((await plugin('credentialStatus', { host: '127.0.0.1', port: fixture.metadata.port, username: fixture.metadata.username })).saved === false, 'ANDROID_PASSWORD_NOT_DELETED')
         await endHarness()
         verify('optional native Keystore password save, secret-free saved login and deletion')
+
+        stage = 'device-key-enrollment'
+        await beginHarness()
+        await connect(true)
+        await nativeTouch(page.getByRole('button', { name: '设置密钥登录', exact: true }))
+        const keyDialog = page.getByRole('dialog', { name: '设置密钥登录', exact: true })
+        const keyTarget = { host: '127.0.0.1', port: fixture.metadata.port, username: fixture.metadata.username }
+        check((await plugin('deviceKeys', keyTarget)).keys.length === 0, 'ANDROID_KEY_GENERATED_WITHOUT_CONSENT')
+        const execBefore = fixture.stats().execRequests
+        await nativeTouch(keyDialog.getByRole('button', { name: '生成新的设备密钥…', exact: true }))
+        check((await plugin('deviceKeys', keyTarget)).keys.length === 0, 'ANDROID_KEY_GENERATED_BEFORE_CONFIRMATION')
+        await nativeTouch(keyDialog.getByRole('button', { name: '确认生成并保存', exact: true }))
+        await until(async () => (await plugin('deviceKeys', keyTarget)).keys.length === 1, 'ANDROID_DEVICE_KEY_NOT_STORED')
+        check(fixture.stats().execRequests === execBefore, 'ANDROID_KEY_GENERATION_WROTE_SERVER')
+        const generatedKey = (await plugin('deviceKeys', keyTarget)).keys[0]
+        check(generatedKey.public.algorithm === 'ssh-ed25519' && !JSON.stringify(generatedKey).includes('PRIVATE KEY'), 'ANDROID_DEVICE_KEY_SECRET_EXPOSED')
+        await capture('device-key-manager')
+        await nativeTouch(keyDialog.getByRole('button', { name: '准备安装公钥…', exact: true }))
+        await until(async () => await keyDialog.getByRole('button', { name: '确认向此账号安装公钥', exact: true }).isVisible(), 'ANDROID_KEY_INSTALL_CONFIRMATION_MISSING')
+        check(fixture.stats().execRequests === execBefore + 1, 'ANDROID_KEY_PREFLIGHT_WAS_NOT_SEPARATE')
+        await capture('device-key-target-confirmation')
+        await nativeTouch(keyDialog.getByRole('button', { name: '确认向此账号安装公钥', exact: true }))
+        await until(async () => (await keyDialog.textContent())?.includes('新的独立连接已通过仅公钥认证'), 'ANDROID_INSTALLED_KEY_NOT_VERIFIED')
+        await capture('device-key-verified')
+        await nativeTouch(keyDialog.getByRole('button', { name: '关闭密钥设置', exact: true }))
+        await sendLine("printf '%s%s\\n' 'W_KEY_' 'ORIGINAL_USABLE'")
+        await output('W_KEY_ORIGINAL_USABLE')
+        await disconnect()
+        await connect(true, 'deviceKey')
+        await sendLine("printf '%s%s\\n' 'W_KEY_' 'PERSISTED_LOGIN'")
+        await output('W_KEY_PERSISTED_LOGIN')
+        await nativeTouch(page.getByRole('button', { name: '设置密钥登录', exact: true }))
+        await nativeTouch(keyDialog.getByRole('button', { name: '删除本机密钥…', exact: true }))
+        check((await plugin('deviceKeys', keyTarget)).keys.length === 1, 'ANDROID_KEY_DELETED_BEFORE_CONFIRMATION')
+        await nativeTouch(keyDialog.getByRole('button', { name: '确认删除本机密钥', exact: true }))
+        await until(async () => (await plugin('deviceKeys', keyTarget)).keys.length === 0, 'ANDROID_DEVICE_KEY_NOT_DELETED')
+        await quiet()
+        await endHarness()
+        verify('separate native-touch key generation and target-confirmed enrollment, public-only verification and local deletion')
 
         stage = 'durable-pin-fresh-process'
         await step('durable-first-process-force-stop', () => android.shell(`am force-stop ${APP}`))

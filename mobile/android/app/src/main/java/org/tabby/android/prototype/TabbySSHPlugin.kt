@@ -48,6 +48,7 @@ class TabbySSHPlugin : Plugin() {
     private val sessionLock get() = runtime.sessionLock
     private val keyboardLease = KeyboardLease()
     private val privateKeys get() = runtime.privateKeys
+    private val keyWorker = Executors.newSingleThreadExecutor()
     @Volatile private var foreground = true
     @Volatile private var destroyed = false
     @Volatile private var notificationPermissionPending = false
@@ -110,7 +111,7 @@ class TabbySSHPlugin : Plugin() {
             require(host.isNotEmpty() && host.length <= 255 && !host.any { it.isWhitespace() || it == '\u0000' || it == '/' })
             require(username.isNotEmpty() && username.length <= 256 && !username.contains('\u0000'))
             require(port in 1..65535 && generation in 0..9_007_199_254_740_991L)
-            require(authMode in setOf("password", "privateKey", "keyboardInteractive"))
+            require(authMode in setOf("password", "privateKey", "deviceKey", "keyboardInteractive"))
             val cols = if (call.data.has("cols")) BridgeNumbers.integer(call.data.opt("cols"), 1, 1000).toInt() else 80
             val rows = if (call.data.has("rows")) BridgeNumbers.integer(call.data.opt("rows"), 1, 1000).toInt() else 24
             require(cols in 1..1000 && rows in 1..1000)
@@ -118,7 +119,7 @@ class TabbySSHPlugin : Plugin() {
             // or credentials in start, even if a modified caller adds fields.
             val endpoint = "${host.lowercase(Locale.ROOT)}\u0000$port"
             val options = JSONObject().put("host", host).put("port", port).put("username", username)
-                .put("generation", generation).put("authMode", authMode)
+                .put("generation", generation).put("authMode", if (authMode == "deviceKey") "privateKey" else authMode)
                 .put("cols", cols).put("rows", rows).put("term", "xterm-256color")
                 .put("deferTerminal", deferTerminal)
             runtime.knownHost(endpoint)?.let { options.put("expectedHostKey", it) }
@@ -184,6 +185,14 @@ class TabbySSHPlugin : Plugin() {
                     }
                     if (input.has("keyId")) {
                         privateKeys.consumeText(input.getString("keyId") ?: error("key")) { output.put("privateKey", it) }
+                    }
+                    if (input.has("deviceKeyId")) {
+                        require(!input.has("keyId") && !input.has("password") && !input.has("passphrase") && !input.has("responses") && !input.optBoolean("useSavedPassword", false))
+                        val keyId = input.getString("deviceKeyId")
+                        runtime.deviceKeys.use(keyId, session.host, session.port, session.username, session.verifiedHostKey ?: error("unverified")) { bytes, _ ->
+                            output.put("privateKey", String(bytes, Charsets.UTF_8))
+                        }
+                        session.deviceKeyId = keyId
                     }
                     if (input.optBoolean("useSavedPassword", false)) {
                         require(!input.has("password"))
@@ -302,6 +311,7 @@ class TabbySSHPlugin : Plugin() {
     }
 
     override fun handleOnDestroy() {
+        keyWorker.shutdownNow()
         destroyed = true
         foreground = false
         keyboardLease.clear()
@@ -378,6 +388,69 @@ class TabbySSHPlugin : Plugin() {
     fun credentialStatus(call: PluginCall) {
         try { call.resolve(JSObject().put("saved", runtime.secrets.has(call.getString("host")!!, call.getInt("port")!!, call.getString("username")!!))) }
         catch (_: Throwable) { call.reject("Cannot read credential status", "CREDENTIAL_UNAVAILABLE") }
+    }
+    private fun keySession(call: PluginCall): SSHRuntime.Session {
+        require(foreground && !destroyed)
+        val session = sessions[call.getString("connectionId")?.toLongOrNull() ?: error("id")] ?: error("closed")
+        require(session.gate.isActive() && session.operations.isReady() && session.verifiedHostKey != null)
+        require(BridgeNumbers.generation(call.data.opt("generation")) == session.gate.generation && call.getString("ownerId") == session.ownerId)
+        return session
+    }
+    @PluginMethod
+    fun generateDeviceKey(call: PluginCall) {
+        try {
+            require(call.getBoolean("confirmed", false) == true)
+            val session = keySession(call)
+            keyWorker.execute {
+                try {
+                    val metadata = synchronized(sessionLock) {
+                        require(keySession(call) === session)
+                        runtime.deviceKeys.create(session.host, session.port, session.username, session.verifiedHostKey!!)
+                    }
+                    call.resolve(JSObject().put("key", metadata))
+                } catch (_: Throwable) { call.reject("Cannot generate or securely store this key", "DEVICE_KEY_UNAVAILABLE") }
+            }
+        } catch (_: Throwable) { call.reject("A verified ready connection is required", "DEVICE_KEY_UNAVAILABLE") }
+    }
+    @PluginMethod
+    fun deviceKeys(call: PluginCall) {
+        try {
+            require(foreground && !destroyed)
+            val host = call.getString("host")!!; val port = call.getInt("port")!!; val user = call.getString("username")!!
+            val pin = runtime.knownHost("${host.lowercase(Locale.ROOT)}\u0000$port")
+            val keys = if (pin == null) JSONArray() else runtime.deviceKeys.list(host, port, user, pin)
+            call.resolve(JSObject().put("keys", keys))
+        } catch (_: Throwable) { call.reject("Cannot read device keys", "DEVICE_KEY_UNAVAILABLE") }
+    }
+    @PluginMethod
+    fun deviceKeyPublic(call: PluginCall) {
+        try {
+            val session = keySession(call)
+            runtime.deviceKeys.use(call.getString("keyId")!!, session.host, session.port, session.username, session.verifiedHostKey!!) { _, metadata ->
+                call.resolve(JSObject().put("key", metadata))
+            }
+        } catch (_: Throwable) { call.reject("Device key or verified target is unavailable", "DEVICE_KEY_UNAVAILABLE") }
+    }
+    @PluginMethod
+    fun markDeviceKey(call: PluginCall) {
+        try {
+            val session = keySession(call)
+            val metadata = runtime.deviceKeys.mark(call.getString("keyId")!!, session.host, session.port, session.username, session.verifiedHostKey!!, call.getString("status")!!)
+            call.resolve(JSObject().put("key", metadata))
+        } catch (_: Throwable) { call.reject("Cannot save the last observed key status", "DEVICE_KEY_UNAVAILABLE") }
+    }
+    @PluginMethod
+    fun deleteDeviceKey(call: PluginCall) {
+        try {
+            require(foreground && !destroyed)
+            val id = call.getString("keyId")!!
+            synchronized(sessionLock) {
+                sessions.values.filter { it.deviceKeyId == id }.forEach { closeSession(it, "device_key_deleted") }
+                runtime.deviceKeys.delete(id)
+            }
+            notifyListeners("deviceKeyDeleted", JSObject().put("keyId", id))
+            call.resolve()
+        } catch (_: Throwable) { call.reject("Cannot delete device key", "DEVICE_KEY_UNAVAILABLE") }
     }
     @PluginMethod
     fun deletePassword(call: PluginCall) {

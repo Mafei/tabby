@@ -15,7 +15,7 @@ from web_security import inspect_web_assets, bind_aot_assets, WebSecurityError
 
 APP = 'org.tabby.android.prototype'
 PAGE = 16384
-EXPORTS = ['start', 'command', 'poll', 'destroy']
+EXPORTS = ['start', 'command', 'poll', 'destroy', 'generateEd25519', 'describeDeviceKey']
 ABI_MACHINES = {'arm64-v8a': 183, 'x86_64': 62}
 
 

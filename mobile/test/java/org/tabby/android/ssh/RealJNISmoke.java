@@ -273,6 +273,30 @@ public final class RealJNISmoke {
         }
         pass("plain and encrypted generated private-key authentication");
 
+        byte[] generatedDeviceKey = NATIVE.generateEd25519();
+        Path enrolled = Path.of(fixture.getString("privateKeyFile")).getParent().resolve(".ssh/authorized_keys");
+        try {
+            JSONObject description = new JSONObject(NATIVE.describeDeviceKey(generatedDeviceKey));
+            check(description.length() == 3 && "ssh-ed25519".equals(description.getString("algorithm")) && !description.toString().contains("PRIVATE KEY"), "Device key description must be public only");
+            Files.createDirectories(enrolled.getParent());
+            Files.writeString(enrolled, description.getString("publicKey") + "\n", StandardCharsets.UTF_8);
+            try (Connection c = new Connection(15, "privateKey", true)) {
+                JSONObject auth = c.auth();
+                c.command(json("type", "authResponse", "requestId", auth.getLong("requestId"), "privateKey", new String(generatedDeviceKey, StandardCharsets.UTF_8)));
+                c.ready();
+            }
+            quiet();
+            control(json("type", "configure", "publickeyPartialSuccess", true));
+            try (Connection c = new Connection(16, "privateKey", true)) {
+                JSONObject auth = c.auth();
+                c.command(json("type", "authResponse", "requestId", auth.getLong("requestId"), "privateKey", new String(generatedDeviceKey, StandardCharsets.UTF_8)));
+                c.ended("auth_partial_success");
+            }
+            quiet();
+            control(json("type", "configure", "publickeyPartialSuccess", false));
+        } finally { java.util.Arrays.fill(generatedDeviceKey, (byte) 0); Files.deleteIfExists(enrolled); }
+        pass("actual JNI Ed25519 generation authenticates and distinguishes additional-auth requirements");
+
         control(json("type", "configure", "authMode", "keyboard-interactive"));
         long answers = stats().getLong("authAnswers");
         try (Connection c = new Connection(20, "keyboardInteractive", true)) {

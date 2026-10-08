@@ -16,8 +16,8 @@ android {
         applicationId = 'org.tabby.android.prototype'
         minSdk = rootProject.ext.minSdkVersion
         targetSdk = rootProject.ext.targetSdkVersion
-        versionCode = 2
-        versionName = '0.2.0-mobile-candidate'
+        versionCode = 3
+        versionName = '0.3.0-key-candidate'
         testInstrumentationRunner = 'androidx.test.runner.AndroidJUnitRunner'
         ndk { abiFilters.addAll(selectedAbis) }
     }

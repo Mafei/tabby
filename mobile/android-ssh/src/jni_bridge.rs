@@ -1,8 +1,11 @@
 use jni::JNIEnv;
-use jni::objects::{JClass, JString};
-use jni::sys::{jlong, jstring};
+use jni::objects::{JByteArray, JClass, JString};
+use jni::sys::{jbyteArray, jlong, jstring};
 
-use crate::{BridgeError, command_json, destroy, poll_json, start_json};
+use crate::{
+    BridgeError, command_json, describe_device_key, destroy, generate_ed25519, poll_json,
+    start_json,
+};
 
 fn guarded<T>(operation: impl FnOnce() -> Result<T, BridgeError>) -> Result<T, BridgeError> {
     crate::panic_guard::install_safe_hook();
@@ -18,6 +21,60 @@ fn read_string(env: &mut JNIEnv<'_>, value: JString<'_>) -> Result<String, Bridg
 
 fn throw(env: &mut JNIEnv<'_>, error: BridgeError) {
     let _ = env.throw_new("java/lang/IllegalStateException", error.0);
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_org_tabby_android_ssh_NativeSSH_generateEd25519(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+) -> jbyteArray {
+    match guarded(generate_ed25519) {
+        Ok(bytes) => match env.byte_array_from_slice(&bytes) {
+            Ok(value) => value.into_raw(),
+            Err(_) => {
+                throw(&mut env, BridgeError("jni_allocation_failed"));
+                std::ptr::null_mut()
+            }
+        },
+        Err(error) => {
+            throw(&mut env, error);
+            std::ptr::null_mut()
+        }
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_org_tabby_android_ssh_NativeSSH_describeDeviceKey(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    bytes: JByteArray<'_>,
+) -> jstring {
+    let result = guarded(|| {
+        let size = env
+            .get_array_length(&bytes)
+            .map_err(|_| BridgeError("invalid_device_key"))?;
+        if size <= 0 || size > 65536 {
+            return Err(BridgeError("invalid_device_key"));
+        }
+        let secret = zeroize::Zeroizing::new(
+            env.convert_byte_array(&bytes)
+                .map_err(|_| BridgeError("invalid_device_key"))?,
+        );
+        describe_device_key(&secret)
+    });
+    match result {
+        Ok(json) => match env.new_string(json) {
+            Ok(value) => value.into_raw(),
+            Err(_) => {
+                throw(&mut env, BridgeError("jni_allocation_failed"));
+                std::ptr::null_mut()
+            }
+        },
+        Err(error) => {
+            throw(&mut env, error);
+            std::ptr::null_mut()
+        }
+    }
 }
 
 #[unsafe(no_mangle)]
