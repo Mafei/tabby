@@ -275,8 +275,8 @@ export async function webviewAcceptance (android, fixture) {
     async function quiet () {
         await until(() => ['clients', 'sessions', 'ptys', 'timers', 'pendingAuth'].every(key => fixture.stats()[key] === 0), 'ANDROID_FIXTURE_RESOURCES_NOT_RELEASED')
     }
-    async function nativeTouch (locator, durationMs = 100) {
-        const deadline = Date.now() + 10000
+    async function nativeTouch (locator, durationMs = 100, enclosingDeadline = Infinity) {
+        const deadline = Math.min(Date.now() + 10000, enclosingDeadline)
         const inTime = () => check(Date.now() < deadline, 'ANDROID_TOUCH_TARGET_DID_NOT_STABILIZE')
         await page.evaluate(() => {
             window.__tabbyCloudObservation.nativeTouchHitTarget = false
@@ -285,7 +285,7 @@ export async function webviewAcceptance (android, fixture) {
         inTime()
         // Prepare visibility only. Activation remains the one real native
         // MotionEvent below; a viewport-inside box can still be panel-clipped.
-        await locator.scrollIntoViewIfNeeded({ timeout: 3000 })
+        await locator.scrollIntoViewIfNeeded({ timeout: Math.max(1, Math.min(3000, deadline - Date.now())) })
         inTime()
         let box
         let previous
@@ -329,9 +329,12 @@ export async function webviewAcceptance (android, fixture) {
         return page.evaluate(async ({ method, options }) => window.Capacitor.Plugins.TabbySSH[method](options), { method, options })
     }
     async function clipboardOverlayCleared (phase) {
-        // Clipboard preview belongs to SystemUI. Wait for its natural timeout
-        // before app-owned injection; do not change permissions or retry touch.
+        // A normal outside touch dismisses SystemUI's clipboard preview. Touch
+        // only the passive app status label, through the existing native input
+        // guards, once within this phase's unchanged budget. Still observe real
+        // disappearance before activating any app command.
         let observed = false
+        let dismissalSent = false
         let clearSince
         const deadline = Date.now() + 10000
         const inTime = () => check(Date.now() < deadline, 'ANDROID_CLIPBOARD_OVERLAY_DID_NOT_DISAPPEAR')
@@ -344,7 +347,17 @@ export async function webviewAcceptance (android, fixture) {
             check(windows.appWindowFound && windows.appWindowVisible, 'ANDROID_CLIPBOARD_APP_WINDOW_UNAVAILABLE')
             // A missing mCurrentFocus field is represented as false by the
             // windows parser; it does not establish that our app lost focus.
-            if (windows.clipboardOverlayVisible) { observed = true; clearSince = undefined }
+            if (windows.clipboardOverlayVisible) {
+                observed = true; clearSince = undefined
+                if (!dismissalSent) {
+                    const target = page.locator('header .status')
+                    check(await target.count() === 1, 'ANDROID_CLIPBOARD_DISMISS_TARGET_AMBIGUOUS')
+                    inTime()
+                    dismissalSent = true
+                    await nativeTouch(target, 100, deadline)
+                    inTime()
+                }
+            }
             else if (clearSince === undefined) { clearSince = Date.now() }
             const cleared = clearSince !== undefined && Date.now() - clearSince >= 350
             await page.evaluate(value => { window.__tabbyCloudObservation.clipboardOverlay = value }, { phase, observed, cleared })
