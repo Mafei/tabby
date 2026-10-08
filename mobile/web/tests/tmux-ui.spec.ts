@@ -50,6 +50,56 @@ test.beforeEach(async ({ page }) => {
     await page.evaluate(() => { window.testBridge.autoTmux = true })
 })
 
+test('delayed native tmux completion updates the chooser without another user action', async ({ page }) => {
+    await page.evaluate(() => { window.testBridge.holdExecEvents = true })
+    const pane = active(page)
+    await pane.getByLabel('主机', { exact: true }).fill('fixture.local')
+    await pane.getByLabel('用户名', { exact: true }).fill('test-user')
+    await pane.getByLabel('密码', { exact: true }).fill('ephemeral-test-password')
+    await pane.getByLabel('会话方式', { exact: true }).selectOption('tmux')
+    await pane.getByRole('button', { name: '连接', exact: true }).click()
+    await expect.poll(() => page.evaluate(() => window.testBridge.starts.length)).toBe(1)
+    await authenticate(page, 0)
+    await expect(pane.getByText('正在处理会话…', { exact: true })).toBeVisible()
+    await expect(pane.getByRole('button', { name: '检测 / 刷新', exact: true })).toBeDisabled()
+    // No click, resize, or viewport callback is used to refresh the result.
+    await page.evaluate(() => window.testBridge.resolveExecEvents())
+    await expect(pane.getByRole('button', { name: '检测 / 刷新', exact: true })).toBeEnabled()
+    await expect(pane.getByRole('button', { name: '连接 work', exact: true })).toBeVisible()
+    await expect(pane.getByText('正在处理会话…', { exact: true })).toHaveCount(0)
+    await pane.getByLabel('Socket', { exact: true }).selectOption('name')
+    await pane.getByLabel('Socket 值', { exact: true }).fill('delayed-socket')
+    await pane.getByRole('button', { name: '检测 / 刷新', exact: true }).click()
+    await expect(pane.getByRole('button', { name: '检测 / 刷新', exact: true })).toBeDisabled()
+    await page.evaluate(() => window.testBridge.resolveExecEvents())
+    await expect(pane.getByRole('button', { name: '检测 / 刷新', exact: true })).toBeEnabled()
+    await expect(pane.getByRole('button', { name: '连接 work', exact: true })).toBeVisible()
+    await expect(pane.getByText('正在处理会话…', { exact: true })).toHaveCount(0)
+})
+
+test('cancel then reconnect ignores late listing events and renders only the new generation', async ({ page }) => {
+    await chooser(page)
+    const pane = active(page)
+    await page.evaluate(() => {
+        window.testBridge.holdExecEvents = true
+        window.testBridge.tmuxSessions[0].name = 'obsolete-result'
+    })
+    await pane.getByRole('button', { name: '检测 / 刷新', exact: true }).click()
+    await expect(pane.getByRole('button', { name: '检测 / 刷新', exact: true })).toBeDisabled()
+    await pane.getByRole('button', { name: '断开或取消连接', exact: true }).click()
+    await page.evaluate(() => { window.testBridge.tmuxSessions[0].name = 'current-result' })
+    await pane.getByLabel('密码', { exact: true }).fill('ephemeral-test-password')
+    await pane.getByRole('button', { name: '连接', exact: true }).click()
+    await expect.poll(() => page.evaluate(() => window.testBridge.starts.length)).toBe(2)
+    await authenticate(page, 1)
+    await expect(pane.getByRole('button', { name: '检测 / 刷新', exact: true })).toBeDisabled()
+    await page.evaluate(() => window.testBridge.resolveExecEvents())
+    await expect(pane.getByRole('button', { name: '检测 / 刷新', exact: true })).toBeEnabled()
+    await expect(pane.getByRole('button', { name: '连接 current-result', exact: true })).toBeVisible()
+    await expect(pane.getByRole('button', { name: '连接 obsolete-result', exact: true })).toHaveCount(0)
+    await expect(pane.locator('.notice')).toHaveCount(0)
+})
+
 test('tmux defers PTY until selection and shared access never detaches other clients', async ({ page }) => {
     await page.evaluate(() => { window.testBridge.tmuxSessions[0].clients = 2 })
     await chooser(page)

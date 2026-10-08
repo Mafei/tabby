@@ -150,7 +150,7 @@ export function launcherReady (state) {
 }
 
 /** AOSP KeyguardServiceDelegate.dump: unique delegate and direct fields only. */
-export function keyguardPolicyResult (dump) {
+function keyguardDirectFields (dump) {
     const body = text(dump)
     const headers = [...body.matchAll(/^([ \t]*)KeyguardServiceDelegate[ \t]*$/gm)]
     let direct = ''
@@ -163,6 +163,11 @@ export function keyguardPolicyResult (dump) {
             if (depth === indent + 2) { direct += line.trim() + '\n' }
         }
     }
+    return direct
+}
+
+export function keyguardPolicyResult (dump) {
+    const direct = keyguardDirectFields(dump)
     const value = name => unique(direct, new RegExp(`^${name}=([^\\n]*)$`, 'gm'))
     const result = Object.fromEntries(['showing', 'secure', 'occluded', 'deviceHasKeyguard', 'enabled', 'bootCompleted']
         .map(name => [name, boolean(value(name))]))
@@ -170,6 +175,28 @@ export function keyguardPolicyResult (dump) {
     result.screenState = ['SCREEN_STATE_OFF', 'SCREEN_STATE_TURNING_ON', 'SCREEN_STATE_ON', 'SCREEN_STATE_TURNING_OFF'].includes(screen) ? screen : 'UNKNOWN'
     result.interactiveState = ['INTERACTIVE_STATE_SLEEP', 'INTERACTIVE_STATE_WAKING', 'INTERACTIVE_STATE_AWAKE', 'INTERACTIVE_STATE_GOING_TO_SLEEP'].includes(interactive) ? interactive : 'UNKNOWN'
     return result
+}
+
+/** Read-only blank-emulator diagnostics; no raw component, title or policy value escapes. */
+export function bootSchemaResult (policy, home) {
+    const fields = keyguardDirectFields(policy)
+    const fieldKind = name => {
+        const values = [...fields.matchAll(new RegExp(`^${name}=([^\\n]*)$`, 'gm'))]
+        return values.length === 0 ? 'MISSING' : values.length !== 1 ? 'DUPLICATE'
+            : boolean(values[0][1]) === null ? 'OTHER' : 'BOOLEAN'
+    }
+    const knownHomes = new Map([
+        ['com.android.launcher3/.Launcher', 'AOSP_LAUNCHER'],
+        ['com.android.launcher3/com.android.launcher3.Launcher', 'AOSP_LAUNCHER'],
+        ['com.android.launcher3/.uioverrides.QuickstepLauncher', 'AOSP_QUICKSTEP'],
+        ['com.android.launcher3/com.android.launcher3.uioverrides.QuickstepLauncher', 'AOSP_QUICKSTEP'],
+        ['com.google.android.apps.nexuslauncher/.NexusLauncherActivity', 'GOOGLE_LAUNCHER'],
+        ['com.google.android.apps.nexuslauncher/com.google.android.apps.nexuslauncher.NexusLauncherActivity', 'GOOGLE_LAUNCHER'],
+    ])
+    const components = text(home).split('\n').map(line => line.trim())
+        .filter(line => /^[a-zA-Z][a-zA-Z0-9_.]*\/[a-zA-Z.][a-zA-Z0-9_.$]*$/.test(line))
+    return { home: components.length !== 1 ? 'UNKNOWN' : knownHomes.get(components[0]) || 'OTHER',
+        secureFields: Object.fromEntries(['secure', 'isSecure', 'mIsSecure', 'secureForCurrentUser'].map(name => [name, fieldKind(name)])) }
 }
 
 export function keyguardReady (state, policy) {
@@ -228,6 +255,8 @@ export async function waitForBoot (android, api, { now = () => performance.now()
     let stableIdentity
     let lastState
     let lastPolicy
+    let lastSchema
+    let home = ''
     let beforeMenu
     let preMenuSince
     let preMenuIdentity
@@ -256,6 +285,10 @@ export async function waitForBoot (android, api, { now = () => performance.now()
                     check(await shell('getprop ro.build.version.sdk') === String(api), 'ANDROID_BOOT_API_MISMATCH')
                     check((await shell('getprop ro.boot.qemu') || await shell('getprop ro.kernel.qemu')) === '1', 'ANDROID_BOOT_REQUIRES_EMULATOR')
                     booted = true
+                    // Observe the system HOME on this disposable emulator before
+                    // installing any app. It does not alter readiness or input.
+                    try { home = await shell('cmd package resolve-activity --brief --user 0 -a android.intent.action.MAIN -c android.intent.category.HOME') }
+                    catch (error) { inTime(); if (!(error instanceof TestFailure)) { throw error } }
                 }
             }
             if (booted) {
@@ -267,7 +300,7 @@ export async function waitForBoot (android, api, { now = () => performance.now()
                 const dumps = Object.fromEntries(Object.keys(commands).map((name, index) => [name,
                     readings[index].status === 'fulfilled' ? readings[index].value : '']))
                 lastState = bootStateResult(dumps)
-                if (!menuSent) { lastPolicy = keyguardPolicyResult(dumps.policy) }
+                if (!menuSent) { lastPolicy = keyguardPolicyResult(dumps.policy); lastSchema = bootSchemaResult(dumps.policy, home) }
                 check(lastState.currentError !== true, 'ANDROID_BOOT_CURRENT_ERROR_DIALOG')
                 if (!menuSent) {
                     const target = preMenuTarget(lastState, lastPolicy)
@@ -289,7 +322,7 @@ export async function waitForBoot (android, api, { now = () => performance.now()
                     if (stableSince === undefined || stableIdentity !== identity) { stableSince = now(); stableIdentity = identity }
                     if (now() - stableSince >= STABLE_MS) {
                         inTime()
-                        report({ status: 'READY', api, menuSent, beforeMenu, state: lastState })
+                        report({ status: 'READY', api, menuSent, beforeMenu, state: lastState, schema: lastSchema })
                         return
                     }
                 } else { stableSince = undefined; stableIdentity = undefined }
@@ -303,7 +336,7 @@ export async function waitForBoot (android, api, { now = () => performance.now()
         throw new TestFailure('ANDROID_BOOT_READINESS_DEADLINE_EXCEEDED')
     } catch (error) {
         report({ status: 'FAILED', api, menuSent, beforeMenu: beforeMenu || null, state: lastState || null,
-            keyguard: lastPolicy || null })
+            keyguard: lastPolicy || null, schema: lastSchema || null })
         throw error
     }
 }

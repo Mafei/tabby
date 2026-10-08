@@ -24,6 +24,8 @@ export class TestBridge implements SSHBridge {
     keyboardRequests: { connectionId: string, generation: number }[] = []
     nextDataSequence = 0
     autoTmux = false
+    holdExecEvents = false
+    private pendingExecEvents: (() => void)[] = []
     tmuxAvailable = true
     tmuxCreateFails = false
     tmuxCreatedName = 'new-session'
@@ -74,13 +76,15 @@ export class TestBridge implements SSHBridge {
                 output = this.tmuxSessions.map(session => `${session.uid}:${session.serverPID}:${session.serverStarted}:${session.sessionID}:${session.sessionCreated}:${session.clients}:${hex(session.socket)}:${hex(session.name)}`).join('\n')
             }
             const frame = `TABBY:${nonce}:BEGIN\n${output}\nTABBY:${nonce}:END:${status}\n`
-            queueMicrotask(() => {
+            const complete = () => {
                 this.emit({ type: 'execStarted', connectionId: started.connectionId, generation: started.generation, requestId: command.requestId })
                 const bytes = new TextEncoder().encode(frame)
                 this.emit({ type: 'execData', connectionId: started.connectionId, generation: started.generation, requestId: command.requestId,
                     data: btoa(Array.from(bytes, byte => String.fromCharCode(byte)).join('')), sequence: this.nextDataSequence++ })
                 this.emit({ type: 'execExit', connectionId: started.connectionId, generation: started.generation, requestId: command.requestId, exitStatus: 0, complete: true })
-            })
+            }
+            if (this.holdExecEvents) { this.pendingExecEvents.push(complete) }
+            else { queueMicrotask(complete) }
         } else if (this.autoTmux && options.command.type === 'openTerminal') {
             const command = options.command; const started = this.starts.find(item => item.connectionId === options.connectionId)!
             const failure = this.nextTerminalFailure; this.nextTerminalFailure = undefined
@@ -111,6 +115,7 @@ export class TestBridge implements SSHBridge {
     resolveStarts(): void { this.startResolvers.splice(0).forEach(item => item.resolve()) }
     rejectStarts(): void { this.startResolvers.splice(0).forEach(item => item.reject(new Error('Delayed start rejection'))) }
     resolveCommands(): void { this.commandResolvers.splice(0).forEach(resolve => resolve()) }
+    resolveExecEvents(): void { this.pendingExecEvents.splice(0).forEach(complete => complete()) }
     resolveClipboards(text: string): void { this.clipboardResolvers.splice(0).forEach(resolve => resolve({ text })) }
     resolvePickers(keyId: string): void { this.pickerResolvers.splice(0).forEach(resolve => resolve({ keyId, label: 'picked.pem' })) }
     resolvePickerAt(index: number, keyId: string): void { this.pickerResolvers.splice(index, 1).forEach(resolve => resolve({ keyId, label: 'picked.pem' })) }

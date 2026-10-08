@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { bootStateResult, keyguardPolicyResult, preMenuTarget, launcherReady, waitForBoot } from '../scripts/prepare-android-emulator.mjs'
+import { bootStateResult, bootSchemaResult, keyguardPolicyResult, preMenuTarget, launcherReady, waitForBoot } from '../scripts/prepare-android-emulator.mjs'
 
 const SENTINEL = 'GENERATED_BOOT_PRIVATE_VALUE_NOT_FOR_OUTPUT'
 const keyguardPolicy = (showing = false, secure = false) => `WINDOW MANAGER POLICY STATE\n  KeyguardServiceDelegate\n    showing=${showing}\n    inputRestricted=${showing}\n    occluded=false\n    secure=${secure}\n    deviceHasKeyguard=true\n    enabled=true\n    bootCompleted=true\n    screenState=SCREEN_STATE_ON\n    interactiveState=INTERACTIVE_STATE_AWAKE\n`
@@ -30,6 +30,9 @@ function controlled (read, { cancelAt, initialTime = 0 } = {}) {
         if (command === 'getprop sys.boot_completed') { return '1' }
         if (command === 'getprop ro.build.version.sdk') { return '36' }
         if (command === 'getprop ro.boot.qemu') { return '1' }
+        if (command === 'cmd package resolve-activity --brief --user 0 -a android.intent.action.MAIN -c android.intent.category.HOME') {
+            return 'com.android.launcher3/.Launcher'
+        }
         if (command === 'input keyevent 82') {
             const data = read(clock, menuCount)
             const state = bootStateResult(data)
@@ -120,6 +123,24 @@ test('policy parsing rejects duplicate delegates/direct fields and does not mix 
     assert.equal(result.secure, false)
     assert.equal(JSON.stringify(result).includes(SENTINEL), false)
     assert.equal(keyguardPolicyResult('x'.repeat(1024 * 1024 + 1)).secure, null)
+})
+test('blank-system schema diagnostics classify exact HOME and policy shapes without exporting untrusted values', () => {
+    const result = bootSchemaResult(keyguardPolicy(), 'priority=0\ncom.google.android.apps.nexuslauncher/.NexusLauncherActivity\n')
+    assert.deepEqual(result, { home: 'GOOGLE_LAUNCHER', secureFields: {
+        secure: 'BOOLEAN', isSecure: 'MISSING', mIsSecure: 'MISSING', secureForCurrentUser: 'MISSING',
+    } })
+    const privateResult = bootSchemaResult(keyguardPolicy().replace('secure=false', `secure=${SENTINEL}`), `private.${SENTINEL}/.Activity`)
+    assert.equal(privateResult.home, 'OTHER')
+    assert.equal(privateResult.secureFields.secure, 'OTHER')
+    assert.equal(JSON.stringify(privateResult).includes(SENTINEL), false)
+    assert.equal(bootSchemaResult(keyguardPolicy().replace('secure=false', 'secure=false\n    secure=true'), '').secureFields.secure, 'DUPLICATE')
+    assert.equal(bootSchemaResult(keyguardPolicy(), 'com.android.launcher3/.Launcher\ncom.android.launcher3/.Launcher').home, 'UNKNOWN')
+    const data = dumps()
+    for (const key of ['windows', 'displays', 'input', 'activities']) {
+        data[key] = data[key].replaceAll('com.android.launcher3/.Launcher', 'com.google.android.apps.nexuslauncher/.NexusLauncherActivity')
+    }
+    // Diagnostic recognition is never permission to send MENU or pass readiness.
+    assert.equal(preMenuTarget(bootStateResult(data), keyguardPolicyResult(data.policy)), undefined)
 })
 test('current ANR fails immediately before MENU and is never dismissed', async () => {
     const fixture = controlled(() => dumps({ error: true }))

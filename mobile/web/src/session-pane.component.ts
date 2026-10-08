@@ -1,4 +1,4 @@
-import { AfterViewInit, ChangeDetectionStrategy, Component, ElementRef, EventEmitter, Input, NgZone, OnDestroy, Output, ViewChild, inject } from '@angular/core'
+import { AfterViewInit, ChangeDetectionStrategy, ChangeDetectorRef, Component, ElementRef, EventEmitter, Input, NgZone, OnDestroy, Output, ViewChild, inject } from '@angular/core'
 import { CommonModule } from '@angular/common'
 import { FormsModule } from '@angular/forms'
 import type { PluginListenerHandle } from '@capacitor/core'
@@ -180,6 +180,7 @@ export class SessionPaneComponent implements AfterViewInit, OnDestroy {
     authInstructions = ''
     private readonly bridge = inject(SSH_BRIDGE)
     private readonly zone = inject(NgZone)
+    private readonly changes = inject(ChangeDetectorRef)
     private readonly element = inject(ElementRef<HTMLElement>)
     private layoutObserver?: ResizeObserver
     private interactionEpoch = 0
@@ -467,14 +468,27 @@ export class SessionPaneComponent implements AfterViewInit, OnDestroy {
         this.actionBusy = true; this.notice = ''
         try {
             const socket = this.socket(); const result = await tmux.list(socket, listing.signal)
-            if (generation !== this.generation || epoch !== this.listingEpoch) { return }
-            this.tmuxAvailable = result.available; this.sessions = result.sessions; this.listedSocket = socket
+            this.zone.run(() => {
+                if (generation !== this.generation || epoch !== this.listingEpoch) { return }
+                this.tmuxAvailable = result.available; this.sessions = result.sessions; this.listedSocket = socket
+                this.changes.markForCheck()
+            })
         } catch (error) {
-            if (generation === this.generation && epoch === this.listingEpoch) {
+            this.zone.run(() => {
+                if (generation !== this.generation || epoch !== this.listingEpoch) { return }
                 if (error instanceof MobileTmuxError && error.code === 'transport_lost') { this.waitTransportState() }
                 else { this.notice = this.tmuxMessage(error instanceof MobileTmuxError ? error.code : 'tmux_detection_failed') }
-            }
-        } finally { if (generation === this.generation && epoch === this.listingEpoch && !this.transportClosing) { this.actionBusy = false } }
+                this.changes.markForCheck()
+            })
+        } finally {
+            // Native async continuations need an explicit render notification;
+            // a later touch or viewport event must not release the loading UI.
+            this.zone.run(() => {
+                if (generation !== this.generation || epoch !== this.listingEpoch) { return }
+                if (!this.transportClosing) { this.actionBusy = false }
+                this.changes.markForCheck()
+            })
+        }
     }
 
     async createSession(): Promise<void> {
