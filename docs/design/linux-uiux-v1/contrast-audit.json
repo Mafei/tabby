@@ -1,0 +1,250 @@
+{
+  "kind": "design_token_math_only",
+  "realXrdp": false,
+  "runtimeProduct": false,
+  "method": "RGB565 bit truncation then replication",
+  "pairs": [
+    {
+      "theme": "dark",
+      "foreground": "text",
+      "background": "chrome",
+      "minimum": 4.5,
+      "RGB888": 12.674003317586127,
+      "RGB565": 13.333107386013836
+    },
+    {
+      "theme": "dark",
+      "foreground": "secondary",
+      "background": "chrome",
+      "minimum": 4.5,
+      "RGB888": 6.863644137573113,
+      "RGB565": 7.280159982232123
+    },
+    {
+      "theme": "dark",
+      "foreground": "index",
+      "background": "chrome",
+      "minimum": 4.5,
+      "RGB888": 5.552888298924239,
+      "RGB565": 5.730519708666179
+    },
+    {
+      "theme": "dark",
+      "foreground": "text",
+      "background": "active",
+      "minimum": 4.5,
+      "RGB888": 10.096166011976306,
+      "RGB565": 10.491329277788596
+    },
+    {
+      "theme": "dark",
+      "foreground": "secondary",
+      "background": "active",
+      "minimum": 4.5,
+      "RGB888": 5.467608688717323,
+      "RGB565": 5.728488742893974
+    },
+    {
+      "theme": "dark",
+      "foreground": "secondary",
+      "background": "hover",
+      "minimum": 4.5,
+      "RGB888": 5.952299157146641,
+      "RGB565": 6.179414960169062
+    },
+    {
+      "theme": "dark",
+      "foreground": "accent",
+      "background": "active",
+      "minimum": 3,
+      "RGB888": 5.6196983857180305,
+      "RGB565": 5.820514028673796
+    },
+    {
+      "theme": "dark",
+      "foreground": "accent",
+      "background": "chrome",
+      "minimum": 3,
+      "RGB888": 7.05456664440106,
+      "RGB565": 7.397112084777283
+    },
+    {
+      "theme": "dark",
+      "foreground": "unfocused",
+      "background": "active",
+      "minimum": 3,
+      "RGB888": 4.291688988410705,
+      "RGB565": 4.466516555411417
+    },
+    {
+      "theme": "dark",
+      "foreground": "divider",
+      "background": "chrome",
+      "minimum": 3,
+      "RGB888": 3.2586277430852575,
+      "RGB565": 3.3224714080640645
+    },
+    {
+      "theme": "dark",
+      "foreground": "divider",
+      "background": "terminal",
+      "minimum": 3,
+      "RGB888": 4.100073356068737,
+      "RGB565": 4.154745846381945
+    },
+    {
+      "theme": "dark",
+      "foreground": "success",
+      "background": "chrome",
+      "minimum": 4.5,
+      "RGB888": 7.512971924716642,
+      "RGB565": 7.877269311060811
+    },
+    {
+      "theme": "dark",
+      "foreground": "warning",
+      "background": "warningBg",
+      "minimum": 4.5,
+      "RGB888": 8.32076634832696,
+      "RGB565": 8.86433717552498
+    },
+    {
+      "theme": "dark",
+      "foreground": "danger",
+      "background": "chrome",
+      "minimum": 4.5,
+      "RGB888": 7.476931160952651,
+      "RGB565": 7.7615535272741525
+    },
+    {
+      "theme": "dark",
+      "foreground": "onAccent",
+      "background": "accent",
+      "minimum": 4.5,
+      "RGB888": 7.852232680470143,
+      "RGB565": 8.207994966021982
+    },
+    {
+      "theme": "light",
+      "foreground": "text",
+      "background": "chrome",
+      "minimum": 4.5,
+      "RGB888": 12.95681176642908,
+      "RGB565": 13.581448106155714
+    },
+    {
+      "theme": "light",
+      "foreground": "secondary",
+      "background": "chrome",
+      "minimum": 4.5,
+      "RGB888": 5.566604761420678,
+      "RGB565": 5.67921890878023
+    },
+    {
+      "theme": "light",
+      "foreground": "index",
+      "background": "chrome",
+      "minimum": 4.5,
+      "RGB888": 4.725984776855038,
+      "RGB565": 4.761484276772807
+    },
+    {
+      "theme": "light",
+      "foreground": "text",
+      "background": "active",
+      "minimum": 4.5,
+      "RGB888": 14.67911847763172,
+      "RGB565": 15.143812624130543
+    },
+    {
+      "theme": "light",
+      "foreground": "secondary",
+      "background": "active",
+      "minimum": 4.5,
+      "RGB888": 6.306555369026805,
+      "RGB565": 6.332537321039106
+    },
+    {
+      "theme": "light",
+      "foreground": "secondary",
+      "background": "hover",
+      "minimum": 4.5,
+      "RGB888": 5.11571236579243,
+      "RGB565": 5.3145660366090555
+    },
+    {
+      "theme": "light",
+      "foreground": "accent",
+      "background": "active",
+      "minimum": 3,
+      "RGB888": 6.653665495649142,
+      "RGB565": 6.751397926359411
+    },
+    {
+      "theme": "light",
+      "foreground": "accent",
+      "background": "chrome",
+      "minimum": 3,
+      "RGB888": 5.872988321150118,
+      "RGB565": 6.054866291382292
+    },
+    {
+      "theme": "light",
+      "foreground": "unfocused",
+      "background": "active",
+      "minimum": 3,
+      "RGB888": 5.889318938644076,
+      "RGB565": 5.989301547634837
+    },
+    {
+      "theme": "light",
+      "foreground": "divider",
+      "background": "chrome",
+      "minimum": 3,
+      "RGB888": 3.066294127786439,
+      "RGB565": 3.161227271138153
+    },
+    {
+      "theme": "light",
+      "foreground": "divider",
+      "background": "terminal",
+      "minimum": 3,
+      "RGB888": 3.4738866011517677,
+      "RGB565": 3.5248843188311807
+    },
+    {
+      "theme": "light",
+      "foreground": "success",
+      "background": "chrome",
+      "minimum": 4.5,
+      "RGB888": 5.936148174181999,
+      "RGB565": 6.225893925323137
+    },
+    {
+      "theme": "light",
+      "foreground": "warning",
+      "background": "warningBg",
+      "minimum": 4.5,
+      "RGB888": 6.681183332714374,
+      "RGB565": 6.812818069286114
+    },
+    {
+      "theme": "light",
+      "foreground": "danger",
+      "background": "chrome",
+      "minimum": 4.5,
+      "RGB888": 6.570959298917458,
+      "RGB565": 6.606327822220518
+    },
+    {
+      "theme": "light",
+      "foreground": "onAccent",
+      "background": "accent",
+      "minimum": 4.5,
+      "RGB888": 6.653665495649142,
+      "RGB565": 6.751397926359411
+    }
+  ],
+  "minimumTextRGB565": 4.761484276772807,
+  "minimumMarkerRGB565": 3.161227271138153
+}
