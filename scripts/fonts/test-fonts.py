@@ -3,6 +3,7 @@
 import hashlib
 import importlib.util
 import json
+import os
 from pathlib import Path
 import subprocess
 import shutil
@@ -30,6 +31,37 @@ class FontBoundaryTests(unittest.TestCase):
     def test_existing_verified_bundle_performs_no_download(self):
         with patch.object(FETCH.subprocess, 'Popen', side_effect=AssertionError('UNEXPECTED_NETWORK')):
             FETCH.prepare(FETCH.ROOT / 'tabby-terminal/src/fonts/bundled')
+
+    def test_actual_git_autocrlf_checkout_preserves_all_pinned_notice_bytes(self):
+        # Exercise Git's real checkout conversion, as used by the Windows runner.
+        # A text control must change to CRLF while upstream notice bytes stay exact.
+        manifest = FETCH.load_manifest()
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            repository = base / 'repository'
+            checkout = base / 'checkout'
+            repository.mkdir()
+            checkout.mkdir()
+            licenses = repository / 'scripts/fonts/licenses'
+            licenses.mkdir(parents=True)
+            shutil.copyfile(FETCH.ROOT / '.gitattributes', repository / '.gitattributes')
+            for entry in manifest['licenses']:
+                shutil.copyfile(FETCH.MANIFEST.parent / 'licenses' / entry['file'], licenses / entry['file'])
+            (repository / 'checkout-control.txt').write_bytes(b'first line\nsecond line\n')
+            env = {key: value for key, value in os.environ.items() if not key.startswith('GIT_')}
+            env.update({'GIT_CONFIG_NOSYSTEM': '1', 'GIT_CONFIG_GLOBAL': os.devnull})
+            def git(*args):
+                subprocess.run(['git', '-C', str(repository), *args], check=True,
+                               stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env, timeout=15)
+            git('init', '--quiet')
+            git('-c', 'core.autocrlf=false', 'add', '--', '.gitattributes', 'scripts/fonts/licenses', 'checkout-control.txt')
+            git('-c', 'core.autocrlf=true', 'checkout-index', '--all', '--prefix=' + str(checkout) + os.sep)
+            self.assertEqual((checkout / 'checkout-control.txt').read_bytes(), b'first line\r\nsecond line\r\n')
+            self.assertEqual(len(manifest['licenses']), 20)
+            for entry in manifest['licenses']:
+                data = (checkout / 'scripts/fonts/licenses' / entry['file']).read_bytes()
+                self.assertEqual(len(data), entry['bytes'], entry['file'])
+                self.assertEqual(hashlib.sha256(data).hexdigest(), entry['sha256'], entry['file'])
 
     def test_output_parent_symlink_rejected(self):
         with tempfile.TemporaryDirectory() as directory:

@@ -99,7 +99,17 @@ the standard `macos-15` ARM runner. CI extracts the delivered ZIP and mounts the
 read-only, then uses `lipo` on the actual app, Electron framework/helpers and selected
 Darwin native addon/PTY helper bytes. Both archives must contain identical verified
 binaries. The artifact includes a JSON report with source SHA, architectures and
-binary/archive SHA-256 digests. This checks architecture and packaging, not GUI execution.
+binary/archive SHA-256 digests. Artifact-only macOS builds ad-hoc sign native sources
+before ASAR creation, finish all bundle/fuse edits, then sign all enclosing frameworks,
+helpers and the app from the inside out. A second prepackaged build creates archives
+without editing signed content. Both final archives require strict recursive signature
+verification for every on-disk Mach-O and bundle, native ASAR integrity validation,
+archive integrity checks and unchanged safety fuses. A fuse tampering regression must
+fail validation. Each archive's actual app is launched on the macOS runner with a
+temporary profile: the Angular renderer must bootstrap, native modules must load and
+a disposable PTY must print its token. Reports include screenshots and a separate
+Gatekeeper policy assessment. Ad-hoc integrity does not establish Developer ID trust
+or notarization. These startup checks do not cover full desktop interactions.
 
 Node integration tests import the actual SSHSession, SSHShellSession, SSHTabComponent,
 connectable tab lifecycle and terminal middleware. Angular/Electron rendering and

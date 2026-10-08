@@ -56,9 +56,11 @@ jobs:
           python3.9 scripts/fonts/fetch-fonts.py --verify
           mkdir -p dist
           python3.9 scripts/fonts/audit-fonts.py --output dist/linux-font-coverage.json
+          python3.9 scripts/fonts/test-fonts.py
           python3.9 scripts/test/test_linux_portable.py
-          node --test scripts/test/linux-portable.test.mjs
           node scripts/prepare-linux-portable.mjs
+          # The real cwd wrapper test loads app dependencies installed above.
+          node --test scripts/test/linux-portable.test.mjs
           node scripts/build-linux.mjs
       - name: Audit actual AppDir and AppImage ELF dependency closures
         run: |
