@@ -188,7 +188,7 @@ class TabbySSHPlugin : Plugin() {
                     }
                     if (input.has("deviceKeyId")) {
                         require(!input.has("keyId") && !input.has("password") && !input.has("passphrase") && !input.has("responses") && !input.optBoolean("useSavedPassword", false))
-                        val keyId = input.getString("deviceKeyId")
+                        val keyId = input.getString("deviceKeyId") ?: error("key")
                         runtime.deviceKeys.use(keyId, session.host, session.port, session.username, session.verifiedHostKey ?: error("unverified")) { bytes, _ ->
                             output.put("privateKey", String(bytes, Charsets.UTF_8))
                         }

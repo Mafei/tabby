@@ -112,6 +112,7 @@ export async function webviewAcceptance (android, fixture) {
     for (const candidate of devices) { if (candidate !== device) { await candidate.close() } }
     device.setDefaultTimeout(15000)
     const passed = []
+    const screenshots = []
     const settings = []
     const deviceStates = []
     const bootObservations = []
@@ -135,10 +136,12 @@ export async function webviewAcceptance (android, fixture) {
         check(bytes.length > 8 && bytes.subarray(0, 8).equals(Buffer.from([137,80,78,71,13,10,26,10])), 'ANDROID_SCREENSHOT_INVALID')
         await writeFile(directory + name + '.png', bytes)
         check(bytes.length >= 24 && bytes.subarray(12, 16).toString('ascii') === 'IHDR', 'ANDROID_SCREENSHOT_IHDR_INVALID')
-        await writeFile(directory + name + '.json', JSON.stringify({ name: name + '.png',
+        const metadata = { name: name + '.png',
             capturedAtUTC: new Date().toISOString(), width: bytes.readUInt32BE(16), height: bytes.readUInt32BE(20),
             bytes: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex'),
-            source: 'actual adb screencap on the selected cloud Android emulator; synthetic account only' }) + '\n')
+            source: 'actual adb screencap on the selected cloud Android emulator; synthetic account only' }
+        await writeFile(directory + name + '.json', JSON.stringify(metadata) + '\n')
+        screenshots.push(metadata)
     }
     const verify = label => { passed.push(label); console.log(`PASS Android WebView: ${label}.`) }
     async function step (name, action) {
@@ -1310,7 +1313,7 @@ export async function webviewAcceptance (android, fixture) {
         await step('replacement-resources-released', () => quiet())
         verify('durable native host-key pin survives a fresh process and rejects same-endpoint replacement')
         await endHarness()
-        return { passed: true, cases: passed, skipped: 0, deviceStates, inputEvidence: 'Actual Android InputConnection; specific Chinese IME candidate UI unverified.',
+        return { passed: true, cases: passed, skipped: 0, deviceStates, screenshots, inputEvidence: 'Actual Android InputConnection; specific Chinese IME candidate UI unverified.',
             touchEvidence: 'Android instrumentation MotionEvent injection, not synthetic DOM touch.' }
     } catch (error) {
         // Requested real images, never credential forms or unknown stages.
