@@ -32,6 +32,7 @@ let classes
 let child
 let cancelled = false
 let killTimer
+let stage = 'library'
 
 function signalChild (signal) {
     if (!child?.pid) { return }
@@ -84,20 +85,24 @@ process.once('SIGTERM', cancel)
 process.once('SIGINT', cancel)
 try {
     await access(library)
+    stage = 'pinned-dependencies'
     await mkdir(cache, { recursive: true })
     const dependencies = []
     for (const dependency of artifacts) { dependencies.push(await artifact(dependency)) }
     const jar = dependencies[0]
     const standardLibrary = dependencies[2]
     classes = await mkdtemp(join(tmpdir(), 'tabby-mobile-jni-classes-'))
+    stage = 'compile-kotlin'
     let code = await run(java, ['-cp', dependencies.slice(1).join(delimiter), 'org.jetbrains.kotlin.cli.jvm.K2JVMCompiler',
         '-no-stdlib', '-no-reflect', '-classpath', standardLibrary, '-jvm-target', '21', '-d', classes,
         'mobile/android/app/src/main/java/org/tabby/android/ssh/NativeSSH.kt'])
     if (code === 0 && !cancelled) {
+        stage = 'compile-java'
         code = await run(javac, ['-encoding', 'UTF-8', '-cp', [classes, jar, standardLibrary].join(delimiter), '-d', classes,
             `mobile/test/java/org/tabby/android/ssh/${smokeClass}.java`])
     }
     if (code !== 0 || cancelled) { process.exitCode = cancelled ? 130 : code } else {
+        stage = 'synthetic-fixture'
         fixture = await startFixture(deferred ? { profile: 'control-tmux', tmuxPath: process.env.TABBY_TEST_TMUX } : {})
         const timeout = setTimeout(cancel, 120000)
         try {
@@ -106,8 +111,9 @@ try {
             process.exitCode = cancelled ? 130 : code
         } finally { clearTimeout(timeout) }
     }
-} catch {
-    console.error('JVM/JNI smoke could not run. Supply JDK 21 and a built JNI library; Android SDK is not required.')
+} catch (error) {
+    const code = ['ENOENT', 'EACCES', 'EPERM', 'ENOSPC'].includes(error?.code) ? error.code : 'UNAVAILABLE'
+    console.error(`JVM/JNI smoke could not run: ${stage}/${code}. Android SDK is not required. Credential-bearing errors are suppressed.`)
     process.exitCode = 1
 } finally {
     clearTimeout(killTimer)

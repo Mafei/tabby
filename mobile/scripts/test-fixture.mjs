@@ -4,6 +4,7 @@ import { createRequire } from 'node:module'
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto'
 import { mkdtemp, writeFile, chmod, rm, access, lstat, mkdir, readdir } from 'node:fs/promises'
 import { constants as fsConstants } from 'node:fs'
+import { readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -67,7 +68,7 @@ export async function startFixture ({ metadataFile, port = 0, profile = 'shell',
     const username = 'tabby-fixture'
     const password = randomBytes(24).toString('base64url')
     const config = { authMode: 'all', delayAuthMs: 0, delaySessionMs: 0, delayPTYMs: 0, delayShellMs: 0, rejectPTY: false, rejectShell: false,
-        delayExecAckMs: 0, delayExecOutputMs: 0, delayExecExitMs: 0, rejectExec: false, noExitStatus: false, closeChannelOnly: false, eofOnly: false, omitBareCloseAck: false }
+        delayExecAckMs: 0, delayExecOutputMs: 0, delayExecExitMs: 0, rejectExec: false, noExitStatus: false, closeChannelOnly: false, eofOnly: false, omitBareCloseAck: false, publickeyPartialSuccess: false }
     const clients = new Set()
     const controlClients = new Set()
     const timers = new Set()
@@ -312,9 +313,15 @@ export async function startFixture ({ metadataFile, port = 0, profile = 'shell',
                 if (ctx.method === 'password') {
                     sameSecret(ctx.password, password) ? ctx.accept() : ctx.reject(methods)
                 } else if (ctx.method === 'publickey') {
+                    // Test-only disposable HOME. Only unrestricted lines model normal authentication.
+                    let enrolled = []
+                    try { enrolled = readFileSync(join(directory, '.ssh', 'authorized_keys'), 'utf8').split('\n')
+                        .filter(line => /^ssh-ed25519 [A-Za-z0-9+/]+={0,2}$/.test(line.trim())).map(line => utils.parseKey(line.trim())).filter(key => !(key instanceof Error)) } catch {}
                     const allowed = clientKeys.find(key => sameSecret(ctx.key.data, key.parsed.getPublicSSH()))
+                        ?? enrolled.map(parsed => ({ parsed })).find(key => sameSecret(ctx.key.data, key.parsed.getPublicSSH()))
                     if (allowed && (!ctx.signature || allowed.parsed.verify(ctx.blob, ctx.signature, ctx.hashAlgo) === true)) {
-                        ctx.accept()
+                        if (ctx.signature && config.publickeyPartialSuccess) ctx.reject(['keyboard-interactive'], true)
+                        else ctx.accept()
                     } else { ctx.reject(methods) }
                 } else if (ctx.method === 'keyboard-interactive') {
                     client.pendingAuth++
@@ -518,7 +525,7 @@ export async function startFixture ({ metadataFile, port = 0, profile = 'shell',
                     config[key] = input[key]
                 }
             }
-            for (const key of ['rejectPTY', 'rejectShell', 'rejectExec', 'noExitStatus', 'closeChannelOnly', 'eofOnly', 'omitBareCloseAck']) {
+            for (const key of ['rejectPTY', 'rejectShell', 'rejectExec', 'noExitStatus', 'closeChannelOnly', 'eofOnly', 'omitBareCloseAck', 'publickeyPartialSuccess']) {
                 if (input[key] !== undefined) {
                     if (typeof input[key] !== 'boolean') { throw new Error('Invalid flag') }
                     if (key === 'omitBareCloseAck' && input[key] && profile === 'shell') { throw new Error('Invalid profile') }

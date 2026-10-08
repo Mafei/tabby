@@ -50,7 +50,7 @@ try {
     const appAPK = resolve(option('--app-apk', resolve(repository, 'mobile/android/app/build/outputs/apk/debug/app-debug.apk')))
     const testAPK = resolve(option('--test-apk', resolve(repository, 'mobile/android/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk')))
     await Promise.all([access(appAPK), access(testAPK)])
-    fixture = await startFixture()
+    fixture = await startFixture({ profile: 'control' })
     const plainKey = await readFile(fixture.metadata.privateKeyFile, 'utf8')
     const encryptedKey = await readFile(fixture.metadata.encryptedPrivateKeyFile, 'utf8')
     android = new Android(serial, [fixture.metadata.password, fixture.metadata.privateKeyPassphrase, plainKey, encryptedKey])
@@ -91,10 +91,10 @@ try {
         privateKey: plainKey, encryptedPrivateKey: encryptedKey, privateKeyPassphrase: fixture.metadata.privateKeyPassphrase }
     await android.privateFile(METADATA, JSON.stringify(metadata))
     if (!process.argv.includes('--webview-only')) {
-        const classes = ['RealSSHBridgeTest', 'AndroidHostKeyStoreTest', 'ViewportLifecycleTest', 'EncryptedSecretStoreTest'].map(name => `${APP}.${name}`).join(',')
+        const classes = ['RealSSHBridgeTest', 'AndroidHostKeyStoreTest', 'ViewportLifecycleTest', 'EncryptedSecretStoreTest', 'EncryptedDeviceKeyStoreTest'].map(name => `${APP}.${name}`).join(',')
         const command = `am instrument -w -r -e fixtureMetadata ${METADATA} -e class ${classes} ${RUNNER}`
         const result = await android.launch(['shell', '-T', command], { timeout: 180000 }).result
-        report.instrumentation = instrumentationResult(result, 8)
+        report.instrumentation = instrumentationResult(result, 10)
         console.log(`PASS Android instrumentation: ${report.instrumentation.tests} tests, no skips.`)
         // The native Activity tests already initialize the actual provider.
         // Capture only its bounded public identity before WebView boot checks,

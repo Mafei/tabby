@@ -1643,6 +1643,7 @@ dependencies = [
  "base64",
  "futures-util",
  "jni",
+ "rand",
  "russh",
  "serde",
  "serde_json",

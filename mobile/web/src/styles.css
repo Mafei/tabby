@@ -113,3 +113,10 @@ input, select { min-height: 48px; padding: .45rem; width: 100%; background: #212
 .all-keys-panel { max-height: calc(100% - var(--header-height, 48px) - var(--input-height, 48px) - 16px); bottom: calc(var(--input-height, 48px) + 8px); }
 .input-strip, .input-strip textarea, .input-strip button { height: var(--input-height, 48px); }
 .tools button { flex-basis: var(--key-width, 56px); padding-block: 0; line-height: 1; }
+
+.key-manager { max-height: calc(100dvh - 32px); overflow-y: auto; }
+.key-manager code { display: block; overflow-wrap: anywhere; word-break: break-all; }
+.key-manager ul { padding-left: 0; list-style: none; }
+.key-manager li { margin-block: 16px; padding-block: 12px; border-top: 1px solid #607088; }
+.key-manager button { margin: 4px; min-height: 48px; }
+.key-manager > div { display: block; }

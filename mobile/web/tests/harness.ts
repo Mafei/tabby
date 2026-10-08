@@ -2,6 +2,7 @@
 // app. It is served outside www and contains no Angular bootstrap/compiler.
 import type { SSHBridge, SSHCommand, SSHEvent, SSHStart } from '../src/bridge'
 import type { TmuxSessionInfo } from '../src/tmux-controller'
+import type { DeviceKey } from '../src/key-enrollment'
 
 export class TestBridge implements SSHBridge {
     readonly starts: (SSHStart & { connectionId: string })[] = []
@@ -145,6 +146,20 @@ export class TestBridge implements SSHBridge {
     async setBackground(options: { enabled: boolean }) { this.backgroundEnabled = options.enabled; return { enabled: options.enabled } }
     async credentialStatus() { return { saved: this.savedPassword } }
     async deletePassword(options: unknown) { this.deletedPasswords.push(options); this.savedPassword = false }
+    generatedDeviceKeys = 0
+    storedDeviceKeys: DeviceKey[] = []
+    async deviceKeys() { return { keys: structuredClone(this.storedDeviceKeys) } }
+    async generateDeviceKey(options: { connectionId: string, confirmed: boolean }) {
+        if (!options.confirmed) throw new Error('Missing generation consent')
+        const start = this.starts.find(item => item.connectionId === options.connectionId)!
+        const key: DeviceKey = { id: `fixture-key-${++this.generatedDeviceKeys}`, createdAt: 1,
+            target: { host: start.host.toLowerCase(), port: start.port, username: start.username, hostKey: 'fixture-public-blob' },
+            public: { algorithm: 'ssh-ed25519', publicKey: 'ssh-ed25519 SYNTHETIC_PUBLIC_ONLY', fingerprint: `SHA256:synthetic-key-${this.generatedDeviceKeys}` } }
+        this.storedDeviceKeys.push(key); return { key }
+    }
+    async deviceKeyPublic(options: { keyId: string }) { const key = this.storedDeviceKeys.find(key => key.id === options.keyId); if (!key) throw new Error('Missing key'); return { key } }
+    async markDeviceKey(options: { keyId: string, status: 'installed' | 'verified' | 'uncertain' }) { const result = await this.deviceKeyPublic(options); result.key.enrollment = options.status; return result }
+    async deleteDeviceKey(options: { keyId: string }) { this.storedDeviceKeys = this.storedDeviceKeys.filter(key => key.id !== options.keyId); this.nativeEvent('deviceKeyDeleted', options) }
     async getViewport() { return { visible: false, height: 0, viewportWidth: innerWidth, viewportHeight: innerHeight } }
 }
 
@@ -154,7 +169,7 @@ window.attackMarker = []
 const nativeListeners = new Map<string, { remove: () => Promise<void> }>()
 let callbackSequence = 0
 const methods = ['start', 'command', 'close', 'writeClipboard', 'readClipboard', 'selectPrivateKey',
-    'discardPrivateKey', 'cancelPrivateKeySelection', 'setActiveTab', 'showKeyboard', 'hideKeyboard', 'getViewport', 'backgroundState', 'backAction', 'leaveApp', 'setBackground', 'credentialStatus', 'deletePassword', 'removeListener']
+    'discardPrivateKey', 'cancelPrivateKeySelection', 'setActiveTab', 'showKeyboard', 'hideKeyboard', 'getViewport', 'backgroundState', 'backAction', 'leaveApp', 'setBackground', 'credentialStatus', 'deletePassword', 'deviceKeys', 'generateDeviceKey', 'deviceKeyPublic', 'markDeviceKey', 'deleteDeviceKey', 'removeListener']
 ;(window as unknown as { Capacitor: unknown }).Capacitor = {
     PluginHeaders: [{ name: 'TabbySSH', methods: [
         ...methods.map(name => ({ name, rtype: 'promise' })), { name: 'addListener', rtype: 'callback' },

@@ -1,7 +1,8 @@
 import { InjectionToken } from '@angular/core'
 import { registerPlugin, type PluginListenerHandle } from '@capacitor/core'
+import type { DeviceKey } from './key-enrollment'
 
-export type AuthMode = 'password' | 'privateKey' | 'keyboardInteractive'
+export type AuthMode = 'password' | 'privateKey' | 'deviceKey' | 'keyboardInteractive'
 export interface SSHEvent {
     connectionId: string
     generation: number
@@ -49,7 +50,7 @@ export interface SSHStart {
 
 export type SSHCommand =
     | { type: 'hostKeyResponse', requestId: number, accept: boolean }
-    | { type: 'authResponse', requestId: number, useSavedPassword?: boolean, savePassword?: boolean, password?: string, keyId?: string, passphrase?: string, responses?: string[] }
+    | { type: 'authResponse', requestId: number, useSavedPassword?: boolean, savePassword?: boolean, password?: string, keyId?: string, deviceKeyId?: string, passphrase?: string, responses?: string[] }
     | { type: 'write', data: string }
     | { type: 'resize', cols: number, rows: number }
     | { type: 'outputAck', sequence: number, generation: number }
@@ -80,6 +81,12 @@ export interface SSHBridge {
     setBackground(options: { enabled: boolean }): Promise<{ enabled: boolean }>
     credentialStatus(options: { host: string, port: number, username: string }): Promise<{ saved: boolean }>
     deletePassword(options: { host: string, port: number, username: string }): Promise<void>
+    deviceKeys(options: { host: string, port: number, username: string }): Promise<{ keys: DeviceKey[] }>
+    generateDeviceKey(options: { connectionId: string, generation: number, ownerId: string, confirmed: boolean }): Promise<{ key: DeviceKey }>
+    deviceKeyPublic(options: { connectionId: string, generation: number, ownerId: string, keyId: string }): Promise<{ key: DeviceKey }>
+    markDeviceKey(options: { connectionId: string, generation: number, ownerId: string, keyId: string, status: 'installed' | 'verified' | 'uncertain' }): Promise<{ key: DeviceKey }>
+    deleteDeviceKey(options: { keyId: string }): Promise<void>
+    addListener(eventName: 'deviceKeyDeleted', listener: (event: { keyId: string }) => void): Promise<PluginListenerHandle>
     getViewport(): Promise<{ visible: boolean, height: number, viewportWidth: number, viewportHeight: number, fontPixels?: Record<string, number>, touchSlop?: number }>
 }
 

@@ -595,6 +595,7 @@ const instrumentationMethods = new Map([
     [`${APP}.AndroidHostKeyStoreTest`, new Set(['realCapacitorCallPreservesSmallAndLargeJavaScriptGenerations',
         'savedPinCannotBeReplacedAndPortsRemainSeparate', 'failedCommitWithARealMutatedCacheRequiresFreshApproval'])],
     [`${APP}.ViewportLifecycleTest`, new Set(['rotationPreservesTheBridgeAndRecomputesViewport'])],
+    [`${APP}.EncryptedDeviceKeyStoreTest`, new Set(['distinctGenerationBoundAuthenticationAndDeletion', 'tamperAndMissingKeystoreKeyFailClosed'])],
     [`${APP}.CloudWebViewHarness`, new Set(['holdTheRealAppForCloudInteraction'])],
     [`${APP}.DeferredSSHBridgeTest`, new Set(['deferredExecCompletesWithSeparateUnicodeStreamsAndNoPTY',
         'cancelledExecAndStaleGenerationCannotAffectAnotherTab', 'deferredTmuxTerminalPreservesIdentityAcrossReconnect'])],

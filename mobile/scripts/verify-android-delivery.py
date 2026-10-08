@@ -32,6 +32,7 @@ WEBVIEW_CASES = [
     'actual Activity background closes resources; canceled auth rejects old responses and reconnects',
     'normal notification permission decisions, real background foreground retention and notification Stop All',
     'optional native Keystore password save, secret-free saved login and deletion',
+    'separate native-touch key generation and target-confirmed enrollment, public-only verification and local deletion',
     'durable native host-key pin survives a fresh process and rejects same-endpoint replacement',
 ]
 TMUX_WEBVIEW_CASES = [
@@ -157,7 +158,7 @@ def verify_runtime(runtime, tested_sha):
             and 'failure' not in runtime, 'RUNTIME_NOT_PASSED')
     native = runtime.get('instrumentation')
     require(type(native) is dict and native.get('passed') is True
-            and type(native.get('tests')) is int and native['tests'] == 8
+            and type(native.get('tests')) is int and native['tests'] == 10
             and type(native.get('skipped')) is int and native['skipped'] == 0,
             'NATIVE_TESTS_INCOMPLETE')
     web = runtime.get('webview')

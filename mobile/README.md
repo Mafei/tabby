@@ -19,6 +19,11 @@ core does not define a cross-platform saved-identity import format.
 
 ## Candidate interaction and lifecycle
 
+The next independent key-enrollment batch starts from sealed product SHA
+`85dd17a2bd611ef414227440389881f531084a8d`; the original prototype and that
+candidate remain available. See [device key enrollment](key-enrollment.md)
+for its consent, storage, server-write boundaries and verification scope.
+
 This product batch is based on design SHA `667663dbeb6b8439dd26471a3fa0be64ab814d7f`.
 It preserves the device-tested prototype `ded417ba852295f3ad76bcca4e6e557d1288ca12`.
 Home returns to the connection workbench without disconnecting. Phones switch
