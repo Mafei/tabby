@@ -250,6 +250,8 @@ export async function webviewAcceptance (android, fixture) {
                         nativeTouch: geometry(window.__tabbyCloudObservation?.lastNativeTouch),
                         nativeTouchHitTarget: window.__tabbyCloudObservation?.nativeTouchHitTarget === true,
                         nativeTouchDocumentFocused: window.__tabbyCloudObservation?.nativeTouchDocumentFocused === true,
+                        nativeTouchPhase: ['VISIBILITY', 'SCROLL_VISIBILITY', 'GEOMETRY', 'DISPATCH'].includes(window.__tabbyCloudObservation?.nativeTouchPhase)
+                            ? window.__tabbyCloudObservation.nativeTouchPhase : 'UNKNOWN',
                         clipboardOverlay: { observed: window.__tabbyCloudObservation?.clipboardOverlay?.observed === true,
                             cleared: window.__tabbyCloudObservation?.clipboardOverlay?.cleared === true,
                             phase: ['command', 'selection'].includes(window.__tabbyCloudObservation?.clipboardOverlay?.phase)
@@ -287,6 +289,7 @@ export async function webviewAcceptance (android, fixture) {
         await until(() => ['clients', 'sessions', 'ptys', 'timers', 'pendingAuth'].every(key => fixture.stats()[key] === 0), 'ANDROID_FIXTURE_RESOURCES_NOT_RELEASED')
     }
     async function nativeTouch (locator, durationMs = 100, enclosingDeadline = Infinity) {
+        await page.evaluate(() => { window.__tabbyCloudObservation.nativeTouchPhase = 'VISIBILITY' })
         if (!await locator.isVisible()) {
             const more = page.getByRole('button', { name: '更多终端操作', exact: true })
             if (await more.isVisible() && !await more.isDisabled() && !await page.locator('.actions-panel').isVisible()) await nativeTouch(more)
@@ -297,11 +300,13 @@ export async function webviewAcceptance (android, fixture) {
         await page.evaluate(() => {
             window.__tabbyCloudObservation.nativeTouchHitTarget = false
             window.__tabbyCloudObservation.nativeTouchDocumentFocused = false
+            window.__tabbyCloudObservation.nativeTouchPhase = 'SCROLL_VISIBILITY'
         })
         inTime()
         // Prepare visibility only. Activation remains the one real native
         // MotionEvent below; a viewport-inside box can still be panel-clipped.
         await locator.scrollIntoViewIfNeeded({ timeout: Math.max(1, Math.min(3000, deadline - Date.now())) })
+        await page.evaluate(() => { window.__tabbyCloudObservation.nativeTouchPhase = 'GEOMETRY' })
         inTime()
         let box
         let previous
@@ -335,6 +340,7 @@ export async function webviewAcceptance (android, fixture) {
             return Date.now() - stableSince >= 350
         }, 'ANDROID_TOUCH_TARGET_DID_NOT_STABILIZE', Math.max(1, deadline - Date.now()))
         inTime()
+        await page.evaluate(() => { window.__tabbyCloudObservation.nativeTouchPhase = 'DISPATCH' })
         await android.input({ type: 'touch', x: box.x + box.width / 2, y: box.y + box.height / 2, durationMs })
     }
     async function output (needle) {
@@ -346,7 +352,7 @@ export async function webviewAcceptance (android, fixture) {
     }
     async function clipboardOverlayCleared (phase) {
         // A normal outside touch dismisses SystemUI's clipboard preview. Touch
-        // only the passive app status label, through the existing native input
+        // the app's More control, through the existing native input
         // guards, once within this phase's unchanged budget. Still observe real
         // disappearance before activating any app command.
         let observed = false
@@ -371,7 +377,6 @@ export async function webviewAcceptance (android, fixture) {
                     inTime()
                     dismissalSent = true
                     await nativeTouch(target, 100, deadline)
-                    if (await page.locator('.actions-panel').isVisible()) await nativeTouch(target, 100, deadline)
                     inTime()
                 }
             }
@@ -1024,7 +1029,7 @@ export async function webviewAcceptance (android, fixture) {
         await endHarness()
 
         stage = 'foreground-service-notification'
-        await startHarness()
+        await beginHarness()
         await connect(true)
         const api = Number(await android.shell('getprop ro.build.version.sdk'))
         async function systemButton (pattern, failure) {
@@ -1078,7 +1083,7 @@ export async function webviewAcceptance (android, fixture) {
         verify('normal notification permission decisions, real background foreground retention and notification Stop All')
 
         stage = 'native-encrypted-password'
-        await startHarness()
+        await beginHarness()
         await connect(true, 'password', 'save')
         check((await plugin('credentialStatus', { host: '127.0.0.1', port: fixture.metadata.port, username: fixture.metadata.username })).saved === true, 'ANDROID_PASSWORD_NOT_SAVED')
         await disconnect()
@@ -1119,6 +1124,14 @@ export async function webviewAcceptance (android, fixture) {
         return { passed: true, cases: passed, skipped: 0, deviceStates, inputEvidence: 'Actual Android InputConnection; specific Chinese IME candidate UI unverified.',
             touchEvidence: 'Android instrumentation MotionEvent injection, not synthetic DOM touch.' }
     } catch (error) {
+        // Requested real images, never credential forms or unknown stages.
+        // A failed acceptance image is diagnostic evidence, not a passed APK.
+        if (page && ['native-touch-scroll-selection-clipboard', 'foreground-service-notification', 'native-encrypted-password'].includes(stage)) {
+            try {
+                if (await page.locator('.pane-status').textContent() === '已连接' && await page.getByRole('dialog').count() === 0
+                    && await page.locator('input[type="password"]').count() === 0) await capture('failure-' + stage)
+            } catch { /* Original test failure remains authoritative. */ }
+        }
         const failure = error instanceof TestFailure ? error
             : new TestFailure(`ANDROID_WEBVIEW_${stage.toUpperCase().replaceAll('-', '_')}_${substage.toUpperCase().replaceAll('-', '_')}_FAILED`)
         failure.diagnostics = await diagnostics(error)

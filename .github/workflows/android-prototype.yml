@@ -239,6 +239,14 @@ jobs:
           if [ -x "$ANDROID_HOME/platform-tools/adb" ]; then
             "$ANDROID_HOME/platform-tools/adb" -s emulator-5554 emu kill || true
           fi
+      - name: Upload fixture-only runtime images on acceptance failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Android-Runtime-Images-api${{ matrix.api }}-${{ matrix.form }}-${{ github.event.pull_request.head.sha || github.sha }}
+          path: mobile/artifacts/runtime-screenshots/*.png
+          if-no-files-found: ignore
+          retention-days: 14
       - name: Build the ARM64 delivery APK
         working-directory: mobile/android
         run: ./gradlew --no-daemon -PtabbyAbis=arm64-v8a assembleDebug
