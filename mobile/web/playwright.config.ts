@@ -3,7 +3,8 @@ import { defineConfig, devices } from '@playwright/test'
 export default defineConfig({
     testDir: './tests',
     testMatch: '*.spec.ts',
-    timeout: 20_000,
+    // Menu navigation adds real UI steps; gesture and protocol deadlines remain separate.
+    timeout: 40_000,
     fullyParallel: true,
     workers: 2,
     reporter: [['list'], ['html', { outputFolder: '../test-results/web-report', open: 'never' }]],

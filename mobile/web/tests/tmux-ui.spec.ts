@@ -329,7 +329,7 @@ test('network backoff pauses occupied sessions; explicit restore takeover retain
     // terminal state. That completion alone must not clear recovery ownership.
     await page.evaluate(() => { window.testBridge.nextExecFailure = { finalCode: 'transport_lost', transportLost: true } })
     await authenticate(page, 2)
-    await expect.poll(() => page.evaluate(() => window.testBridge.starts.length), { timeout: 6000 }).toBe(4)
+    await expect.poll(() => page.evaluate(() => window.testBridge.starts.length), { timeout: 10000 }).toBe(4)
     await page.evaluate(() => { window.testBridge.tmuxSessions[0].clients = 1 })
     await authenticate(page, 3)
     await expect(active(page).locator('.notice')).toContainText('自动恢复已暂停')

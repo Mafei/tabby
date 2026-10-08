@@ -309,7 +309,7 @@ export class MobileTmuxRecovery {
     private budgetTimer?: ReturnType<typeof setTimeout>
     constructor(private readonly options: RecoveryOptions) {}
     cancel(): void { this.controller.cancel(); if (this.budgetTimer) clearTimeout(this.budgetTimer); this.budgetTimer = undefined }
-    reset(): void { this.cancel(); this.controller.reset(); this.attempts = 0; this.deadline = 0 }
+    reset(): void { if (this.budgetTimer) clearTimeout(this.budgetTimer); this.budgetTimer = undefined; this.controller.reset(); this.attempts = 0; this.deadline = 0 }
     private schedule(): number {
         if (!this.deadline) {
             this.deadline = performance.now() + 120000
@@ -336,7 +336,7 @@ export class MobileTmuxRecovery {
             if (signal.aborted || !this.options.hasBinding() || !this.options.foreground() || !this.options.credentialsAvailable()) { return }
             try {
                 await new Promise<void>((resolve, reject) => {
-                    const timer = setTimeout(() => reject(new MobileTmuxError('recovery_timeout')), Math.max(1, Math.min(75000, this.deadline - performance.now())))
+                    const timer = setTimeout(() => reject(new MobileTmuxError('recovery_timeout')), Math.max(1, Math.min(75000, this.deadline ? this.deadline - performance.now() : 75000)))
                     const abort = () => { clearTimeout(timer); reject(new MobileTmuxError('exec_cancelled')) }
                     signal.addEventListener('abort', abort, { once: true })
                     Promise.resolve().then(() => this.options.connect(signal, epoch)).then(resolve, reject)

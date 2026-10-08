@@ -10,6 +10,7 @@ import struct
 import subprocess
 import tempfile
 import zipfile
+from manifest_policy import inspect_connection_components, ManifestPolicyError
 from web_security import inspect_web_assets, bind_aot_assets, WebSecurityError
 
 APP = 'org.tabby.android.prototype'
@@ -88,13 +89,10 @@ def main():
     manifest = run(str(tools / 'aapt2'), 'dump', 'xmltree', '--file', 'AndroidManifest.xml', str(apk))
     for flag in ['allowBackup', 'fullBackupContent', 'usesCleartextTraffic', 'extractNativeLibs']:
         require(re.search(r':' + flag + r'\([^\n]+\)=false', manifest), 'Unsafe or absent packaged flag: ' + flag)
-    service_blocks = re.findall(r'(?m)^( +)E: service[^\n]*\n((?:(?!\1E:)[^\n]*\n)*)', manifest)
-    require(len(service_blocks) == 1, 'Exactly one connection service is required')
-    service = service_blocks[0][1]
-    require('ConnectionService' in service and re.search(r':exported\([^\n]+\)=false', service), 'Connection service must be private')
-    require(re.search(r':foregroundServiceType\([^\n]+\)=0x40000000', service), 'Connection service must use specialUse only')
-    require('android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE' in service, 'Connection service purpose must be declared')
-    require(not re.search(r'E: receiver\b', manifest), 'Automatic receivers are not allowed')
+    try:
+        component_policy = inspect_connection_components(manifest)
+    except ManifestPolicyError as error:
+        raise SystemExit(str(error)) from error
     require('protectionLevel(0x01010009)=0x00000002' in manifest, 'Receiver permission must remain signature protected')
     run(str(tools / 'zipalign'), '-c', '-P', '16', '4', str(apk))
     signature = run(str(tools / 'apksigner'), 'verify', '--verbose', '--print-certs', str(apk))
@@ -154,7 +152,7 @@ def main():
     report = {'verified': True, 'artifact': apk.name, 'sha256': hashlib.file_digest(apk.open('rb'), 'sha256').hexdigest(),
               'bytes': apk.stat().st_size, 'sourceCommit': source, 'sourceTree': tree, 'sourceDirty': dirty,
               'applicationId': APP, 'minSdk': 26, 'targetSdk': 36, 'debuggable': True,
-              'permissions': permissions, 'publicTestCertificateSHA256': certificate[1], 'signatureScheme': 'v2',
+              'permissions': permissions, 'componentPolicy': component_policy, 'publicTestCertificateSHA256': certificate[1], 'signatureScheme': 'v2',
               'zipAlignmentBytes': PAGE, 'expectedABIs': args.expected_abis, 'packagedABIs': packaged_abis,
               'nativeLibraries': libraries, 'arm64RuntimeVerified': False,
               'webSecurity': web_security,

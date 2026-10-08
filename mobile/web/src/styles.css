@@ -108,3 +108,8 @@ input, select { min-height: 48px; padding: .45rem; width: 100%; background: #212
 .session-tabs[hidden] { display: none; }
 
 .all-keys-panel { max-height: calc(100% - 112px); overflow-y: auto; }
+.workspace-header, .workspace-header > button { height: var(--header-height, 48px); }
+.actions-panel { top: calc(var(--header-height, 48px) + 4px); max-height: calc(100% - var(--header-height, 48px) - 16px); }
+.all-keys-panel { max-height: calc(100% - var(--header-height, 48px) - var(--input-height, 48px) - 16px); bottom: calc(var(--input-height, 48px) + 8px); }
+.input-strip, .input-strip textarea, .input-strip button { height: var(--input-height, 48px); }
+.tools button { flex-basis: var(--key-width, 56px); padding-block: 0; line-height: 1; }

@@ -73,7 +73,9 @@ jobs:
         run: npm run test:delivery --prefix mobile
       - name: Packaged WebView policy rejection tests
         if: always() && steps.install.outcome == 'success'
-        run: python3 -m unittest discover -s mobile/test -p test_android_web_security.py -v
+        run: |
+          python3 -m unittest discover -s mobile/test -p test_android_web_security.py -v
+          python3 -m unittest discover -s mobile/test -p test_android_manifest_policy.py -v
       - name: Rust safety and real SSH integration
         id: native
         if: always() && steps.install.outcome == 'success'

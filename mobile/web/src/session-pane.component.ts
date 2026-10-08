@@ -265,12 +265,12 @@ export class SessionPaneComponent implements AfterViewInit, OnDestroy {
     private readonly visibilityListener = () => {
         if (document.visibilityState === 'hidden') this.zone.run(() => this.suspend(true))
     }
-    private suspend(deferTransportDecision = false): void {
+    private suspend(deferTransportDecision = false, invalidatePicker = true): void {
         this.foreground = false; this.clearModifiers(); this.keyCancel(); this.touchCancel(); this.input?.cancel()
         this.inputElement?.nativeElement.blur(); this.view?.cancelMouseGesture(); ++this.interactionEpoch
         this.volatilePassword = undefined; this.auth = undefined; this.password = ''; this.passphrase = ''
         if (!deferTransportDecision && (!this.backgroundEnabled || !this.connected || this.modal)) {
-            this.disconnect(!this.pickerActive); this.notice = '应用进入后台，SSH 已关闭。返回后可重新连接。'
+            this.disconnect(invalidatePicker); this.notice = '应用进入后台，SSH 已关闭。返回后可重新连接。'
         }
     }
 
@@ -285,7 +285,7 @@ export class SessionPaneComponent implements AfterViewInit, OnDestroy {
             .then(handle => { if (this.destroyed) { void handle.remove() } else { this.handles.push(handle) } })
             .catch(() => {})
         this.bridge.addListener('lifecycleState', event => this.zone.run(() => {
-            if (!event.active) { this.backgroundEnabled = event.retained === true; this.suspend() }
+            if (!event.active) { this.backgroundEnabled = event.retained === true; this.suspend(false, event.reason !== 'privateKeyPicker') }
             else { this.foreground = true; void this.loadTypography(); void this.refreshBackgroundState() }
         })).then(handle => { if (this.destroyed) { void handle.remove() } else { this.handles.push(handle) } }).catch(() => {})
         window.visualViewport?.addEventListener('resize', this.viewportListener)
@@ -753,7 +753,10 @@ export class SessionPaneComponent implements AfterViewInit, OnDestroy {
     private async loadTypography(): Promise<void> {
         try { const viewport = await this.bridge.getViewport(); if (this.destroyed) return
             this.zone.run(() => { this.fontPixels = viewport.fontPixels ?? {};
-                for (const size of [14, 16, 20]) document.documentElement.style.setProperty('--font-' + size, (this.fontPixels[String(size)] ?? size) + 'px'); this.touchSlop = viewport.touchSlop ?? 8; this.updateViewport(viewport.viewportHeight); this.view?.setFontSize(this.fontPixels[String(this.fontSize)] ?? this.fontSize) })
+                for (const size of [14, 16, 20]) document.documentElement.style.setProperty('--font-' + size, (this.fontPixels[String(size)] ?? size) + 'px');
+                document.documentElement.style.setProperty('--header-height', Math.max(48, Math.ceil(1.2 * ((this.fontPixels['16'] ?? 16) + (this.fontPixels['14'] ?? 14)))) + 'px');
+                document.documentElement.style.setProperty('--input-height', Math.max(48, Math.ceil(1.2 * (this.fontPixels['16'] ?? 16) + 20)) + 'px');
+                document.documentElement.style.setProperty('--key-width', Math.max(56, Math.ceil(3 * (this.fontPixels['16'] ?? 16) + 8)) + 'px'); this.touchSlop = viewport.touchSlop ?? 8; this.updateViewport(viewport.viewportHeight); this.view?.setFontSize(this.fontPixels[String(this.fontSize)] ?? this.fontSize) })
         } catch {}
     }
     private async refreshBackgroundState(): Promise<void> { try { const state = await this.bridge.backgroundState(); this.zone.run(() => { this.backgroundEnabled = state.enabled }) } catch {} }

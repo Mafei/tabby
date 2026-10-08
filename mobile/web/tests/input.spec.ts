@@ -501,6 +501,7 @@ test('DSR parser replies survive selection and sticky Ctrl; output ACK follows p
 
 test('old composition and delayed clipboard never enter a new connection', async ({ page }) => {
     await ready(page)
+    await actions(page)
     await page.getByRole('textbox', { name: '终端输入' }).focus()
     await page.getByRole('textbox', { name: '终端输入' }).evaluate((element: HTMLTextAreaElement) => {
         ;(window as unknown as { oldInput: HTMLTextAreaElement }).oldInput = element
@@ -532,6 +533,7 @@ test('old composition and delayed clipboard never enter a new connection', async
 
 test('old queued output is disposed on reconnect; malformed overproduction closes explicitly', async ({ page }) => {
     await ready(page)
+    await actions(page)
     await page.evaluate(() => {
         const active = window.testBridge.starts.at(-1)!
         window.testBridge.emit({ connectionId: active.connectionId, generation: active.generation, type: 'data',
