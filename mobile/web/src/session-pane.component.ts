@@ -300,9 +300,9 @@ export class SessionPaneComponent implements AfterViewInit, OnDestroy {
     async connect(automatic = false, takeover = false): Promise<void> {
         if (this.busy || this.destroyed) { return }
         const host = this.host.trim(); const username = this.username.trim(); const port = Number(this.port)
-        if (!host || !username || !Number.isInteger(port) || port < 1 || port > 65535 || /[\x00-\x20]/.test(host)) {
-            this.notice = '请输入有效主机、端口和用户名。'; return
-        }
+        if (!host || /[\x00-\x20]/.test(host)) { this.notice = '请输入有效主机地址。'; return }
+        if (!Number.isInteger(port) || port < 1 || port > 65535) { this.notice = '请输入 1–65535 范围内的整数端口。'; return }
+        if (!username) { this.notice = '请输入用户名。'; return }
         if (this.boundBinding && (host !== this.boundBinding.host || port !== this.boundBinding.port || username !== this.boundBinding.account)) {
             this.notice = '恢复必须使用保存的主机、端口和账号。更换目标请先改选会话。'; return
         }

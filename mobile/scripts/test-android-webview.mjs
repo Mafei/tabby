@@ -175,6 +175,9 @@ export async function webviewAcceptance (android, fixture) {
                         ['认证中', 'AUTHENTICATING'], ['等待认证', 'WAITING_AUTH'], ['已连接', 'READY']])
                     const noticeNames = new Map([
                         ['请输入有效主机、端口和用户名。', 'INVALID_ENDPOINT'],
+                        ['请输入有效主机地址。', 'INVALID_HOST'],
+                        ['请输入 1–65535 范围内的整数端口。', 'INVALID_PORT'],
+                        ['请输入用户名。', 'INVALID_USERNAME'],
                         ['原生 SSH 插件不可用。此页面不能在普通浏览器中连接 SSH。', 'PLUGIN_UNAVAILABLE'],
                         ['无法建立 SSH 连接。请检查地址和网络。', 'START_FAILED'],
                         ['主机密钥已变化，连接已拒绝。请先通过可信渠道核实。', 'HOST_KEY_CHANGED'],
@@ -201,6 +204,8 @@ export async function webviewAcceptance (android, fixture) {
                         'visualHeight', 'devicePixelRatio', 'nativeViewportWidth', 'nativeViewportHeight', 'nativeKeyboardHeight', 'firstHistoryOrdinal'].filter(key => Number.isFinite(values?.[key]))
                         .map(key => [key, values[key]]))
                     const notice = document.querySelector('.notice')?.textContent || ''
+                    const endpointValue = name => document.querySelector(`.connect-panel input[name="${name}"]`)?.value || ''
+                    const endpointPort = endpointValue('port')
                     return {
                         capabilities: { objectHasOwn: typeof Object.hasOwn === 'function', cryptoRandomUUID: typeof window.crypto?.randomUUID === 'function',
                             arrayAt: typeof Array.prototype.at === 'function', abortSignalAny: typeof window.AbortSignal?.any === 'function',
@@ -214,6 +219,11 @@ export async function webviewAcceptance (android, fixture) {
                         portInputCount: document.querySelectorAll('input[name="port"]').length,
                         usernameInputCount: document.querySelectorAll('input[name="username"]').length,
                         authSelectCount: document.querySelectorAll('select[name="authMode"]').length,
+                        formInputs: Object.fromEntries(['hostMatch', 'portMatch', 'usernameMatch', 'authModeMatch', 'portValid', 'documentFocused']
+                            .map(key => [key, window.__tabbyCloudObservation?.formInputs?.[key] === true])),
+                        endpointValidity: { host: !!endpointValue('host').trim() && !/[\x00-\x20]/.test(endpointValue('host').trim()),
+                            port: !!endpointPort && Number.isInteger(Number(endpointPort)) && Number(endpointPort) >= 1 && Number(endpointPort) <= 65535,
+                            username: !!endpointValue('username').trim() },
                         passwordInputCount: document.querySelectorAll('input[name="password"]').length,
                         submitVisible: visible('.connect-panel button[type="submit"]'),
                         hostDialogVisible: visible('[role="dialog"][aria-label="确认主机密钥"]'),
@@ -579,8 +589,8 @@ export async function webviewAcceptance (android, fixture) {
         await prepareDevice(preparation, harnessDeadline)
         return view.pid()
     }
-    async function focusSample () {
-        const deadline = Math.min(harnessDeadline, Date.now() + 5000)
+    async function focusSample (enclosingDeadline = Infinity) {
+        const deadline = Math.min(harnessDeadline, Date.now() + 5000, enclosingDeadline)
         check(Date.now() < deadline, 'ANDROID_FOCUS_OBSERVATION_DEADLINE_EXCEEDED')
         const [deviceState, focusState] = await Promise.all([
             android.input({ type: 'deviceState' }, { deadline }), android.focusState({ deadline }),
@@ -648,6 +658,31 @@ export async function webviewAcceptance (android, fixture) {
     }
     async function connect (known, mode = 'password', credential = 'transient') {
         const authenticatedBefore = fixture.stats().authenticated
+        // A newly rebuilt form can exist before native foreground focus and
+        // Angular's queued form-control registration have settled. Observe it;
+        // never repair values, grant focus, or replay a failed submission.
+        const formDeadline = Math.min(harnessDeadline, Date.now() + 10000)
+        let formSince
+        let previousForm
+        await step('form-foreground-ready', () => until(async () => {
+            const [{ deviceState: state, focusState: focus }, form] = await Promise.all([
+                focusSample(formDeadline), page.evaluate(() => ({ focused: document.hasFocus(), width: innerWidth, height: innerHeight,
+                    controlsReady: ['host', 'port', 'username'].every(name => {
+                        const nodes = document.querySelectorAll(`.connect-panel input[name="${name}"]`)
+                        const node = nodes[0]; const box = node?.getBoundingClientRect()
+                        return nodes.length === 1 && !node.disabled && !node.readOnly && box.width > 0 && box.height > 0
+                    }) })),
+            ])
+            check(Date.now() < formDeadline, 'ANDROID_FORM_FOREGROUND_DID_NOT_STABILIZE')
+            check(state.secure === false && state.deviceLocked === false && state.keyguardShowing === false, 'ANDROID_FORM_DEVICE_NOT_READY')
+            const ready = state.interactive && state.windowFocused && state.scenarioState === 'RESUMED' && form.focused && form.controlsReady
+                && focus.appOnInputFocusedDisplay && focus.inputDispatchEnabled && !focus.inputDispatchFrozen && focus.inputFocusRequestResult === 'OK'
+                && ['wmsFocusedWindowCategory', 'wmsFocusedAppCategory', 'inputFocusedWindowCategory', 'inputFocusedApplicationCategory',
+                    'inputFocusRequestCategory', 'activityDisplayResumedCategory'].every(key => focus[key] === 'APP')
+            const current = JSON.stringify(form)
+            if (!ready || current !== previousForm) { formSince = Date.now(); previousForm = current }
+            return ready && Date.now() - formSince >= 350
+        }, 'ANDROID_FORM_FOREGROUND_DID_NOT_STABILIZE', Math.max(1, formDeadline - Date.now())))
         await step('form-host', () => page.getByLabel('主机', { exact: true }).fill('127.0.0.1'))
         await step('form-port', () => page.getByLabel('端口', { exact: true }).fill(String(fixture.metadata.port)))
         await step('form-username', () => page.getByLabel('用户名', { exact: true }).fill(fixture.metadata.username))
@@ -666,6 +701,23 @@ export async function webviewAcceptance (android, fixture) {
         }
         await step('form-hide-ime', () => plugin('hideKeyboard'))
         await step('form-ime-hidden', () => until(async () => !(await viewport()).visible, 'ANDROID_FORM_IME_DID_NOT_HIDE'))
+        const inputDeadline = Math.min(harnessDeadline, Date.now() + 5000)
+        let inputSince
+        await step('form-input-readback', () => until(async () => {
+            const state = await page.evaluate(({ port, username, mode }) => {
+                const value = name => document.querySelector(`.connect-panel [name="${name}"]`)?.value
+                const portValue = value('port')
+                const result = { hostMatch: value('host') === '127.0.0.1', portMatch: portValue === String(port), usernameMatch: value('username') === username,
+                    authModeMatch: value('authMode') === mode, portValid: !!portValue && Number.isInteger(Number(portValue)) && Number(portValue) >= 1 && Number(portValue) <= 65535,
+                    documentFocused: document.hasFocus() }
+                window.__tabbyCloudObservation.formInputs = result
+                return result
+            }, { port: fixture.metadata.port, username: fixture.metadata.username, mode })
+            check(Date.now() < inputDeadline, 'ANDROID_FORM_FIXTURE_INPUTS_DID_NOT_STABILIZE')
+            const ready = Object.values(state).every(value => value === true)
+            if (!ready || inputSince === undefined) inputSince = Date.now()
+            return ready && Date.now() - inputSince >= 350
+        }, 'ANDROID_FORM_FIXTURE_INPUTS_DID_NOT_STABILIZE', Math.max(1, inputDeadline - Date.now())))
         await step('form-native-submit', () => nativeTouch(page.getByRole('button', { name: '连接', exact: true })))
         if (!known) {
             await step('host-key-dialog', () => page.getByRole('dialog', { name: '确认主机密钥' }).waitFor())
