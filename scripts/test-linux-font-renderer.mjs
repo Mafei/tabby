@@ -8,10 +8,10 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { extractAll } from '@electron/asar'
+import { runtimeFailure, runtimeStages as stages } from './linux-font-runtime/diagnostics.mjs'
 
 const root = fileURLToPath(new URL('..', import.meta.url))
 const hash = bytes => createHash('sha256').update(bytes).digest('hex')
-const stages = ['STARTUP', 'NATIVE_PTY', 'NATIVE_RUSSH', 'NATIVE_KEYTAR', 'NATIVE_SERIALPORT', 'NATIVE_CWD', 'PLUGIN_FONT_SOURCES', 'SANDBOXED_FONT_RENDERER', 'COMPLETE']
 const publicCodes = new Set(['FONT_RUNTIME_ARGUMENTS_INVALID', 'FONT_RUNTIME_ARGUMENTS_REQUIRED',
     'FONT_RUNTIME_APPDIR_AMBIGUOUS', 'FONT_RUNTIME_SOURCE_UNAVAILABLE', 'FONT_RUNTIME_BACKEND_INVALID',
     'FONT_RUNTIME_COLUMNS_FAILED', 'FONT_RUNTIME_RESULT_FAILED', 'FONT_RUNTIME_NATIVE_MODULES_FAILED',
@@ -22,6 +22,7 @@ const publicCodes = new Set(['FONT_RUNTIME_ARGUMENTS_INVALID', 'FONT_RUNTIME_ARG
     'FONT_RUNTIME_REPORT_LIMIT', 'FONT_RUNTIME_ELECTRON_START_OR_SANDBOX_FAILED', 'FONT_RUNTIME_FAILED',
     ...stages.map(stage => `FONT_RUNTIME_FAILED_${stage}`)])
 function check (value, code) { if (!value) { throw new Error(code) } }
+export const validateFailure = runtimeFailure
 function args (values) {
     const result = {}
     for (let index = 0; index < values.length; index += 2) {
@@ -140,6 +141,7 @@ async function run (options) {
         await cp(path.join(testDirectory, 'main.cjs'), path.join(appDirectory, 'font-main.cjs'))
         await cp(path.join(testDirectory, 'preload.cjs'), path.join(appDirectory, 'font-preload.cjs'))
         await cp(path.join(testDirectory, 'renderer.js'), path.join(appDirectory, 'font-renderer.js'))
+        await cp(path.join(testDirectory, 'diagnostics.mjs'), path.join(appDirectory, 'font-diagnostics.mjs'))
         const modules = path.join(root, 'tabby-terminal/node_modules/@xterm')
         for (const [name, target] of [['xterm/lib/xterm.mjs', 'xterm.mjs'], ['xterm/css/xterm.css', 'xterm.css'],
             ['addon-unicode11/lib/addon-unicode11.mjs', 'unicode11.mjs'], ['addon-webgl/lib/addon-webgl.mjs', 'webgl.mjs']]) {
@@ -173,8 +175,8 @@ async function run (options) {
             value = JSON.parse(bytes)
         } catch (_error) { throw new Error('FONT_RUNTIME_ELECTRON_START_OR_SANDBOX_FAILED') }
         if (exit.code !== 0 || value.passed !== true) {
-            const stage = stages.includes(value.stage) ? value.stage : 'STARTUP'
-            throw new Error(`FONT_RUNTIME_FAILED_${stage}`)
+            const failure = validateFailure(value)
+            throw Object.assign(new Error(failure.code), { runtimeFailure: failure })
         }
         const result = validateRuntime(value)
         const osRelease = await readFile('/etc/os-release', 'utf8')
@@ -208,7 +210,10 @@ if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === imp
         console.log('PASS actual packaged Electron font runtime: sandboxed renderer, packaged sources, custom glyphs and terminal columns.')
     } catch (error) {
         const code = publicCodes.has(error?.message) ? error.message : 'FONT_RUNTIME_FAILED'
-        if (output) { await mkdir(path.dirname(output), { recursive: true }); await writeFile(output, JSON.stringify({ passed: false, code }) + '\n') }
-        console.error(code); process.exitCode = 1
+        const failure = error?.runtimeFailure ? validateFailure(error.runtimeFailure) : { passed: false, code }
+        if (output) { await mkdir(path.dirname(output), { recursive: true }); await writeFile(output, JSON.stringify(failure) + '\n') }
+        console.error(code)
+        if (failure.failureCode) { console.error(failure.failureCode) }
+        process.exitCode = 1
     }
 }

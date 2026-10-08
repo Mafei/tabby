@@ -134,9 +134,11 @@ jobs:
           mkdir -p dist/runtime-appdir
           tar -xzf "${archives[0]}" -C dist/runtime-appdir
       - name: Actual packaged Electron sandboxed font and synthetic TUI renderer
+        id: font-runtime
         run: |
           xvfb-run --auto-servernum node scripts/test-linux-font-renderer.mjs --app-dir dist/runtime-appdir --report dist/linux-font-runtime.json
       - uses: actions/upload-artifact@v4
+        if: ${{ (success() || failure()) && (steps.font-runtime.outcome == 'success' || steps.font-runtime.outcome == 'failure') }}
         with:
           name: tabby-linux-font-runtime-ubuntu22-${{ github.event.pull_request.head.sha || github.sha }}
           path: dist/linux-font-runtime.json

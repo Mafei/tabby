@@ -11,6 +11,7 @@ app.setPath('userData', config.userData)
 app.setPath('crashDumps', path.join(config.userData, 'crashes'))
 let finished = false
 let stage = 'STARTUP'
+let failureCode = () => 'UNKNOWN_FAILURE'
 const windows = new Set()
 const hash = value => crypto.createHash('sha256').update(value).digest('hex')
 function check (value, code) { if (!value) { throw new Error(code) } }
@@ -29,15 +30,16 @@ function finish (result) {
     for (const window of windows) { if (!window.isDestroyed()) { window.destroy() } }
     app.exit(result.passed ? 0 : 1)
 }
-const timer = setTimeout(() => finish({ passed: false, stage }), 90000)
+function fail (error) { finish({ passed: false, stage, failureCode: failureCode(error) }) }
+const timer = setTimeout(() => fail(new Error('FONT_RUNTIME_DEADLINE')), 90000)
 timer.unref()
-process.on('uncaughtException', () => finish({ passed: false, stage }))
-process.on('unhandledRejection', () => finish({ passed: false, stage }))
+process.on('uncaughtException', fail)
+process.on('unhandledRejection', fail)
 function secureWindow (options) {
     const window = new BrowserWindow(options); windows.add(window)
     window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
     window.webContents.on('will-navigate', (event, url) => { if (!url.startsWith('file://')) { event.preventDefault() } })
-    window.webContents.on('render-process-gone', () => finish({ passed: false, stage }))
+    window.webContents.on('render-process-gone', () => fail(new Error('RENDER_PROCESS_GONE')))
     return window
 }
 async function activeNativeModules () {
@@ -133,6 +135,8 @@ async function platformFonts (window, ids) {
     } finally { if (debuggerAPI.isAttached()) { debuggerAPI.detach() } }
 }
 async function main () {
+    const diagnostics = await import('./font-diagnostics.mjs')
+    failureCode = diagnostics.failureCode
     await app.whenReady()
     check(process.versions.electron.split('.')[0] === '43', 'ELECTRON_43_REQUIRED')
     check(!['no-sandbox', 'disable-setuid-sandbox', 'disable-gpu-sandbox'].some(value => app.commandLine.hasSwitch(value)), 'SANDBOX_BYPASS_FORBIDDEN')
@@ -151,6 +155,7 @@ async function main () {
     })
     await bounded(window.loadFile(path.join(__dirname, 'font-test.ready.html')))
     const result = await bounded(rendererResult, 30000)
+    if (result?.passed !== true) { throw new Error(failureCode(result?.failureCode)) }
     check(result.passed === true && result.sandboxed === true && result.contextIsolated === true && result.nodeUnavailable === true && result.facesLoaded === 5, 'FONT_RENDERER_FAILED')
     const sampleIDs = ['regular', 'bold', 'box', 'block', 'powerline', 'icons', 'cjk', 'braille', 'emoji']
     check(JSON.stringify(result.sampleIDs) === JSON.stringify(sampleIDs), 'FONT_SAMPLE_LIST_FAILED')
@@ -166,4 +171,4 @@ async function main () {
         dom: result.dom, webgl: result.webgl, platformFontUsage: usage,
         renderedScreenshotSHA256: hash(screenshot.toPNG()) })
 }
-main().catch(() => finish({ passed: false, stage }))
+main().catch(fail)

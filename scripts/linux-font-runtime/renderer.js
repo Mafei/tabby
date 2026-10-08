@@ -1,6 +1,7 @@
 import { Terminal } from './xterm.mjs'
 import { Unicode11Addon } from './unicode11.mjs'
 import { WebglAddon } from './webgl.mjs'
+import { failureCode } from './font-diagnostics.mjs'
 /* global fontRuntime, FONT_SOURCES */
 // Public, synthetic TUI text only. No shell, server or external AI service.
 async function testRenderer () {
@@ -8,7 +9,7 @@ async function testRenderer () {
         throw new Error('FONT_RENDERER_SANDBOX_REQUIRED')
     }
     const faces = FONT_SOURCES.map(source => new FontFace(source.family, `url(${JSON.stringify(source.url)})`, { weight: String(source.weight) }))
-    await Promise.all(faces.map(face => face.load()))
+    await Promise.all(faces.map(face => face.load())).catch(() => { throw new Error('FONT_FACE_LOAD_FAILED') })
     for (const face of faces) { document.fonts.add(face) }
     const loaded = await Promise.all(faces.map(async (face, index) => {
         const source = FONT_SOURCES[index]
@@ -37,6 +38,7 @@ async function testRenderer () {
     }
     const canvas = document.createElement('canvas'); canvas.width = 128; canvas.height = 64
     const context = canvas.getContext('2d', { willReadFrequently: true })
+    if (!context) { throw new Error('FONT_CANVAS_UNAVAILABLE') }
     function pixels (content, family = stack) {
         context.clearRect(0, 0, 128, 64)
         context.fillStyle = '#fff'; context.font = `400 32px ${family}`
@@ -58,7 +60,9 @@ async function testRenderer () {
     context.font = '400 32px "Tabby Bundled Mono"'
     const monoWidths = ['M', 'W', 'i', '0', '\ue0b0'].map(glyph => context.measureText(glyph).width)
     const monoEqual = monoWidths.every(width => width > 0 && Math.abs(width - monoWidths[0]) < 0.02)
-    if (!distinctInk || !monoEqual || pixels('😀').colored === 0) { throw new Error('FONT_PIXEL_OR_WIDTH_FAILED') }
+    if (!distinctInk) { throw new Error('FONT_DISTINCT_GLYPH_INK_FAILED') }
+    if (!monoEqual) { throw new Error('FONT_MONO_WIDTH_FAILED') }
+    if (pixels('😀').colored === 0) { throw new Error('FONT_COLOR_EMOJI_FAILED') }
     async function frame () { await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))) }
     async function terminal (element, useWebGL) {
         const term = new Terminal({ cols: 120, rows: 18, fontFamily: stack, fontSize: 16, fontWeight: '400', fontWeightBold: '700', allowProposedApi: true })
@@ -111,9 +115,27 @@ async function testRenderer () {
         term.select(0, 0, 40)
         const selectionCopied = term.getSelection() === 'A'.repeat(38) + '中'
         term.clearSelection(); term.resize(60, 18); await frame()
-        const resized = term.cols === 60 && term.buffer.active.cursorX === 30 && term.buffer.active.cursorY === 1
-            && line(0).getCell(38).getChars() === '中'
-        if (!wrapped || !selectionCopied || !resized) { throw new Error('TERMINAL_WRAP_RESIZE_COPY_FAILED') }
+        // The pinned xterm default preserves the active cursor line group;
+        // shells normally redraw it. Check that behavior before testing reflow.
+        const activeResized = term.cols === 60 && term.buffer.active.cursorX === 10 && term.buffer.active.cursorY === 2
+            && line(0).translateToString(true) === 'A'.repeat(38) + '中'
+            && line(0).getCell(38).getWidth() === 2 && line(0).getCell(39).getWidth() === 0
+            && line(1).translateToString(true) === 'B'.repeat(40) && line(1).isWrapped
+            && line(2).translateToString(true) === 'B'.repeat(10) && line(2).isWrapped
+        if (!wrapped) { throw new Error('TERMINAL_WRAP_FAILED') }
+        if (!selectionCopied) { throw new Error('TERMINAL_SELECTION_COPY_FAILED') }
+        if (!activeResized) { throw new Error('TERMINAL_ACTIVE_LINE_RESIZE_FAILED') }
+        // Rewrite the fixture at 40 columns and move the cursor to the next
+        // blank line. Completed output must then reflow at the default setting.
+        term.resize(40, 18)
+        await new Promise(resolve => term.write('\x1b[2J\x1b[H' + 'A'.repeat(38) + '中' + 'B'.repeat(50) + '\r\n', resolve))
+        term.resize(60, 18); await frame()
+        const resized = term.cols === 60 && term.buffer.active.cursorX === 0 && term.buffer.active.cursorY === 2
+            && line(0).translateToString(true) === 'A'.repeat(38) + '中' + 'B'.repeat(20)
+            && line(0).getCell(38).getWidth() === 2 && line(0).getCell(39).getWidth() === 0
+            && line(1).translateToString(true) === 'B'.repeat(30) && line(1).isWrapped
+            && line(2).translateToString(true) === '' && !line(2).isWrapped
+        if (!resized) { throw new Error('TERMINAL_COMPLETED_LINE_REFLOW_FAILED') }
         term.resize(120, 18)
         await new Promise(resolve => term.write('\x1b[2J\x1b[H' + content, resolve))
         term.refresh(0, term.rows - 1); await frame()
@@ -136,4 +158,4 @@ async function testRenderer () {
         facesLoaded: loaded.length, distinctGlyphInk: distinctInk, monoEqual, colorEmoji: true,
         dom, webgl, sampleIDs: samples.map(sample => sample[0]) }
 }
-testRenderer().then(result => fontRuntime.report(result), () => fontRuntime.report({ passed: false }))
+testRenderer().then(result => fontRuntime.report(result), error => fontRuntime.report({ passed: false, failureCode: failureCode(error) }))

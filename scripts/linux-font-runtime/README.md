@@ -32,8 +32,10 @@ which fonts rendered common ASCII, bold, box/block, Powerline/icon, CJK,
 Braille and emoji samples. Every reported glyph must come from a custom face.
 The test writes public synthetic Codex-like and Claude-like layouts to xterm 6,
 checks actual buffer cell widths, wrapping, resize/reflow, cursor position,
-public selection-copy and repaint, and records the DOM renderer. It records
-observed VS15/VS16, skin-tone, flag and ZWJ widths without calling their
+public selection-copy and repaint, and records the DOM renderer. It checks
+the pinned xterm default that preserves the active cursor line group, then
+requires completed output to reflow after the cursor moves to a blank line.
+It records observed VS15/VS16, skin-tone, flag and ZWJ widths without calling their
 code-point behavior correct grapheme layout. The WebGL
 renderer is tested when its normal context is available; otherwise the receipt
 explicitly records `UNAVAILABLE` without claiming WebGL coverage. Constructor
@@ -59,3 +61,9 @@ terminal package metadata to match the checkout. It does not exercise the full
 product frontend, OS clipboard or product fit lifecycle. CJK Extension B
 U+20000 is absent from the bundled fonts. Unicode 11 code-point widths still
 allow ZWJ and flag grapheme sequences to occupy multiple terminal cells.
+
+Failures retain the fixed stage and an allowlisted error category, such as
+`FONT_MONO_WIDTH_FAILED` or `TERMINAL_COMPLETED_LINE_REFLOW_FAILED`. Unknown
+exceptions become `UNKNOWN_FAILURE`; arbitrary messages, console output,
+paths, stacks and user text never enter the failure receipt. CI also uploads
+this bounded failure receipt when the runtime probe fails.
