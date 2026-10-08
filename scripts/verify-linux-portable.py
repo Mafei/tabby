@@ -108,7 +108,7 @@ def check_limits(requirements):
     return {family: ".".join(str(x) for x in value) for family, value in highest.items()}
 
 
-def inspect_elf(path, packaged=True):
+def inspect_elf(path, packaged=True, display_name=None):
     with path.open("rb") as stream:
         header = stream.read(20)
     require(len(header) == 20 and header[:4] == b"\x7fELF", "Native payload is not ELF: " + path.name)
@@ -126,7 +126,10 @@ def inspect_elf(path, packaged=True):
     paths = re.findall(r"\((RUNPATH|RPATH)\).*?Library (?:runpath|rpath): \[([^\]]*)\]", dynamic)
     require(len(paths) <= 1, "Ambiguous ELF search path")
     program_headers = run(["readelf", "--program-headers", "--wide", str(path)])
-    symbols = dynamic_symbols(run(["readelf", "--dyn-syms", "--wide", str(path)]))
+    try:
+        symbols = dynamic_symbols(run(["readelf", "--dyn-syms", "--wide", str(path)]))
+    except AuditError as error:
+        raise AuditError("ELF " + json.dumps(display_name or path.name) + ": " + str(error)) from error
     require("(SYMTAB)" not in dynamic or symbols["declaredEntries"] is not None,
             "ELF dynamic symbols were not parsed")
     result = {"needed": needed, "requirements": requirements, "definitions": definitions,
@@ -143,13 +146,28 @@ def dynamic_symbols(text):
     imports, exports, defaults = set(), set(), set()
     headers = re.findall(r"Symbol table '\.dynsym' contains ([0-9]+) entries:", text)
     require(len(headers) <= 1, "Ambiguous dynamic symbol table")
-    parsed = 0
+    rows = set()
     for line in text.splitlines():
-        match = re.match(r"\s*\d+:\s+[0-9a-fA-F]+\s+(?:[0-9]+|0x[0-9a-fA-F]+)\s+\S+\s+(\S+)\s+(\S+)\s+(\S+)\s+(\S+)", line)
+        match = re.fullmatch(r"\s*(\d+):\s+([0-9a-fA-F]+)\s+([0-9]+|0x[0-9a-fA-F]+)\s+(\S+)\s+(\S+)\s+(\S+)\s+(\S+)(?:\s+(\S+)(?:\s+\([0-9]+\))?)?\s*", line)
         if not match:
+            require(not re.match(r"\s*\d+:", line), "Unsupported dynamic symbol row")
             continue
-        binding, visibility, index, name = match.groups()
-        parsed += 1
+        number, value, size, kind, binding, visibility, index, name = match.groups()
+        number = int(number)
+        require(number not in rows, "Duplicate dynamic symbol row")
+        rows.add(number)
+        if number == 0:
+            require(int(value, 16) == 0 and int(size, 16 if size.startswith("0x") else 10) == 0
+                    and (kind, binding, visibility, index, name) == ("NOTYPE", "LOCAL", "DEFAULT", "UND", None),
+                    "Invalid null dynamic symbol")
+            continue
+        if name is None:
+            # Older GNU readelf leaves st_name=0 SECTION symbols unnamed; newer
+            # versions synthesize the section name. Neither is an import/export.
+            require((kind, binding, visibility) == ("SECTION", "LOCAL", "DEFAULT")
+                    and index.isdecimal() and int(index) > 0,
+                    "Invalid unnamed dynamic symbol")
+            continue
         pieces = name.replace("@@", "@").split("@", 1)
         symbol, version = pieces[0], pieces[1] if len(pieces) == 2 else None
         if index == "UND":
@@ -160,7 +178,10 @@ def dynamic_symbols(text):
             if version is None or "@@" in name:
                 defaults.add(symbol)
     declared = int(headers[0]) if headers else None
-    require(declared is None or parsed == max(0, declared - 1), "Incomplete dynamic symbol parsing")
+    parsed = len(rows - {0})
+    require(declared is None or (parsed == max(0, declared - 1)
+            and all(0 <= number < declared for number in rows)),
+            "Incomplete dynamic symbol parsing (parsed " + str(parsed) + ", declared " + str(declared) + ")")
     return {"imports": imports, "exports": exports, "defaults": defaults, "declaredEntries": declared}
 
 
@@ -229,7 +250,7 @@ def scan_payload(root):
         if path.suffix == ".asar":
             asars.append(path)
         if magic == b"\x7fELF" or path.suffix == ".node":
-            elfs[relative] = inspect_elf(path)
+            elfs[relative] = inspect_elf(path, display_name=relative)
         require(not (magic[:2] == b"MZ" and path.suffix.lower() in (".exe", ".dll", ".node")),
                 "Foreign Windows native payload: " + relative)
     require("tabby" in elfs and "chrome-sandbox" in elfs, "Electron runtime is incomplete")

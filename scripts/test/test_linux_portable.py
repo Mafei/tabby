@@ -169,6 +169,71 @@ Version needs section '.gnu.version_r' contains 2 entries:
             " 1: 00000000002feb80 0x20004 OBJECT GLOBAL DEFAULT 28 large_static_table")
         self.assertIn('large_static_table', parsed['defaults'])
 
+    def test_unnamed_defined_local_section_counts_without_exporting(self):
+        data = """Symbol table '.dynsym' contains 4 entries:
+  0: 0000000000000000 0 NOTYPE LOCAL DEFAULT UND
+  1: 0000000000000ba8 0 SECTION LOCAL DEFAULT 9
+  2: 0000000000000000 0 FUNC GLOBAL DEFAULT UND memcpy@GLIBC_2.14 (2)
+  3: 0000000000001110 10 FUNC GLOBAL DEFAULT 12 fixture@@FIXTURE_1
+"""
+        symbols = AUDIT.dynamic_symbols(data)
+        self.assertEqual(symbols['declaredEntries'], 4)
+        self.assertEqual(symbols['imports'], {('memcpy', 'GLIBC_2.14')})
+        self.assertEqual(symbols['exports'], {('fixture', 'FIXTURE_1')})
+        self.assertEqual(symbols['defaults'], {'fixture'})
+        # Newer readelf supplies the section name for the same st_name=0 entry.
+        self.assertEqual(symbols, AUDIT.dynamic_symbols(data.replace('DEFAULT 9\n', 'DEFAULT 9 .init\n')))
+
+    def test_unnamed_or_malformed_symbols_fail_closed(self):
+        for row in [
+            '1: 0000000000000000 0 FUNC GLOBAL DEFAULT UND',
+            '1: 0000000000000000 0 FUNC WEAK DEFAULT UND',
+            '1: 0000000000000ba8 0 SECTION GLOBAL DEFAULT 9',
+            '1: 0000000000000ba8 0 SECTION LOCAL DEFAULT UND',
+            '1: 0000000000000ba8 0 SECTION LOCAL DEFAULT ABS',
+            '1: 0000000000000ba8 0 SECTION LOCAL DEFAULT 0',
+            '1: 0000000000000ba8 0 OBJECT LOCAL DEFAULT 9',
+            '1: 0000000000000ba8 0 SECTION LOCAL HIDDEN 9',
+            '1: changed unsupported row format',
+            '1: 0000000000000000 0 FUNC GLOBAL DEFAULT UND import extra-fields',
+        ]:
+            with self.subTest(row=row), self.assertRaises(AUDIT.AuditError):
+                AUDIT.dynamic_symbols("Symbol table '.dynsym' contains 2 entries:\n" + row)
+
+    def test_null_and_duplicate_or_missing_symbol_numbers_fail_closed(self):
+        for rows in [
+            '0: 0000000000000001 0 NOTYPE LOCAL DEFAULT UND',
+            '0: 0000000000000000 1 NOTYPE LOCAL DEFAULT UND',
+            '0: 0000000000000000 0 SECTION LOCAL DEFAULT UND',
+            '0: 0000000000000000 0 NOTYPE GLOBAL DEFAULT UND',
+            '0: 0000000000000000 0 NOTYPE LOCAL DEFAULT 9',
+            '0: 0000000000000000 0 NOTYPE LOCAL DEFAULT UND named_null',
+        ]:
+            with self.subTest(rows=rows), self.assertRaises(AUDIT.AuditError):
+                AUDIT.dynamic_symbols(rows)
+        row = '1: 0000000000000ba8 0 SECTION LOCAL DEFAULT 9\n'
+        for rows in [row + row, row + row.replace('1:', '3:')]:
+            with self.subTest(rows=rows), self.assertRaises(AUDIT.AuditError):
+                AUDIT.dynamic_symbols("Symbol table '.dynsym' contains 3 entries:\n" + rows)
+
+    def test_actual_compiled_shared_library_readelf_symbols(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / 'fixture.c'
+            library = root / 'fixture.so'
+            source.write_text('#include <stdio.h>\nint fixture(void) { return puts("fixture"); }\n')
+            AUDIT.run(['gcc', '-shared', '-fPIC', str(source), '-o', str(library)])
+            output = AUDIT.run(['readelf', '--dyn-syms', '--wide', str(library)])
+            symbols = AUDIT.dynamic_symbols(output)
+            self.assertGreater(symbols['declaredEntries'], 1)
+            self.assertIn('fixture', symbols['defaults'])
+            self.assertTrue(any(name == 'puts' and version and version.startswith('GLIBC_')
+                for name, version in symbols['imports']))
+            self.assertEqual(AUDIT.inspect_elf(library, packaged=False)['symbols'], symbols)
+            with self.assertRaises(AUDIT.AuditError):
+                AUDIT.dynamic_symbols('\n'.join(line.split(' puts@', 1)[0]
+                    if ' puts@' in line else line for line in output.splitlines()))
+
     def test_actual_five_font_hashes_plus_packed_and_unpacked_asar_count_once(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

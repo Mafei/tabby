@@ -14,6 +14,9 @@ export default function linuxPortableConfig () {
     }
     return {
         ...base,
+        // The pinned maintained toolset bundles GTK3 tray libraries supported
+        // by Rocky 8, instead of the legacy toolset's GTK2 dbusmenu soname.
+        toolsets: { ...base.toolsets, appimage: '1.0.3' },
         npmRebuild: false,
         files: options.files,
         extraResources: options.extraResources,
