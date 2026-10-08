@@ -32,6 +32,13 @@ WEBVIEW_CASES = [
     'actual Activity background closes resources; canceled auth rejects old responses and reconnects',
     'durable native host-key pin survives a fresh process and rejects same-endpoint replacement',
 ]
+TMUX_WEBVIEW_CASES = [
+    'actual SSH exec detects tmux, lists the selected private socket and creates literal session names with atomic collision rejection',
+    'two real PTYs share one tmux session; read-only blocks input and explicit takeover detaches prior clients',
+    'real TCP interruption restores the same tmux server/session identity and pauses automatic recovery while occupied',
+    'missing, replaced and restarted tmux identities fail closed without implicit session creation',
+    'cancel and old generations cannot reopen tmux or affect another Tab',
+]
 
 
 class DeliveryError(Exception):
@@ -155,11 +162,39 @@ def verify_runtime(runtime, tested_sha):
     require(type(web) is dict and web.get('passed') is True
             and type(web.get('skipped')) is int and web['skipped'] == 0
             and web.get('cases') == WEBVIEW_CASES, 'WEBVIEW_TESTS_INCOMPLETE')
+    tmux = runtime.get('tmux')
+    require(type(tmux) is dict and tmux.get('passed') is True and 'failure' not in tmux,
+            'TMUX_NOT_PASSED')
+    tmux_native = tmux.get('instrumentation')
+    require(type(tmux_native) is dict and tmux_native.get('passed') is True
+            and type(tmux_native.get('tests')) is int and tmux_native['tests'] == 4
+            and type(tmux_native.get('skipped')) is int and tmux_native['skipped'] == 0,
+            'TMUX_NATIVE_TESTS_INCOMPLETE')
+    tmux_web = tmux.get('webview')
+    require(type(tmux_web) is dict and tmux_web.get('passed') is True
+            and type(tmux_web.get('skipped')) is int and tmux_web['skipped'] == 0
+            and tmux_web.get('cases') == TMUX_WEBVIEW_CASES, 'TMUX_WEBVIEW_TESTS_INCOMPLETE')
     apks = runtime.get('apks')
     require(type(apks) is dict and apks.get('appSHA256') == tested_sha, 'RUNTIME_APK_MISMATCH')
     android = runtime.get('android')
     require(type(android) is dict and type(android.get('api')) is int
-            and android['api'] in [35, 36] and android.get('abi') == 'x86_64', 'RUNTIME_PLATFORM_INVALID')
+            and android['api'] in [31, 32, 33, 34, 35, 36] and android.get('abi') == 'x86_64', 'RUNTIME_PLATFORM_INVALID')
+    compatibility = runtime.get('compatibility')
+    require(type(compatibility) is dict and compatibility.get('physicalDevice') is False
+            and compatibility.get('requestedForm') in ['phone', 'tablet', 'unspecified']
+            and all(type(compatibility.get(field)) is int and 1 <= compatibility[field] <= 16384
+                    for field in ['width', 'height'])
+            and type(compatibility.get('density')) is int and 72 <= compatibility['density'] <= 1000
+            and type(compatibility.get('webViewPackage')) is str
+            and len(compatibility['webViewPackage']) <= 256
+            and re.fullmatch(r'com\.[A-Za-z0-9_.]+', compatibility['webViewPackage'])
+            and type(compatibility.get('webViewVersion')) is str
+            and len(compatibility['webViewVersion']) <= 64
+            and re.fullmatch(r'\d+(?:\.\d+){1,4}', compatibility['webViewVersion']),
+            'RUNTIME_COMPATIBILITY_INVALID')
+    minimum_dp = min(compatibility['width'], compatibility['height']) * 160 / compatibility['density']
+    require(compatibility['requestedForm'] != 'tablet' or minimum_dp >= 600,
+            'RUNTIME_TABLET_TOO_SMALL')
     return {'api': android['api'], 'abi': android['abi']}
 
 
@@ -205,6 +240,9 @@ def _verify_delivery(apk, emulator_apk, apk_report, emulator_report, runtime_rep
         'commonPayloadSHA256': digest.hexdigest(), 'commonPayloadMemberCount': len(common),
         'arm64LibrarySHA256': arm64_sha.hex(), 'deliveredABIs': ['arm64-v8a'],
         'runtime': platform, 'deliveredABIExecuted': False,
+        'compatibility': {field: runtime_report['compatibility'][field] for field in
+                          ['physicalDevice', 'requestedForm', 'width', 'height', 'density',
+                           'webViewPackage', 'webViewVersion']},
         'limitations': [
             'ARM64 APK was not executed on Android; runtime evidence belongs to the x86_64 emulator APK.',
             'OPPO Find N6 hardware, physical touch, a specific Chinese IME and 16 KiB page-size runtime remain unverified.',

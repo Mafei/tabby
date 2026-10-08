@@ -1,7 +1,7 @@
 name: Fork desktop checks and artifacts
 on:
   push:
-    branches: [master, feature/ssh-tmux-recovery]
+    branches: [master, feature/ssh-tmux-recovery, prototype/android-direct-ssh]
   pull_request:
     branches: [master]
   workflow_dispatch:
@@ -21,7 +21,7 @@ env:
   TABBY_ARTIFACT_ONLY: '1'
 jobs:
   checks:
-    if: github.repository == 'Mafei/tabby'
+    if: github.event.repository.visibility == 'public' && github.repository == 'Mafei/tabby'
     runs-on: ubuntu-24.04
     timeout-minutes: 35
     steps:
@@ -59,7 +59,7 @@ jobs:
       - run: yarn build
         if: always() && steps.typings.outcome == 'success'
   desktop:
-    if: github.repository == 'Mafei/tabby'
+    if: github.event.repository.visibility == 'public' && github.repository == 'Mafei/tabby'
     needs: checks
     timeout-minutes: 60
     strategy:

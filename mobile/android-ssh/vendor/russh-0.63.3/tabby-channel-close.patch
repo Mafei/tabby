@@ -1,0 +1,20 @@
+--- a/src/client/encrypted.rs
++++ b/src/client/encrypted.rs
+@@ -481,6 +481,17 @@
+                 let channel_num = map_err!(ChannelId::decode(&mut r))?;
+                 map_err!(ensure_end(&r))?;
+                 if !self.common.is_established_channel(channel_num) {
++                    // A locally requested close already removed encrypted state.
++                    // Still release its outer ChannelRef and forward the peer's
++                    // close acknowledgement to a consumer waiting for cleanup.
++                    if self.common.encrypted.as_ref().is_some_and(|enc| {
++                        !enc.channels.contains_key(&channel_num)
++                    }) {
++                        if let Some(chan) = self.channels.remove(&channel_num) {
++                            let _ = chan.send(ChannelMsg::Close).await;
++                            client.channel_close(channel_num, self).await?;
++                        }
++                    }
+                     return Ok(());
+                 }
+                 if let Some(ref mut enc) = self.common.encrypted {

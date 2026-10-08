@@ -24,16 +24,42 @@ export class TerminalView {
     private resizeTimer?: ReturnType<typeof setTimeout>
     private pendingBytes = 0
     private disposed = false
+    private mouseDispatch?: Event
+    private mouseDispatchAllowed = false
+    private mouseGestureOwned = false
+    private readonly mouseEvents = ['mousedown', 'mousemove', 'mouseup', 'wheel'] as const
+    private readonly markMouseDispatch = (event: Event) => {
+        const mouse = event as MouseEvent
+        const withinHost = event.target instanceof Node && this.host.contains(event.target)
+        const allowed = this.mouseAllowed()
+        this.mouseDispatch = event
+        if (event.type === 'mousedown') {
+            this.mouseGestureOwned = withinHost && allowed
+            this.mouseDispatchAllowed = this.mouseGestureOwned
+        } else if (event.type === 'mouseup') {
+            this.mouseDispatchAllowed = this.mouseGestureOwned && allowed
+            if (!mouse.buttons) { this.mouseGestureOwned = false }
+        } else if (event.type === 'mousemove') {
+            this.mouseDispatchAllowed = allowed && (mouse.buttons ? this.mouseGestureOwned : withinHost)
+        } else { this.mouseDispatchAllowed = withinHost && allowed }
+    }
 
-    constructor(host: HTMLElement, onProtocol: (bytes: Uint8Array) => void, onResize: (cols: number, rows: number) => void) {
+    constructor(private readonly host: HTMLElement, onProtocol: (bytes: Uint8Array) => void, onResize: (cols: number, rows: number) => void,
+        private readonly mouseAllowed: () => boolean = () => false) {
         this.terminal.loadAddon(this.fitAddon)
         this.terminal.open(host)
         // Disable only the keyboard owner. disableStdin would also suppress
         // parser device-status replies and TUI mouse reporting in xterm 6.
         if (this.terminal.textarea) { this.terminal.textarea.disabled = true }
         this.terminal.attachCustomKeyEventHandler(() => false)
-        this.terminal.onData(text => onProtocol(new TextEncoder().encode(text)))
-        this.terminal.onBinary(text => onProtocol(Uint8Array.from(text, char => char.charCodeAt(0))))
+        // xterm emits reports synchronously within the mouse event dispatch.
+        // eventPhase returns to NONE afterward, so asynchronous parser replies
+        // never inherit mouse ownership. A microtask flag would clear between
+        // trusted DOM listeners before xterm's bubble listener executes.
+        const send = (bytes: Uint8Array) => { if (!this.mouseDispatch?.eventPhase || (this.mouseDispatchAllowed && this.mouseAllowed())) { onProtocol(bytes) } }
+        this.terminal.onData(text => send(new TextEncoder().encode(text)))
+        this.terminal.onBinary(text => send(Uint8Array.from(text, char => char.charCodeAt(0))))
+        this.mouseEvents.forEach(type => document.addEventListener(type, this.markMouseDispatch, { capture: true, passive: true }))
         this.terminal.onResize(({ cols, rows }) => onResize(cols, rows))
         this.observer = new ResizeObserver(() => this.fit())
         this.observer.observe(host)
@@ -45,6 +71,11 @@ export class TerminalView {
         if (this.resizeTimer !== undefined) { clearTimeout(this.resizeTimer) }
         this.resizeTimer = setTimeout(() => {
             this.resizeTimer = undefined
+            // Hidden Tabs still parse and ACK their own output. Fitting a hidden
+            // host would shrink its local buffer to the addon's 2x1 minimum,
+            // reflowing output independently of the still-live remote PTY.
+            const bounds = this.host.getBoundingClientRect()
+            if (!this.host.isConnected || bounds.width <= 0 || bounds.height <= 0) { return }
             this.fitAddon.fit()
         }, 70)
     }
@@ -77,10 +108,14 @@ export class TerminalView {
         return result
     }
 
+    cancelMouseGesture(): void { this.mouseGestureOwned = false; this.mouseDispatchAllowed = false }
+
     dispose(): void {
         this.disposed = true
         if (this.resizeTimer !== undefined) { clearTimeout(this.resizeTimer) }
         this.observer.disconnect()
+        this.mouseEvents.forEach(type => document.removeEventListener(type, this.markMouseDispatch, true))
+        this.mouseDispatch = undefined
         this.terminal.dispose()
     }
 }

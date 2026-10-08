@@ -47,6 +47,15 @@ test('session metadata is numeric and names retain arbitrary UTF-8 as display da
     }
 })
 
+test('portable metadata preserves leading BOM bytes and rejects malformed UTF-8', () => {
+    const parsed = parseSessionList(`1000:7:100:$1:101:0:${hex('\ufeff/tmp/socket')}:${hex('\ufeffname')}`)[0]
+    assert.equal(parsed.socket, '\ufeff/tmp/socket')
+    assert.equal(parsed.name, '\ufeffname')
+    for (const invalid of ['c0800a', 'eda0800a', 'f49080800a', 'efbbbf']) {
+        assert.throws(() => parseSessionList(`1000:7:100:$1:101:0:${hex('/tmp/socket')}:${invalid}`))
+    }
+})
+
 test('shell quoting contains hostile names as single literal arguments', () => {
     for (const name of ["a'b", '$(touch /tmp/should-never-exist)', 'a; echo attack', '空 格', '-leading', 'a\nb']) {
         const output = execFileSync('sh', ['-c', `printf %s ${shellQuote(name)}`], { encoding: 'utf8' })

@@ -1,12 +1,16 @@
 package org.tabby.android.prototype
 
-/** One imported key, owned by a random picker nonce, with no persistent storage. */
+/** Bounded, independently owned picker nonces. Each imported key is consumed once. */
 class PrivateKeyVault {
     private val keys = mutableMapOf<String, ByteArray>()
 
     @Synchronized fun snapshot(): Set<String> = keys.keys.toSet()
     @Synchronized fun replace(id: String, bytes: ByteArray) {
-        clear()
+        if (id.isEmpty() || bytes.isEmpty() || bytes.size > 65536 || (!keys.containsKey(id) && keys.size >= 4)) {
+            bytes.fill(0)
+            throw IllegalArgumentException("Private key capacity is unavailable")
+        }
+        keys.remove(id)?.fill(0)
         keys[id] = bytes
     }
     @Synchronized fun discard(ids: Set<String>) {

@@ -23,6 +23,8 @@ const artifacts = [
     ['org/jetbrains/annotations/13.0/annotations-13.0.jar', 'ace2a10dc8e2d5fd34925ecac03e4988b2c0f851650c94b8cef49ba1bd111478'],
 ]
 const library = resolve(process.env.TABBY_JNI_LIBRARY || join(repository, 'mobile/android-ssh/target/debug/libtabby_ssh.so'))
+const deferred = process.argv.includes('--deferred')
+const smokeClass = deferred ? 'RealDeferredJNISmoke' : 'RealJNISmoke'
 const java = process.env.JAVA_HOME ? join(process.env.JAVA_HOME, 'bin/java') : 'java'
 const javac = process.env.JAVA_HOME ? join(process.env.JAVA_HOME, 'bin/javac') : 'javac'
 let fixture
@@ -93,14 +95,14 @@ try {
         'mobile/android/app/src/main/java/org/tabby/android/ssh/NativeSSH.kt'])
     if (code === 0 && !cancelled) {
         code = await run(javac, ['-encoding', 'UTF-8', '-cp', [classes, jar, standardLibrary].join(delimiter), '-d', classes,
-            'mobile/test/java/org/tabby/android/ssh/RealJNISmoke.java'])
+            `mobile/test/java/org/tabby/android/ssh/${smokeClass}.java`])
     }
     if (code !== 0 || cancelled) { process.exitCode = cancelled ? 130 : code } else {
-        fixture = await startFixture()
+        fixture = await startFixture(deferred ? { profile: 'control-tmux', tmuxPath: process.env.TABBY_TEST_TMUX } : {})
         const timeout = setTimeout(cancel, 120000)
         try {
             code = await run(java, ['-Xcheck:jni', `-Djava.library.path=${dirname(library)}`, '-cp', [classes, jar, standardLibrary].join(delimiter),
-                'org.tabby.android.ssh.RealJNISmoke'], { ...process.env, SSH_FIXTURE_METADATA: fixture.metadataFile })
+                `org.tabby.android.ssh.${smokeClass}`], { ...process.env, SSH_FIXTURE_METADATA: fixture.metadataFile })
             process.exitCode = cancelled ? 130 : code
         } finally { clearTimeout(timeout) }
     }

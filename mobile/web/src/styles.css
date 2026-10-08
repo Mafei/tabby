@@ -2,15 +2,35 @@
 :root { color-scheme: dark; font: 15px system-ui, sans-serif; background: #171b24; color: #eee; }
 * { box-sizing: border-box; }
 html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; }
+.session-workspace { height: 100vh; height: 100dvh; display: flex; flex-direction: column; min-width: 0; }
+.session-pane { display: block; flex: 1 1 0; min-height: 0; min-width: 0; overflow: hidden; }
+.session-pane[hidden] { display: none; }
+.session-tabs { display: flex; flex: 0 0 auto; gap: 4px; padding: 3px 5px; overflow-x: auto; touch-action: pan-x; background: #202733; }
+.session-tab { display: flex; flex: 0 0 auto; }
+.session-tab > button[role=tab] { max-width: 180px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.session-tab.selected > button[role=tab] { background: #165765; border-color: #8cffff; }
+.workspace-notice { flex: 0 0 auto; padding: .3rem .65rem; font-size: .78rem; background: #3c3422; }
 button, input, select, textarea { font: inherit; }
 button { min-height: 44px; min-width: 44px; padding: .4rem .65rem; color: #eee; background: #293343; border: 1px solid #536076; border-radius: 7px; touch-action: manipulation; }
 button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible { outline: 2px solid #8cffff; outline-offset: 2px; }
 button.primary, button.active { background: #165765; border-color: #8cffff; }
-.app-shell { height: 100dvh; display: flex; flex-direction: column; padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }
+.app-shell { height: 100vh; height: 100dvh; display: flex; flex-direction: column; padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }
 header { display: flex; align-items: center; gap: 12px; padding: .35rem .7rem; border-bottom: 1px solid #364052; flex: 0 0 auto; }
 header strong { color: #8cffff; font-size: 1.15rem; }
 .status { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .85rem; }
 .connect-panel { flex: 1 1 0; min-height: 0; padding: .3rem .8rem; overflow: auto; }
+.tmux-panel { flex: 1 1 0; min-height: 0; padding: .4rem .8rem; overflow: auto; touch-action: pan-y; }
+.tmux-panel h2 { margin: .4rem 0; font-size: 1.1rem; }
+.tmux-panel label { display: flex; flex-direction: column; gap: .3rem; margin: .5rem 0; }
+.tmux-panel .remember-identity { flex-direction: row; align-items: center; font-size: .8rem; }
+.remember-identity input { width: 20px; min-height: 20px; flex: 0 0 20px; }
+.tmux-session-list { padding: 0; list-style: none; }
+.tmux-session-list li { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: .6rem 0; border-bottom: 1px solid #364052; }
+.tmux-session-list li > div { flex: 1 1 140px; min-width: 0; }
+.tmux-session-list strong { display: block; overflow-wrap: anywhere; }
+.tmux-session-list span { font-size: .75rem; color: #a9b6ca; }
+.tmux-session-list button { max-width: 100%; overflow-wrap: anywhere; }
+button:disabled { opacity: .5; }
 .connect-panel p { margin: .4rem 0; }
 form label { display: flex; flex-direction: column; gap: .3rem; margin: .5rem 0; }
 input, select { min-height: 42px; padding: .45rem; width: 100%; background: #212936; color: #fff; border: 1px solid #607088; border-radius: 6px; }
@@ -51,4 +71,18 @@ input, select { min-height: 42px; padding: .45rem; width: 100%; background: #212
     .terminal-active > .actions { grid-column: 2; grid-row: 3; }
     .terminal-active > .input-strip { grid-column: 1 / -1; grid-row: 4; }
     .terminal-active > .notice { grid-column: 1 / -1; grid-row: 5; }
+}
+.app-shell.terminal-active.short-pane { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr) auto auto auto; }
+.terminal-active.short-pane > header { grid-column: 1 / -1; grid-row: 1; }
+.terminal-active.short-pane > .terminal-area { grid-column: 1 / -1; grid-row: 2; }
+.terminal-active.short-pane > .tools { grid-column: 1; grid-row: 3; }
+.terminal-active.short-pane > .actions { grid-column: 2; grid-row: 3; }
+.terminal-active.short-pane > .input-strip { grid-column: 1 / -1; grid-row: 4; }
+.terminal-active.short-pane > .notice { grid-column: 1 / -1; grid-row: 5; }
+@media (min-width: 760px) {
+    .connect-panel form, .tmux-panel { max-width: 900px; width: 100%; margin-inline: auto; }
+    .tmux-session-list li > div { flex-basis: 300px; }
+    .socket-form { display: flex; gap: 10px; align-items: end; }
+    .socket-form label { flex: 1; }
+    .socket-form button { margin-bottom: .5rem; }
 }

@@ -29,6 +29,8 @@ pub(crate) struct Options {
     #[serde(default = "default_term")]
     pub term: String,
     pub expected_host_key: Option<String>,
+    #[serde(default)]
+    pub defer_terminal: bool,
 }
 
 fn default_port() -> u16 {
@@ -64,7 +66,8 @@ impl AuthMode {
 
 impl Options {
     pub fn validate(&self) -> Result<(), BridgeError> {
-        if self.host.is_empty()
+        if self.generation > 9_007_199_254_740_991
+            || self.host.is_empty()
             || self.host.len() > 255
             || self.host.chars().any(char::is_control)
             || self.username.is_empty()
@@ -145,6 +148,17 @@ pub(crate) enum Command {
         request_id: u64,
         command: String,
     },
+    #[serde(rename = "execCancel", rename_all = "camelCase")]
+    ExecCancel { generation: u64, request_id: u64 },
+    #[serde(rename = "openTerminal", rename_all = "camelCase")]
+    OpenTerminal {
+        generation: u64,
+        request_id: u64,
+        kind: TerminalKind,
+        command: Option<String>,
+        cols: Option<u32>,
+        rows: Option<u32>,
+    },
     #[serde(rename = "cancel")]
     Cancel { generation: u64 },
     #[serde(rename = "close")]
@@ -159,10 +173,36 @@ impl Command {
             | Self::Write { generation, .. }
             | Self::Resize { generation, .. }
             | Self::Exec { generation, .. }
+            | Self::ExecCancel { generation, .. }
+            | Self::OpenTerminal { generation, .. }
             | Self::Cancel { generation }
             | Self::Close { generation } => *generation,
         }
     }
+}
+
+#[derive(Clone, Copy, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) enum TerminalKind {
+    Shell,
+    Exec,
+}
+
+impl TerminalKind {
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Shell => "shell",
+            Self::Exec => "exec",
+        }
+    }
+}
+
+pub(crate) struct TerminalRequest {
+    pub request_id: u64,
+    pub kind: TerminalKind,
+    pub command: Option<String>,
+    pub cols: Option<u32>,
+    pub rows: Option<u32>,
 }
 
 pub(crate) enum Reply {
@@ -174,4 +214,5 @@ pub(crate) enum ChannelCommand {
     Write(Vec<u8>),
     Resize(u32, u32),
     Exec(u64, String),
+    OpenTerminal(TerminalRequest),
 }

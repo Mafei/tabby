@@ -595,6 +595,9 @@ const instrumentationMethods = new Map([
         'savedPinCannotBeReplacedAndPortsRemainSeparate', 'failedCommitWithARealMutatedCacheRequiresFreshApproval'])],
     [`${APP}.ViewportLifecycleTest`, new Set(['rotationPreservesTheBridgeAndRecomputesViewport'])],
     [`${APP}.CloudWebViewHarness`, new Set(['holdTheRealAppForCloudInteraction'])],
+    [`${APP}.DeferredSSHBridgeTest`, new Set(['deferredExecCompletesWithSeparateUnicodeStreamsAndNoPTY',
+        'cancelledExecAndStaleGenerationCannotAffectAnotherTab', 'deferredTmuxTerminalPreservesIdentityAcrossReconnect'])],
+    [`${APP}.NativeSessionIsolationTest`, new Set(['actualPluginPreservesOtherTabsAndClosesAllSessionsOnBackground'])],
 ])
 const instrumentationKinds = new Map([
     ['java.lang.AssertionError', 'AssertionError'], ['org.junit.ComparisonFailure', 'AssertionError'],

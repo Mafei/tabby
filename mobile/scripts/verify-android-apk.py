@@ -109,7 +109,8 @@ def main():
             if name.endswith('.dex'):
                 dex = archive.read(name)
                 for test_class in ['CloudWebViewHarness', 'RealSSHBridgeTest', 'AndroidHostKeyStoreTest',
-                                   'ViewportLifecycleTest', 'SecurityPolicyTest', 'PrivateKeyImportTest']:
+                                   'ViewportLifecycleTest', 'SecurityPolicyTest', 'PrivateKeyImportTest',
+                                   'DeferredSSHBridgeTest', 'NativeSessionIsolationTest', 'SessionOperationsTest']:
                     require(('Lorg/tabby/android/prototype/' + test_class + ';').encode() not in dex, 'Instrumentation class packaged in main DEX: ' + test_class)
         config = json.loads(archive.read('assets/capacitor.config.json'))
         require(config.get('loggingBehavior') == 'none', 'Capacitor logging must remain disabled')

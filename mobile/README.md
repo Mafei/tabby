@@ -1,14 +1,21 @@
-# Android direct SSH prototype
+# Android SSH and tmux prototype
 
 This branch starts from desktop commit
 `fb869900e1ac6da0ff577a53ab7084778d6389bc`. Mobile code is isolated here;
-desktop source and packaging remain unchanged.
+desktop packaging remains unchanged. The portable tmux identity/command core
+is shared with desktop; its Node channel adapter remains desktop-only.
 
-The prototype has one host and one terminal. Angular 22.2.1 and xterm 6 render the
+The prototype supports up to four independent SSH session Tabs. Angular 22.2.1 and xterm 6 render the
 terminal; a Capacitor 8 Kotlin plugin calls a JNI library using the same pinned
 `russh 0.63.3` core as desktop Tabby. SSH connects directly from the device to
 the host. The production app contains no test bridge, Node runtime or gateway.
 Tabby's palette generator is reused from `tabby-terminal/src/generatePalette.ts`.
+Android applies one [same-version channel-close repair](android-ssh/vendor/russh-0.63.3/TABBY-PATCH.md);
+the desktop transport dependency is unchanged. The provenance check compares
+63 retained library files with the digest-pinned original public crate.
+Mobile saved host-key identities use the native verified public-key blob;
+desktop retains its existing algorithm/fingerprint representation. The shared
+core does not define a cross-platform saved-identity import format.
 
 ## Supported scope
 
@@ -19,8 +26,25 @@ Tabby's palette generator is reused from `tabby-terminal/src/generatePalette.ts`
 - A real textarea for system IME composition; terminal rendering, touch scroll,
   long-press text selection, native clipboard and Ctrl/Esc/Tab/arrow buttons.
 - Viewport-driven PTY resize, connection cancellation, bounded output/input
-  queues and generation checks. Backgrounding closes the connection; reconnect
-  is an explicit new connection.
+  queues and generation checks. Backgrounding closes all connections and
+  clears transient credentials. Each Tab owns its own native SSH transport.
+- Optional tmux discovery on the authenticated account and chosen socket,
+  explicit session selection or atomic named creation, shared/read-only access,
+  and explicit takeover. Ordinary SSH remains available; missing tmux is never
+  installed automatically. One tmux session has one Tab in this window.
+- Saved identities are opt-in and include host, port, actual verified public-key
+  blob, SSH account, Unix UID, actual socket path, server PID/start time and
+  session ID/creation time. Rename preserves identity; missing/replaced sessions
+  or a restarted server fail without implicit creation. Duplicate opens a new
+  connection/selection rather than copying an attachment.
+- Foreground tmux password sessions retry unexpected transport loss with
+  bounded exponential backoff, cancellation and generation isolation. Failed
+  TCP acquisition within that established recovery series continues backoff.
+  Authentication/key failures, explicit remote disconnect, terminal detach and
+  takeover do not start automatic recovery. Occupied automatic recovery pauses
+  without detaching another client. Private-key and keyboard-interactive sessions
+  require explicit credentials/import on recovery; passwords are only kept in
+  foreground memory. No background SSH or hard fencing is promised.
 
 The configured minimum is Android 8 / API 26; compile/target SDK is 36. The
 default application build targets ARM64. The cloud emulator build explicitly
@@ -31,10 +55,12 @@ bar/cutout or visible IME inset, including navigation space when the IME is
 visible with zero height. Child WebView system-bar/cutout insets are cleared
 after native padding to avoid applying them twice. Capacitor's automatic inset
 handler is disabled; the final WebView layout still drives terminal/PTY resize.
-This first prototype does not implement mobile tmux recovery, multi-tab
-management, jump hosts, SSH agents, X11, host certificates or background SSH.
-The reserved Rust exec API is not exposed by the Android plugin and successful
-exec is not verified.
+Jump hosts, SSH agents, X11, host certificates and background SSH remain
+outside this mobile prototype. Real exec control channels are separate from the
+PTY terminal. A framed response is accepted only after native complete channel
+close with an exit status; cancellation/time/output limits fail closed and do
+not replay a possibly completed create operation. Session guards narrow races
+but do not provide hard fencing against another external tmux client.
 
 The user's target device is **OPPO Find N6 / ARM64**. Its
 [official specifications](https://www.oppo.com/cn/smartphones/series-find-n/find-n6/specs/)
@@ -46,7 +72,8 @@ and updating PTY dimensions; they do not establish a physical fold transition.
 Record the device's installed Android/WebView/IME versions during acceptance.
 
 Credentials are neither logged nor saved to profiles, localStorage or files.
-Public host keys are the only persistent SSH data. Private keys are bounded to
+Public host keys and explicitly saved tmux identities are persistent SSH data;
+saved identity JSON never contains passwords, private keys, key handles or output. Private keys are bounded to
 64 KiB, RSA keys to 8192 bits and encrypted OpenSSH bcrypt cost to 64 rounds;
 encrypted PKCS#8 is outside prototype support. After the document picker returns,
 provider I/O runs off the UI thread with one process-wide reader and a 30-second
@@ -72,6 +99,8 @@ npm audit --omit=dev --audit-level=low --prefix mobile
 npm audit --audit-level=low --prefix mobile
 CHROMIUM_PATH=/usr/bin/chromium npm run test:web --prefix mobile
 npm run test:fixture --prefix mobile
+npm run test:tmux-controller --prefix mobile
+TABBY_TEST_TMUX=/absolute/path/to/tmux npm run test:tmux-fixture --prefix mobile
 cargo fmt --check --manifest-path mobile/android-ssh/Cargo.toml
 cargo test --locked --features jni --manifest-path mobile/android-ssh/Cargo.toml
 cargo build --locked --features jni --manifest-path mobile/android-ssh/Cargo.toml
@@ -100,8 +129,17 @@ approved the
 on 2026-10-07 at 09:12 UTC. Installation accepted only `android-sdk-license`
 (agreement dated January 16, 2019). Installed tools include SDK/Build Tools 36,
 NDK 27.3.13750724 and a stable emulator with an AOSP API 35 x86_64 image.
-The workflow installs an approved stable AOSP API 35 or 36 image per matrix job;
-both package references use the same already-approved SDK agreement.
+The workflow installs stable AOSP API 31–36 images and runs phone/tablet jobs;
+all selected package references were verified against the same already-approved
+SDK agreement. The current official metadata has no matching default or Google
+APIs x86_64 API 37 image, so Android 17 runtime remains an acceptance gap. The
+configured API 26 minimum is an installation declaration, not a claim that
+every old Android WebView was tested. The mobile language build explicitly
+targets Chrome 93+, while actual emulator reports record their WebView version
+and screen geometry; Angular upstream support remains its
+[published Baseline](https://angular.dev/reference/versions#browser-support).
+The [Capacitor Android support requirements](https://capacitorjs.com/docs/android#android-support)
+and syntax target alone do not establish compatibility of the complete app.
 No preview, Google Play, store, billing or personal signing agreement was accepted.
 
 The same free public `ubuntu-24.04` runner gives the disposable emulator four
@@ -169,8 +207,11 @@ Debug keystores and disposable fixture credentials must never be uploaded.
 The dedicated fork-guarded Android workflow builds the exact requested head,
 keeps `contents: read`, and uses standard free runners for this public fork.
 It runs Rust and application Kotlin/JNI SSH tests on an actual ARM64 Linux
-host, separately from Android runtime acceptance. API 35 and 36 Android jobs
-run the complete native and WebView suites on disposable x86_64 emulators.
+host, separately from Android runtime acceptance. API 31–36 Android jobs
+run the complete native and WebView suites on disposable x86_64 phone/tablet
+emulators. The original native 7 and WebView 7 gates remain mandatory, with
+separate supplemental native 4 and tmux WebView 5 gates. No suite may skip;
+original test deadlines and real native focus/input checks remain unchanged.
 After runtime acceptance, each job builds the ARM64 delivery APK and checks
 that its common packaged payload and ARM64 library bytes exactly match the
 accepted emulator build. The binding receipt explicitly records
@@ -189,7 +230,7 @@ credentials injected through stdin into app-private files, and a test-APK-only
 WebView harness. Run them with:
 
 ```sh
-node mobile/scripts/test-android.mjs --serial emulator-5554 \
+TABBY_TEST_TMUX=/absolute/path/to/tmux node mobile/scripts/test-android.mjs --serial emulator-5554 \
   --app-apk /path/to/verified/emulator.apk \
   --report mobile/artifacts/android-runtime-report.json
 ```
@@ -208,6 +249,12 @@ node mobile/scripts/test-android.mjs --serial emulator-5554 \
 - Use a system Chinese IME: preedit, candidates, commit, backspace and cancel.
   Check emoji, rapid keyboard hide/show, focus, native copy/paste, long-press
   selection, scroll, Ctrl/Esc/Tab/arrows and a terminal editor.
+- Exercise separate Tab transports, cancellation during authentication/exec/PTY,
+  session collision and literal names, shared/read-only/explicit takeover, TCP
+  outage while the server is unavailable and subsequent identity restore,
+  occupied recovery pause, and killed/replaced/restarted identities without
+  implicit recreation. Check that switching/closing a Tab cannot cancel another
+  Tab's import, input, keyboard ownership or live transport.
 - Rotate with the keyboard visible and hidden; compare remote `stty size` with
   the visible terminal, and verify editor/TUI redraw after resize.
 

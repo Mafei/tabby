@@ -77,3 +77,39 @@ jni --manifest-path mobile/android-ssh/Cargo.toml --test real_ssh` with
 `SSH_FIXTURE_METADATA` set to its private metadata path, and always closes the
 fixture afterward. Put Cargo on PATH, or set `CARGO` to the executable path.
 The runner also terminates its owned Cargo process group when canceled.
+
+
+## Real exec and tmux profiles
+
+The default fixture continues to reject exec requests. Opt-in `control` starts
+actual `/bin/sh -c` commands; `control-tmux` additionally requires an explicit
+absolute `TABBY_TEST_TMUX` binary (modern tmux 3.2+). It creates a private socket
+inside its owned 0700 directory and uses `-f /dev/null`; it never touches the
+user's default tmux server, config or socket. Its metadata records the actual
+binary version and owned socket. The fixture's SSH username maps to the cloud
+process UID, so these tests do not establish isolation between real Unix users.
+
+```sh
+node --test mobile/test/ssh-control-fixture.test.mjs
+TABBY_TEST_TMUX=/absolute/path/to/tmux node --test mobile/test/ssh-tmux-fixture.test.mjs
+```
+
+Control policies snapshot each new request. Delayed/rejected ACK, missing exit
+status, EOF-only and Close-only policies expose actual SSH protocol ordering;
+they do not fabricate stdout or terminal responses. Session acquisition and
+exec cancellations clean only the owned command/PTY/process group, including
+late replies. Output uses bounded pipes and actual process bytes.
+
+Additional owned controls include `suspendSSH`/`resumeSSH` (actual listener
+closure/reopening on the same port with the same host key, retaining tmux),
+`stopTmux` (only the owned explicit socket), and bounded exec response/output
+policies. A TCP interruption closes client channels but retains tmux until
+explicit fixture cleanup. Sharing/read-only/takeover, literal names, collisions,
+server/session/pane identity and disappearance use the real server and PTYs.
+
+Android acceptance retains the original native 7 and WebView 7. Supplemental
+native 4 and tmux WebView 5 must pass separately with no skipped methods/cases;
+their test-only metadata, class files and harness are excluded from the main
+APK. Each harness preserves the actual window/input security checks and original
+180/190-second budgets. Runtime reports contain fixed public results, versions
+and geometry, without generated credentials or raw terminal/system dumps.

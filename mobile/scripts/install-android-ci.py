@@ -31,7 +31,7 @@ def download(url, destination):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--emulator-api', type=int, choices=[35, 36], default=35)
+    parser.add_argument('--emulator-api', type=int, choices=[31, 32, 33, 34, 35, 36], default=35)
     args = parser.parse_args()
     image = f'system-images;android-{args.emulator_api};default;x86_64'
     packages = BASE_PACKAGES + [image]

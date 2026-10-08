@@ -1,0 +1,441 @@
+import { expect, test, type Page } from '@playwright/test'
+import type { SSHEvent } from '../src/bridge'
+
+const hostKey = 'Zml4dHVyZS1wdWJsaWMta2V5'
+const active = (page: Page) => page.locator('.session-pane:not([hidden])')
+
+async function emit(page: Page, index: number, event: Partial<SSHEvent>): Promise<void> {
+    await page.evaluate(({ index, event }) => {
+        const started = window.testBridge.starts[index]
+        window.testBridge.emit({ connectionId: started.connectionId, generation: started.generation, type: 'state',
+            ...(event.type === 'data' ? { sequence: window.testBridge.nextDataSequence++ } : {}), ...event })
+    }, { index, event })
+}
+
+async function authenticate(page: Page, index: number, key = hostKey): Promise<void> {
+    await emit(page, index, { type: 'hostKey', status: 'known', keyBase64: key, algorithm: 'ssh-ed25519', fingerprint: 'SHA256:fixture' })
+    await emit(page, index, { type: 'auth', requestId: 2, mode: 'password' })
+    await emit(page, index, { type: 'state', state: 'authenticated', verifiedHostKey: key,
+        nativeEndpoint: { host: 'fixture.local', port: 22, username: 'test-user' }, deferredTerminal: true })
+}
+
+async function chooser(page: Page): Promise<number> {
+    const pane = active(page)
+    await pane.getByLabel('主机', { exact: true }).fill('fixture.local')
+    await pane.getByLabel('用户名', { exact: true }).fill('test-user')
+    await pane.getByLabel('密码', { exact: true }).fill('ephemeral-test-password')
+    await pane.getByLabel('会话方式', { exact: true }).selectOption('tmux')
+    const count = await page.evaluate(() => window.testBridge.starts.length)
+    await pane.getByRole('button', { name: '连接', exact: true }).click()
+    await expect.poll(() => page.evaluate(() => window.testBridge.starts.length)).toBe(count + 1)
+    await authenticate(page, count)
+    await expect(pane.getByRole('region', { name: '选择 tmux 会话' })).toBeVisible()
+    await expect(pane.getByRole('button', { name: '检测 / 刷新', exact: true })).toBeEnabled()
+    return count
+}
+
+async function attached(page: Page, name = 'work'): Promise<void> {
+    await active(page).getByRole('button', { name: `连接 ${name}`, exact: true }).click()
+    await expect(active(page).locator('.status')).toHaveText('已连接')
+    await expect(active(page).getByRole('region', { name: '选择 tmux 会话' })).toHaveCount(0)
+}
+
+async function openCommands(page: Page): Promise<{ connectionId: string, command: string, kind: string }[]> {
+    return page.evaluate(() => window.testBridge.commands.flatMap(item => item.command.type === 'openTerminal'
+        ? [{ connectionId: item.connectionId, command: item.command.command ?? '', kind: item.command.kind }] : []))
+}
+
+test.beforeEach(async ({ page }) => {
+    await page.goto('/tests/harness.html')
+    await page.evaluate(() => { window.testBridge.autoTmux = true })
+})
+
+test('tmux defers PTY until selection and shared access never detaches other clients', async ({ page }) => {
+    await page.evaluate(() => { window.testBridge.tmuxSessions[0].clients = 2 })
+    await chooser(page)
+    expect(await page.evaluate(() => window.testBridge.starts[0].deferTerminal)).toBe(true)
+    expect(await openCommands(page)).toHaveLength(0)
+    await expect(active(page).getByText('$0 · 2 个客户端', { exact: true })).toBeVisible()
+    await attached(page)
+    const opened = await openCommands(page)
+    expect(opened).toHaveLength(1)
+    expect(opened[0].kind).toBe('exec')
+    expect(opened[0].command).toContain('attach-session')
+    expect(opened[0].command).not.toContain('attach-session -d')
+    expect(opened[0].command).not.toContain('new-session')
+    expect(await page.evaluate(() => Object.keys(localStorage))).toEqual([])
+})
+
+test('missing tmux offers ordinary SSH without installation or implicit creation', async ({ page }) => {
+    await page.evaluate(() => { window.testBridge.tmuxAvailable = false })
+    await chooser(page)
+    await expect(active(page).getByText('服务器没有 tmux。可使用普通 SSH；应用不会安装软件。', { exact: true })).toBeVisible()
+    await expect(active(page).getByLabel('新会话名称', { exact: true })).toHaveCount(0)
+    await active(page).getByRole('button', { name: '使用普通 SSH', exact: true }).click()
+    await expect(active(page).locator('.status')).toHaveText('已连接')
+    expect((await openCommands(page)).map(item => item.kind)).toEqual(['shell'])
+    expect(await page.evaluate(() => window.testBridge.commands.filter(item => item.command.type === 'exec')
+        .some(item => item.command.type === 'exec' && /(?:apt-get|yum|apk add|sudo|new-session)/.test(item.command.command)))).toBe(false)
+})
+
+test('socket and named create use atomic creation; collision never silently attaches', async ({ page }) => {
+    await chooser(page)
+    await active(page).getByLabel('Socket', { exact: true }).selectOption('name')
+    await expect(active(page).getByRole('button', { name: '连接 work', exact: true })).toHaveCount(0)
+    await active(page).getByLabel('Socket 值', { exact: true }).fill("socket ' $(ignored)")
+    await active(page).getByRole('button', { name: '检测 / 刷新', exact: true }).click()
+    await expect(active(page).getByRole('button', { name: '检测 / 刷新', exact: true })).toBeEnabled()
+    const name = "计划 ' $(ignored)"
+    await page.evaluate(name => { window.testBridge.tmuxCreateFails = true; window.testBridge.tmuxCreatedName = name }, name)
+    await active(page).getByLabel('新会话名称', { exact: true }).fill(name)
+    await active(page).getByRole('button', { name: '新建并连接', exact: true }).click()
+    await expect(active(page).locator('.notice')).toContainText('名称可能已存在')
+    expect(await openCommands(page)).toHaveLength(0)
+    await page.evaluate(() => { window.testBridge.tmuxCreateFails = false })
+    await active(page).getByRole('button', { name: '新建并连接', exact: true }).click()
+    await expect(active(page).locator('.status')).toHaveText('已连接')
+    const commands = await page.evaluate(() => window.testBridge.commands.flatMap(item => item.command.type === 'exec' ? [item.command.command] : []))
+    expect(commands.some(command => command.includes('new-session -d -P'))).toBe(true)
+    expect(commands.every(command => !command.includes('new-session -A'))).toBe(true)
+    expect((await openCommands(page))[0].command).toContain('$1')
+})
+
+test('readonly blocks user input while parser replies and output ACK stay scoped', async ({ page }) => {
+    await chooser(page)
+    await active(page).getByLabel('访问方式', { exact: true }).selectOption('readonly')
+    await attached(page)
+    const commands = await openCommands(page)
+    expect(commands[0].command).toContain('attach-session -r')
+    expect(commands[0].command).not.toContain('attach-session -d')
+    await expect(active(page).getByRole('textbox', { name: '终端输入', exact: true })).toBeDisabled()
+    await expect(active(page).getByRole('button', { name: 'Esc', exact: true })).toBeDisabled()
+    await expect(active(page).getByRole('button', { name: '粘贴', exact: true })).toBeDisabled()
+    await emit(page, 0, { type: 'data', data: btoa('\x1b[6n') })
+    await expect.poll(() => page.evaluate(() => window.testBridge.commands.some(item => item.command.type === 'write'))).toBe(true)
+    await expect.poll(() => page.evaluate(() => window.testBridge.commands.some(item => item.command.type === 'outputAck'))).toBe(true)
+})
+
+test('TUI mouse reporting requires the active writable Tab mouse mode and cannot finish a stale drag', async ({ page }) => {
+    await chooser(page); await attached(page)
+    const enableMouse = btoa('\x1b[?1002h\x1b[?1006h')
+    const sequence = await page.evaluate(() => window.testBridge.nextDataSequence)
+    await emit(page, 0, { type: 'data', data: enableMouse })
+    await expect.poll(() => page.evaluate(sequence => window.testBridge.commands.some(item => item.command.type === 'outputAck' && item.command.sequence === sequence), sequence)).toBe(true)
+    const screen = await active(page).locator('.xterm-screen').boundingBox()
+    expect(screen).not.toBeNull()
+    const point = { x: screen!.x + 40, y: screen!.y + 40 }
+    const writes = () => page.evaluate(() => window.testBridge.commands.filter(item => item.command.type === 'write').length)
+    const before = await writes()
+    await page.mouse.click(point.x, point.y)
+    expect(await writes()).toBe(before)
+    await active(page).getByRole('button', { name: '滚动模式', exact: true }).click()
+    await page.mouse.move(point.x, point.y); await page.mouse.down()
+    await expect.poll(writes).toBeGreaterThan(before)
+    await page.mouse.up()
+    await active(page).getByRole('button', { name: '新增连接', exact: true }).click()
+    await page.evaluate(() => { window.testBridge.tmuxSessions[0].sessionID = '$2'; window.testBridge.tmuxSessions[0].sessionCreated = '1700000003'; window.testBridge.tmuxSessions[0].name = 'readonly-mouse' })
+    await chooser(page)
+    await active(page).getByLabel('访问方式', { exact: true }).selectOption('readonly')
+    await attached(page, 'readonly-mouse')
+    const readonlySequence = await page.evaluate(() => window.testBridge.nextDataSequence)
+    await emit(page, 1, { type: 'data', data: enableMouse })
+    await expect.poll(() => page.evaluate(sequence => window.testBridge.commands.some(item => item.connectionId === window.testBridge.starts[1].connectionId && item.command.type === 'outputAck' && item.command.sequence === sequence), readonlySequence)).toBe(true)
+    const readonlyScreen = await active(page).locator('.xterm-screen').boundingBox()
+    const readonlyBefore = await writes()
+    await page.mouse.click(readonlyScreen!.x + 40, readonlyScreen!.y + 40)
+    expect(await writes()).toBe(readonlyBefore)
+    await page.getByRole('tab', { name: 'work', exact: true }).click()
+    const firstScreen = await active(page).locator('.xterm-screen').boundingBox()
+    await page.mouse.move(firstScreen!.x + 40, firstScreen!.y + 40); await page.mouse.down()
+    const held = await writes()
+    // Keyboard activation switches ownership without releasing the physical
+    // Chromium mouse button, exercising xterm's document drag/up listeners.
+    await page.getByRole('tab', { name: '只读 · readonly-mouse', exact: true }).focus()
+    await page.keyboard.press('Enter')
+    await page.mouse.move(readonlyScreen!.x + 80, readonlyScreen!.y + 80)
+    expect(await writes()).toBe(held)
+    await page.getByRole('tab', { name: 'work', exact: true }).focus()
+    await page.keyboard.press('Enter')
+    await page.mouse.move(firstScreen!.x + 80, firstScreen!.y + 80)
+    await page.mouse.up()
+    expect(await writes()).toBe(held)
+    await page.getByRole('tab', { name: '只读 · readonly-mouse', exact: true }).click()
+    await emit(page, 0, { type: 'data', data: btoa('\x1b[6n') })
+    await expect.poll(writes).toBe(held + 1)
+    expect(await page.evaluate(() => window.testBridge.commands.filter(item => item.command.type === 'write').at(-1)?.connectionId)).toBe(await page.evaluate(() => window.testBridge.starts[0].connectionId))
+})
+
+test('takeover is a separate confirmation and is never saved as an access mode', async ({ page }) => {
+    await page.evaluate(() => { window.testBridge.tmuxSessions[0].clients = 1 })
+    await chooser(page)
+    await active(page).getByRole('button', { name: '接管 work', exact: true }).click()
+    await expect(page.getByRole('dialog', { name: '确认接管会话' })).toBeVisible()
+    expect(await openCommands(page)).toHaveLength(0)
+    await page.getByRole('dialog').getByRole('button', { name: '取消', exact: true }).click()
+    expect(await openCommands(page)).toHaveLength(0)
+    await active(page).getByLabel('在此设备保存会话身份以便手动恢复（不含凭据）').check()
+    await active(page).getByRole('button', { name: '接管 work', exact: true }).click()
+    await page.getByRole('button', { name: '断开其他客户端并接管', exact: true }).click()
+    await expect(active(page).locator('.status')).toHaveText('已连接')
+    expect((await openCommands(page))[0].command).toContain('attach-session -d')
+    const saved = await page.evaluate(() => JSON.parse(localStorage.getItem('tabby.tmux.bindings.v1')!))
+    expect(saved).toHaveLength(1)
+    expect(saved[0].mode).toBe('share')
+    expect(saved[0].selector).toEqual({ kind: 'path', value: '/tmp/tmux-1000/default' })
+    expect(Object.keys(saved[0]).sort()).toEqual(['account', 'host', 'hostKey', 'mode', 'port', 'selector', 'serverPID', 'serverStarted', 'sessionCreated', 'sessionID', 'socket', 'tabID', 'uid', 'version'].sort())
+})
+
+test('duplicate opens fresh choice and dedupe focuses the existing identity without another PTY', async ({ page }) => {
+    await chooser(page); await attached(page)
+    await active(page).getByRole('button', { name: '复制连接并重新选择会话', exact: true }).click()
+    await expect(page.getByRole('tab')).toHaveCount(2)
+    await expect(active(page).getByLabel('密码', { exact: true })).toHaveValue('')
+    await expect(active(page).getByLabel('会话方式', { exact: true })).toHaveValue('tmux')
+    await chooser(page)
+    await attached(page)
+    await expect(page.getByRole('tab')).toHaveCount(1)
+    expect(await openCommands(page)).toHaveLength(1)
+    await expect(page.locator('.workspace-notice')).toContainText('此会话已在标签页中打开')
+    await expect.poll(() => page.evaluate(() => window.testBridge.closed.includes(window.testBridge.starts[1].connectionId))).toBe(true)
+})
+
+test('inactive output ACKs its own session while stale clipboard and composing input cannot cross tabs', async ({ page }) => {
+    await chooser(page); await attached(page)
+    const first = active(page)
+    await first.getByRole('textbox', { name: '终端输入' }).focus()
+    await first.getByRole('textbox', { name: '终端输入' }).evaluate(element => {
+        element.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true }))
+        ;(element as HTMLTextAreaElement).value = '\u200b旧候选'
+    })
+    await first.getByRole('button', { name: '新增连接', exact: true }).click()
+    await page.evaluate(() => { window.testBridge.tmuxSessions[0].sessionID = '$2'; window.testBridge.tmuxSessions[0].sessionCreated = '1700000003'; window.testBridge.tmuxSessions[0].name = 'second' })
+    await chooser(page); await attached(page, 'second')
+    await page.evaluate(() => { window.testBridge.holdClipboard = true })
+    await active(page).getByRole('button', { name: '粘贴', exact: true }).click()
+    await page.getByRole('tab', { name: 'work', exact: true }).click()
+    await page.evaluate(() => { window.testBridge.resolveClipboards('late-clipboard') })
+    await emit(page, 1, { type: 'data', data: btoa('SECOND_BACKGROUND\x1b[6n') })
+    await expect.poll(() => page.evaluate(() => {
+        const second = window.testBridge.starts[1].connectionId
+        return window.testBridge.commands.some(item => item.connectionId === second && item.command.type === 'outputAck')
+    })).toBe(true)
+    await active(page).getByRole('textbox', { name: '终端输入', exact: true }).evaluate(element => {
+        element.dispatchEvent(new CompositionEvent('compositionend', { bubbles: true, data: '旧候选' }))
+        ;(element as HTMLTextAreaElement).value = '\u200b旧候选'
+        element.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: '旧候选' }))
+    })
+    const writes = await page.evaluate(() => window.testBridge.commands.flatMap(item => item.command.type === 'write'
+        ? [{ connectionId: item.connectionId, data: atob(item.command.data) }] : []))
+    expect(writes.some(item => item.data.includes('late-clipboard') || item.data.includes('旧候选'))).toBe(false)
+    await page.getByRole('tab', { name: 'second', exact: true }).click()
+    await expect(active(page).locator('.xterm-rows')).toContainText('SECOND_BACKGROUND')
+    await active(page).getByRole('button', { name: '键盘', exact: true }).click()
+    expect(await page.evaluate(() => window.testBridge.keyboardRequests.at(-1)?.connectionId)).toBe(await page.evaluate(() => window.testBridge.starts[1].connectionId))
+})
+
+test('saved restore keeps full identity and rejects missing or changed server before implicit recreation', async ({ page }) => {
+    await chooser(page)
+    await active(page).getByLabel('在此设备保存会话身份以便手动恢复（不含凭据）').check()
+    await attached(page)
+    await page.reload()
+    await page.evaluate(() => { window.testBridge.autoTmux = true; window.testBridge.tmuxSessions = [] })
+    await expect(active(page).getByLabel('主机', { exact: true })).toHaveAttribute('readonly')
+    await expect(active(page).getByLabel('密码', { exact: true })).toHaveValue('')
+    await active(page).getByLabel('密码', { exact: true }).fill('new-ephemeral-password')
+    await active(page).getByRole('button', { name: '恢复会话', exact: true }).click()
+    await authenticate(page, 0)
+    await expect(active(page).locator('.notice')).toContainText('不会重新创建')
+    expect(await openCommands(page)).toHaveLength(0)
+    expect(await page.evaluate(() => window.testBridge.commands.some(item => item.command.type === 'exec' && item.command.command.includes('new-session')))).toBe(false)
+    await active(page).getByLabel('密码', { exact: true }).fill('different-ephemeral-password')
+    const authCount = await page.evaluate(() => window.testBridge.commands.filter(item => item.command.type === 'authResponse').length)
+    await active(page).getByRole('button', { name: '恢复会话', exact: true }).click()
+    await emit(page, 1, { type: 'hostKey', status: 'known', keyBase64: 'Y2hhbmdlZC1wdWJsaWMta2V5' })
+    await emit(page, 1, { type: 'auth', requestId: 3, mode: 'password' })
+    await expect(active(page).locator('.notice')).toContainText('主机密钥、地址或账号')
+    expect(await page.evaluate(() => window.testBridge.commands.filter(item => item.command.type === 'authResponse').length)).toBe(authCount)
+})
+
+test('network backoff pauses occupied sessions; explicit restore takeover retains identity and never enters automatic recovery', async ({ page }) => {
+    await chooser(page); await attached(page)
+    await emit(page, 0, { type: 'state', state: 'error', code: 'transport_lost', transportLost: true })
+    await expect.poll(() => page.evaluate(() => window.testBridge.starts.length)).toBe(2)
+    await emit(page, 1, { type: 'state', state: 'error', code: 'tcp_failed', transportLost: false })
+    await expect.poll(() => page.evaluate(() => window.testBridge.starts.length)).toBe(3)
+    // Native settles pending exec requests before it emits the classified
+    // terminal state. That completion alone must not clear recovery ownership.
+    await page.evaluate(() => { window.testBridge.nextExecFailure = { finalCode: 'transport_lost', transportLost: true } })
+    await authenticate(page, 2)
+    await expect.poll(() => page.evaluate(() => window.testBridge.starts.length), { timeout: 6000 }).toBe(4)
+    await page.evaluate(() => { window.testBridge.tmuxSessions[0].clients = 1 })
+    await authenticate(page, 3)
+    await expect(active(page).locator('.notice')).toContainText('自动恢复已暂停')
+    expect(await openCommands(page)).toHaveLength(1)
+    await active(page).getByRole('button', { name: '接管并恢复', exact: true }).click()
+    await expect(page.getByRole('dialog', { name: '确认接管会话' })).toContainText('$0')
+    await page.getByRole('dialog').getByRole('button', { name: '取消', exact: true }).click()
+    expect(await page.evaluate(() => window.testBridge.starts.length)).toBe(4)
+    await active(page).getByLabel('密码', { exact: true }).fill('manual-foreground-password')
+    await active(page).getByRole('button', { name: '接管并恢复', exact: true }).click()
+    await page.getByRole('button', { name: '断开其他客户端并接管', exact: true }).click()
+    await expect.poll(() => page.evaluate(() => window.testBridge.starts.length)).toBe(5)
+    await authenticate(page, 4)
+    await expect(active(page).locator('.status')).toHaveText('已连接')
+    const takeover = (await openCommands(page)).at(-1)!.command
+    expect(takeover).toContain('attach-session -d')
+    expect(takeover).toContain('12345:1700000000:$0:1700000001')
+    await page.evaluate(() => { window.testBridge.tmuxSessions[0].clients = 0 })
+    await emit(page, 4, { type: 'state', state: 'error', code: 'transport_lost', transportLost: true })
+    await expect.poll(() => page.evaluate(() => window.testBridge.starts.length)).toBe(6)
+    await authenticate(page, 5)
+    await expect(active(page).locator('.status')).toHaveText('已连接')
+    expect((await openCommands(page)).at(-1)!.command).not.toContain('attach-session -d')
+    const leases = await page.evaluate(() => window.testBridge.activeLeases.length)
+    await page.evaluate(() => { window.testBridge.nativeEvent('lifecycleState', { active: false }); window.testBridge.nativeEvent('lifecycleState', { active: true }) })
+    await expect.poll(() => page.evaluate(() => window.testBridge.activeLeases.length)).toBeGreaterThan(leases)
+    await expect(active(page).getByLabel('密码', { exact: true })).toHaveValue('')
+    const resumeLease = await page.evaluate(() => window.testBridge.activeLeases.at(-1)!)
+    expect(resumeLease.ownerId).toBe(await active(page).getAttribute('id').then(id => id!.slice('pane-'.length)))
+    await active(page).getByLabel('密码', { exact: true }).fill('fresh-resume-password')
+    await active(page).getByRole('button', { name: '恢复会话', exact: true }).click()
+    await expect.poll(() => page.evaluate(() => window.testBridge.starts.length)).toBe(7)
+    await authenticate(page, 6)
+    await expect(active(page).locator('.status')).toHaveText('已连接')
+    await active(page).getByRole('button', { name: '键盘', exact: true }).click()
+    expect(await page.evaluate(() => window.testBridge.keyboardRequests.at(-1)?.connectionId)).toBe(await page.evaluate(() => window.testBridge.starts[6].connectionId))
+})
+
+test('an exec completion before remote disconnect cannot manufacture a transport retry', async ({ page }) => {
+    await chooser(page); await attached(page)
+    await emit(page, 0, { type: 'state', state: 'error', code: 'transport_lost', transportLost: true })
+    await expect.poll(() => page.evaluate(() => window.testBridge.starts.length)).toBe(2)
+    // Rust marks remote_disconnect as a lost transport too. Its classified
+    // code must still stop recovery rather than entering network retries.
+    await page.evaluate(() => { window.testBridge.nextExecFailure = { finalCode: 'remote_disconnect', transportLost: true } })
+    await authenticate(page, 1)
+    await expect(active(page).locator('.notice')).toHaveText('SSH 连接失败或认证被拒绝。')
+    await expect(active(page).getByLabel('密码', { exact: true })).toHaveValue('')
+    // A late, formerly owned state cannot revive the terminated generation.
+    await emit(page, 1, { type: 'state', state: 'error', code: 'transport_lost', transportLost: true })
+    await page.clock.install()
+    await page.clock.fastForward(60000)
+    expect(await page.evaluate(() => window.testBridge.starts.length)).toBe(2)
+    expect(await openCommands(page)).toHaveLength(1)
+})
+
+test('an interrupted named create reports uncertainty and is never automatically replayed', async ({ page }) => {
+    await chooser(page)
+    await active(page).getByLabel('新会话名称', { exact: true }).fill('uncertain-create')
+    await page.evaluate(() => { window.testBridge.nextExecFailure = { finalCode: 'transport_lost', transportLost: true } })
+    await active(page).getByRole('button', { name: '新建并连接', exact: true }).click()
+    await expect(active(page).locator('.notice')).toContainText('结果不确定')
+    await expect(active(page).locator('.notice')).toContainText('不会自动重放创建')
+    await page.clock.install()
+    await page.clock.fastForward(60000)
+    expect(await page.evaluate(() => window.testBridge.starts.length)).toBe(1)
+    expect(await page.evaluate(() => window.testBridge.commands.filter(item => item.command.type === 'exec' && item.command.command.includes('new-session')).length)).toBe(1)
+    expect(await openCommands(page)).toHaveLength(0)
+})
+
+for (const finalCode of ['transport_lost', 'remote_disconnect'] as const) {
+    test(`a terminal acknowledgement error waits for classified ${finalCode} before recovery`, async ({ page }) => {
+        await chooser(page); await attached(page)
+        await emit(page, 0, { type: 'state', state: 'error', code: 'transport_lost', transportLost: true })
+        await expect.poll(() => page.evaluate(() => window.testBridge.starts.length)).toBe(2)
+        await page.evaluate(finalCode => { window.testBridge.nextTerminalFailure = { finalCode, transportLost: true } }, finalCode)
+        await authenticate(page, 1)
+        if (finalCode === 'transport_lost') {
+            await expect.poll(() => page.evaluate(() => window.testBridge.starts.length)).toBe(3)
+            await authenticate(page, 2)
+            await expect(active(page).locator('.status')).toHaveText('已连接')
+            expect((await openCommands(page)).at(-1)!.command).not.toContain('attach-session -d')
+        } else {
+            await expect(active(page).locator('.notice')).toHaveText('SSH 连接失败或认证被拒绝。')
+            await page.clock.install(); await page.clock.fastForward(60000)
+            expect(await page.evaluate(() => window.testBridge.starts.length)).toBe(2)
+        }
+    })
+}
+
+test('pending start filters other Tab output and owner mismatch before the native ID returns', async ({ page }) => {
+    await chooser(page); await attached(page)
+    await active(page).getByRole('button', { name: '新增连接', exact: true }).click()
+    await active(page).getByLabel('主机', { exact: true }).fill('fixture.local')
+    await active(page).getByLabel('用户名', { exact: true }).fill('test-user')
+    await active(page).getByLabel('密码', { exact: true }).fill('pending-ephemeral-password')
+    await active(page).getByLabel('会话方式', { exact: true }).selectOption('tmux')
+    await page.evaluate(() => { window.testBridge.holdStart = true })
+    await active(page).getByRole('button', { name: '连接', exact: true }).click()
+    await expect.poll(() => page.evaluate(() => window.testBridge.starts.length)).toBe(2)
+    await page.evaluate(() => {
+        const first = window.testBridge.starts[0]; const pending = window.testBridge.starts[1]
+        for (let index = 0; index < 130; index++) {
+            window.testBridge.emit({ ...first, type: 'data', data: btoa('noise'), sequence: window.testBridge.nextDataSequence++ })
+        }
+        window.testBridge.emit({ ...pending, ownerId: 'different-owner', type: 'state', state: 'error', code: 'auth_failed' })
+    })
+    await expect(active(page).locator('.status')).toHaveText('连接中')
+    await page.evaluate(() => { window.testBridge.holdStart = false; window.testBridge.resolveStarts() })
+    await authenticate(page, 1)
+    await expect(active(page).getByRole('region', { name: '选择 tmux 会话' })).toBeVisible()
+    await active(page).getByRole('button', { name: '断开或取消连接', exact: true }).click()
+    await page.getByRole('tab', { name: 'work', exact: true }).click()
+    await expect(active(page).locator('.status')).toHaveText('已连接')
+    expect(await openCommands(page)).toHaveLength(1)
+    expect(await page.evaluate(() => window.testBridge.closed.includes(window.testBridge.starts[0].connectionId))).toBe(false)
+})
+
+test('a late picker owner can discard its own result without cancelling the newer Tab picker', async ({ page }) => {
+    await chooser(page); await attached(page)
+    await active(page).getByRole('button', { name: '复制连接并重新选择会话', exact: true }).click()
+    await active(page).getByRole('combobox', { name: '认证方式', exact: true }).selectOption('privateKey')
+    await page.evaluate(() => { window.testBridge.holdPicker = true })
+    await active(page).getByRole('button', { name: '选择私钥文件', exact: true }).click()
+    await expect.poll(() => page.evaluate(() => window.testBridge.pickerRequests.length)).toBe(1)
+    await page.getByRole('tablist').getByRole('button', { name: '新增连接', exact: true }).click()
+    await active(page).getByRole('combobox', { name: '认证方式', exact: true }).selectOption('privateKey')
+    await active(page).getByRole('button', { name: '选择私钥文件', exact: true }).click()
+    await expect.poll(() => page.evaluate(() => window.testBridge.pickerRequests.length)).toBe(2)
+    await page.getByRole('button', { name: '关闭标签页 fixture.local', exact: true }).click()
+    const operations = await page.evaluate(() => ({ requests: window.testBridge.pickerRequests, cancelled: window.testBridge.cancelledPickerRequests }))
+    expect(operations.cancelled).toContainEqual(operations.requests[0])
+    expect(operations.cancelled).not.toContainEqual(operations.requests[1])
+    await page.evaluate(() => { window.testBridge.resolvePickerAt(0, 'stale-old-key'); window.testBridge.resolvePickerAt(0, 'new-owned-key') })
+    await expect(active(page).getByText('picked.pem', { exact: true })).toBeVisible()
+    await expect.poll(() => page.evaluate(() => window.testBridge.discardedKeys.includes('stale-old-key'))).toBe(true)
+    expect(await page.evaluate(() => window.testBridge.discardedKeys.includes('new-owned-key'))).toBe(false)
+})
+
+test('remote session names and saved socket markup remain literal under production CSP', async ({ page }) => {
+    const name = '<svg onload="window.attackMarker.push(1)"><script>ignored</script></svg>{{constructor}}'
+    const socket = '/tmp/<svg onload="window.attackMarker.push(2)">'
+    await page.evaluate(({ name, socket }) => { window.testBridge.tmuxSessions[0].name = name; window.testBridge.tmuxSessions[0].socket = socket }, { name, socket })
+    await chooser(page)
+    await expect(active(page).locator('.tmux-session-list strong')).toHaveText(name)
+    await expect(page.locator('.tmux-panel svg, .tmux-panel script')).toHaveCount(0)
+    await active(page).getByLabel('在此设备保存会话身份以便手动恢复（不含凭据）').check()
+    await attached(page, name)
+    await page.reload()
+    await expect(active(page).locator('.hint').filter({ hasText: socket })).toHaveCount(1)
+    await expect(page.locator('.connect-panel svg, .connect-panel script')).toHaveCount(0)
+    expect(await page.evaluate(() => window.attackMarker)).toEqual([])
+    expect(await page.evaluate(() => window.testBridge.starts.length)).toBe(0)
+    expect(await page.evaluate(() => window.testBridge.commands.length)).toBe(0)
+})
+
+test('small phone and large tablet layouts keep chooser controls reachable and the same terminal session after resizing', async ({ page }) => {
+    await page.setViewportSize({ width: 320, height: 500 })
+    await chooser(page)
+    const plain = active(page).getByRole('button', { name: '使用普通 SSH', exact: true })
+    await plain.scrollIntoViewIfNeeded()
+    expect(await plain.evaluate(element => { const rect = element.getBoundingClientRect(); return rect.right <= innerWidth && element.contains(document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2)) })).toBe(true)
+    await attached(page)
+    await emit(page, 0, { type: 'data', data: btoa('PHONE_TABLET_SAME_SESSION') })
+    await page.setViewportSize({ width: 1024, height: 1366 })
+    await expect(active(page).locator('.xterm-rows')).toContainText('PHONE_TABLET_SAME_SESSION')
+    await expect.poll(() => page.evaluate(() => window.testBridge.commands.flatMap(item => item.command.type === 'resize' ? [item.command.cols] : []).at(-1))).toBeGreaterThan(80)
+    expect(await page.evaluate(() => window.testBridge.starts.length)).toBe(1)
+    await page.setViewportSize({ width: 1366, height: 650 })
+    await expect.poll(() => page.evaluate(() => window.testBridge.commands.flatMap(item => item.command.type === 'resize' ? [item.command.rows] : []).at(-1))).toBeLessThan(60)
+    expect(await page.evaluate(() => window.testBridge.starts.length)).toBe(1)
+})

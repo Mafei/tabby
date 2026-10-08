@@ -533,7 +533,7 @@ export async function webviewAcceptance (android, fixture) {
         // or any test-generated resize request.
         while (Date.now() < deadline) {
             substage = `pty-${phase}-native-write-query`
-            const ready = await page.evaluate(() => window.__tabbyCloudObservation.events.findLast(event => event.type === 'state' && event.state === 'ready'))
+            const ready = await page.evaluate(() => window.__tabbyCloudObservation.events.slice().reverse().find(event => event.type === 'state' && event.state === 'ready'))
             inTime()
             const validID = typeof ready?.connectionId === 'string' && /^[1-9]\d{0,18}$/.test(ready.connectionId)
                 && BigInt(ready.connectionId) <= 9223372036854775807n
@@ -738,7 +738,7 @@ export async function webviewAcceptance (android, fixture) {
         verify('actual AOSP system keyboard show/hide and rotation update WebView and SSH PTY dimensions')
 
         stage = 'background-and-auth-cancel'
-        const old = await page.evaluate(() => window.__tabbyCloudObservation.events.findLast(event => event.type === 'state' && event.state === 'ready'))
+        const old = await page.evaluate(() => window.__tabbyCloudObservation.events.slice().reverse().find(event => event.type === 'state' && event.state === 'ready'))
         await android.shell('input keyevent KEYCODE_HOME')
         await quiet()
         await android.shell(`am start -n ${APP}/.MainActivity`)
@@ -751,7 +751,7 @@ export async function webviewAcceptance (android, fixture) {
         await fixture.command({ type: 'configure', authMode: 'keyboard-interactive' })
         await connect(true, 'keyboardInteractive')
         await page.getByRole('dialog', { name: 'SSH 交互认证' }).waitFor()
-        const prompt = await page.evaluate(() => window.__tabbyCloudObservation.events.findLast(event => event.type === 'auth'))
+        const prompt = await page.evaluate(() => window.__tabbyCloudObservation.events.slice().reverse().find(event => event.type === 'auth'))
         await nativeTouch(page.getByRole('dialog').getByRole('button', { name: '取消', exact: true }))
         await quiet()
         const authRejected = await page.evaluate(async event => {
@@ -764,7 +764,7 @@ export async function webviewAcceptance (android, fixture) {
         await connect(true)
         stage = 'network-loss-and-explicit-reconnect'
         substage = 'drop-real-tcp'
-        const lostConnection = await page.evaluate(() => window.__tabbyCloudObservation.events.findLast(event => event.type === 'state' && event.state === 'ready'))
+        const lostConnection = await page.evaluate(() => window.__tabbyCloudObservation.events.slice().reverse().find(event => event.type === 'state' && event.state === 'ready'))
         const connectionsBeforeLoss = fixture.stats().connections
         await fixture.command({ type: 'dropConnections' })
         await step('network-loss-ui-closed', () => until(async () =>

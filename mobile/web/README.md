@@ -1,7 +1,7 @@
 # Android web interface prototype
 
 This is an independent Angular 22.2.1 AOT / xterm 6 build. It imports Tabby's existing
-`tabby-terminal/src/generatePalette.ts` directly; it does not load desktop
+`tabby-terminal/src/generatePalette.ts` and the portable desktop tmux core directly; it does not load desktop
 Electron, Node, filesystem, plugin installer, or SSH N-API modules. Native SSH is
 provided by the Android `TabbySSH` Capacitor plugin. Ordinary browsers cannot
 connect to SSH through the production entry point.
@@ -57,7 +57,9 @@ The APK packages neither the shim nor CSP probe, build graph or source maps.
 
 ## Lifecycle and security
 
-Native events must match both connection ID and generation. Host-key verification
+Each session pane owns its terminal, generation, transport, control controller
+and foreground credential memory. Native events must match both connection ID
+and generation; owner IDs isolate events arriving before start returns its ID. Host-key verification
 is required before any credential response. First-use confirmation shows the
 algorithm/fingerprint; a changed key closes the connection. Password/passphrase
 form values are cleared on start, authentication, cancellation and backgrounding;
@@ -71,7 +73,9 @@ Native import waits for foreground resume, reads provider data off the UI thread
 and only commits to the in-memory vault after checking the current request and
 foreground state again. Canceling the preconnection picker has an explicit
 native path. Requests to show the keyboard carry connection ID/generation and
-require the actual focused, visible terminal editor and native window.
+require the actual focused, visible terminal editor and native window. A native
+active-Tab lease rejects late keyboard requests after switching, backgrounding
+or reconnecting; the selected Tab reclaims its lease on resume.
 
 Every connection receives a new xterm instance so queued output/parser replies
 cannot reach a new host. User input and parser replies have separate paths;
@@ -82,8 +86,15 @@ backpressure is backed by a 1 MiB parser backlog limit. Input queuing is bounded
 256 KiB. Exceeding a backlog closes explicitly rather than dropping data silently.
 Terminal logging is disabled, including upstream parser diagnostics.
 
-Backgrounding closes SSH and clears authentication prompts; foreground requires
-a new connection. This prototype does not include automatic tmux recovery.
+Backgrounding closes all SSH transports and clears prompts and transient
+passwords. Foreground tmux password sessions recover an unexpected transport
+loss with increasing backoff while the original complete identity is available.
+Missing credentials, authentication/key/identity failures and occupied sessions
+pause. Private-key/interactive sessions need explicit fresh authentication.
+Auto recovery never takes over or creates a session; manual share/read-only and
+explicit takeover remain distinct choices. Saved identity storage is opt-in and
+contains public connection/session metadata only. A copied Tab starts a new
+selection, and the registry deduplicates the complete attached identity.
 
 ## Evidence limits
 

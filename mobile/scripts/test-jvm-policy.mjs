@@ -78,10 +78,15 @@ try {
         source('app/src/main/java/org/tabby/android/prototype/PrivateKeyVault.kt'),
         source('app/src/main/java/org/tabby/android/prototype/PrivateKeyImport.kt'),
         source('app/src/main/java/org/tabby/android/prototype/BridgeNumbers.kt'),
+        source('app/src/main/java/org/tabby/android/prototype/SessionOperations.kt'),
+        source('app/src/main/java/org/tabby/android/prototype/PickerScope.kt'),
+        source('app/src/main/java/org/tabby/android/prototype/KeyboardLease.kt'),
         source('app/src/test/java/org/tabby/android/prototype/SecurityPolicyTest.kt'),
-        source('app/src/test/java/org/tabby/android/prototype/PrivateKeyImportTest.kt')])
+        source('app/src/test/java/org/tabby/android/prototype/PrivateKeyImportTest.kt'),
+        source('app/src/test/java/org/tabby/android/prototype/SessionOperationsTest.kt')])
     await run(java, ['-cp', `${classes}${delimiter}${classpath}`, 'org.junit.runner.JUnitCore',
-        'org.tabby.android.prototype.SecurityPolicyTest', 'org.tabby.android.prototype.PrivateKeyImportTest'])
+        'org.tabby.android.prototype.SecurityPolicyTest', 'org.tabby.android.prototype.PrivateKeyImportTest',
+        'org.tabby.android.prototype.SessionOperationsTest'])
 } finally {
     await rm(classes, { recursive: true, force: true })
 }

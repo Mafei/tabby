@@ -56,8 +56,12 @@ class DeliveryBindingTest(unittest.TestCase):
             'suite': 'real-android-emulator', 'passed': True, 'scope': 'native-and-webview',
             'instrumentation': {'passed': True, 'tests': 7, 'skipped': 0},
             'webview': {'passed': True, 'cases': delivery.WEBVIEW_CASES.copy(), 'skipped': 0},
+            'tmux': {'passed': True, 'instrumentation': {'passed': True, 'tests': 4, 'skipped': 0},
+                     'webview': {'passed': True, 'cases': delivery.TMUX_WEBVIEW_CASES.copy(), 'skipped': 0}},
             'apks': {'appSHA256': self.emulator_receipt['sha256']},
             'android': {'api': 35, 'abi': 'x86_64'},
+            'compatibility': {'requestedForm': 'phone', 'width': 1080, 'height': 2400, 'density': 480,
+                              'webViewPackage': 'com.android.webview', 'webViewVersion': '133.0.1.2', 'physicalDevice': False},
         }
 
     def build(self, path, entries, abis, duplicate=None):
@@ -227,15 +231,61 @@ class DeliveryBindingTest(unittest.TestCase):
                 self.reject('WEBVIEW_TESTS_INCOMPLETE')
                 self.runtime['webview'] = original
 
-    def test_runtime_requires_official_api_35_or_36_and_x86_64(self):
-        self.runtime['android']['api'] = 36
-        self.assertEqual(self.check()['runtime']['api'], 36)
-        for field, value in [('api', 34), ('api', True), ('abi', 'arm64-v8a')]:
+    def test_supplemental_tmux_failure_or_missing_scope_rejected(self):
+        original = copy.deepcopy(self.runtime['tmux'])
+        for value in [None, {}, {'passed': False}, {**original, 'failure': 'FIXED_FAILURE'}]:
+            with self.subTest(value=value):
+                self.runtime['tmux'] = value
+                self.reject('TMUX_NOT_PASSED')
+        self.runtime['tmux'] = original
+
+    def test_supplemental_native_requires_all_four_and_zero_skips(self):
+        for field, value in [('tests', 3), ('tests', True), ('skipped', 1), ('skipped', False), ('passed', False)]:
+            with self.subTest(field=field):
+                original = copy.deepcopy(self.runtime['tmux']['instrumentation'])
+                self.runtime['tmux']['instrumentation'][field] = value
+                self.reject('TMUX_NATIVE_TESTS_INCOMPLETE')
+                self.runtime['tmux']['instrumentation'] = original
+
+    def test_supplemental_web_requires_all_five_exact_cases_and_zero_skips(self):
+        for field, value in [('cases', delivery.TMUX_WEBVIEW_CASES[:-1]),
+                             ('cases', list(reversed(delivery.TMUX_WEBVIEW_CASES))),
+                             ('cases', [delivery.TMUX_WEBVIEW_CASES[0]] * 5),
+                             ('skipped', 1), ('skipped', False), ('passed', False)]:
+            with self.subTest(field=field):
+                original = copy.deepcopy(self.runtime['tmux']['webview'])
+                self.runtime['tmux']['webview'][field] = value
+                self.reject('TMUX_WEBVIEW_TESTS_INCOMPLETE')
+                self.runtime['tmux']['webview'] = original
+
+    def test_runtime_requires_verified_stable_api_31_to_36_and_x86_64(self):
+        for api in [31, 32, 33, 34, 35, 36]:
+            self.runtime['android']['api'] = api
+            self.assertEqual(self.check()['runtime']['api'], api)
+        for field, value in [('api', 30), ('api', 37), ('api', '35'), ('api', True), ('abi', 'arm64-v8a')]:
             with self.subTest(field=field):
                 original = self.runtime['android'].copy()
                 self.runtime['android'][field] = value
                 self.reject('RUNTIME_PLATFORM_INVALID')
                 self.runtime['android'] = original
+
+    def test_compatibility_requires_actual_bounded_geometry_and_webview_identity(self):
+        for field, value in [('requestedForm', 'foldable-oppo'), ('width', True), ('height', 0),
+                             ('density', 0), ('physicalDevice', True), ('webViewPackage', 'unknown'),
+                             ('webViewVersion', 'unknown')]:
+            with self.subTest(field=field):
+                original = copy.deepcopy(self.runtime['compatibility'])
+                self.runtime['compatibility'][field] = value
+                self.reject('RUNTIME_COMPATIBILITY_INVALID')
+                self.runtime['compatibility'] = original
+        self.runtime['compatibility']['requestedForm'] = 'tablet'
+        self.reject('RUNTIME_TABLET_TOO_SMALL')
+        self.runtime['compatibility'].update(width=2560, height=1600, density=320)
+        self.assertEqual(self.check()['compatibility']['requestedForm'], 'tablet')
+        self.runtime['compatibility']['unexpectedPrivateMetadata'] = 'MUST_NOT_BE_REFLECTED'
+        result = self.check()
+        self.assertNotIn('unexpectedPrivateMetadata', result['compatibility'])
+        self.assertNotIn('MUST_NOT_BE_REFLECTED', json.dumps(result))
 
     def test_cli_source_check_rejects_any_dirty_checkout(self):
         with patch.object(delivery.subprocess, 'run', return_value=types.SimpleNamespace(stdout=' M tracked-input\n')):

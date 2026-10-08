@@ -1,0 +1,4 @@
+# Explicit syntax target for Android System WebView acceptance runs.
+# Actual device/API compatibility is measured separately; this does not expand
+# Angular's official browser support or install/update the system WebView.
+Chrome >= 93

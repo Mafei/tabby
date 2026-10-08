@@ -13,6 +13,8 @@
     "test:build": "node scripts/verify-web-build.mjs",
     "test:toolchain": "node scripts/verify-capacitor-toolchain.mjs",
     "test:web": "playwright test --config web/playwright.config.ts",
+    "test:tmux-controller": "node --test test/tmux-controller.test.mjs",
+    "test:tmux-fixture": "node --test test/ssh-control-fixture.test.mjs test/ssh-tmux-fixture.test.mjs",
     "test:fixture": "node --test test/ssh-fixture.test.mjs",
     "test:delivery": "python3 -m unittest discover -s test -p test_android_delivery.py -v",
     "test:native": "node scripts/test-fixture-native.mjs",

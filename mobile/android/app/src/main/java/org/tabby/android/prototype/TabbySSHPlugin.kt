@@ -34,14 +34,19 @@ class TabbySSHPlugin : Plugin() {
     private data class Session(
         val id: Long,
         val endpoint: String,
+        val host: String,
+        val port: Int,
+        val username: String,
+        val ownerId: String?,
         val gate: ConnectionGate,
+        val operations: SessionOperations,
         val hostKeys: MutableMap<String, String> = ConcurrentHashMap(),
         val batchPending: AtomicBoolean = AtomicBoolean(false),
         val outputWindow: OutputWindow = OutputWindow(),
-        @Volatile var ready: Boolean = false,
+        @Volatile var verifiedHostKey: String? = null,
     )
 
-    private class Selection(val call: PluginCall) {
+    private class Selection(val call: PluginCall, val scope: PickerScope) {
         val cancelled = AtomicBoolean(false)
         val settled = AtomicBoolean(false)
         @Volatile var returned = false
@@ -49,6 +54,8 @@ class TabbySSHPlugin : Plugin() {
     private data class SelectedDocument(val selection: Selection, val uri: Uri)
 
     private val sessions = ConcurrentHashMap<Long, Session>()
+    private val sessionLock = Any()
+    private val keyboardLease = KeyboardLease()
     private val privateKeys = PrivateKeyVault()
     private val worker = Executors.newSingleThreadScheduledExecutor()
     @Volatile private var foreground = true
@@ -103,8 +110,6 @@ class TabbySSHPlugin : Plugin() {
 
     @PluginMethod
     fun start(call: PluginCall) {
-        cancelSelection()
-        val startingKeys = privateKeys.snapshot()
         var allocatedId: Long? = null
         var allocatedSession: Session? = null
         try {
@@ -114,6 +119,14 @@ class TabbySSHPlugin : Plugin() {
             val port = if (call.data.has("port")) BridgeNumbers.integer(call.data.opt("port"), 1, 65535).toInt() else 22
             val generation = BridgeNumbers.generation(call.data.opt("generation"))
             val authMode = call.getString("authMode", "password") ?: "password"
+            val deferTerminal = if (call.data.has("deferTerminal")) {
+                (call.data.get("deferTerminal") as? Boolean) ?: error("deferTerminal")
+            } else false
+            val ownerId = if (call.data.has("ownerId")) {
+                (call.data.get("ownerId") as? String)?.also {
+                    require(it.isNotEmpty() && it.length <= 128 && !it.any { char -> char.code < 32 || char.code == 127 })
+                } ?: error("ownerId")
+            } else null
             require(host.isNotEmpty() && host.length <= 255 && !host.any { it.isWhitespace() || it == '\u0000' || it == '/' })
             require(username.isNotEmpty() && username.length <= 256 && !username.contains('\u0000'))
             require(port in 1..65535 && generation in 0..9_007_199_254_740_991L)
@@ -127,31 +140,31 @@ class TabbySSHPlugin : Plugin() {
             val options = JSONObject().put("host", host).put("port", port).put("username", username)
                 .put("generation", generation).put("authMode", authMode)
                 .put("cols", cols).put("rows", rows).put("term", "xterm-256color")
+                .put("deferTerminal", deferTerminal)
             hostKeyStore.read(endpoint)?.let { options.put("expectedHostKey", it) }
-            if (authMode != "privateKey") discardPrivateKeys(startingKeys)
-            closeAll("replaced", clearKeys = false)
-            val id = NativeSSH.start(options.toString())
-            allocatedId = id
-            val session = Session(id, endpoint, ConnectionGate(generation))
-            allocatedSession = session
-            sessions[id] = session
+            val session = synchronized(sessionLock) {
+                require(foreground && !destroyed && sessions.size < 4)
+                val id = NativeSSH.start(options.toString())
+                allocatedId = id
+                Session(id, endpoint, host, port, username, ownerId, ConnectionGate(generation), SessionOperations(deferTerminal)).also {
+                    allocatedSession = it
+                    sessions[id] = it
+                }
+            }
             if (!foreground || destroyed) {
                 closeSession(session, "background")
                 call.reject("The app is in the background", "BACKGROUND")
                 return
             }
-            call.resolve(JSObject().put("connectionId", id.toString()))
+            call.resolve(JSObject().put("connectionId", session.id.toString()))
         } catch (_: Throwable) {
             val session = allocatedSession
             if (session != null) {
-                closeSession(session, "start_failed", notify = false, clearUnusedKeys = false)
+                closeSession(session, "start_failed", notify = false)
             }
             // If allocation succeeded but creating/registering Session failed,
             // there is still a native ID/socket to release.
             allocatedId?.let { try { NativeSSH.destroy(it) } catch (_: Throwable) { } }
-            // A later picker owns a different nonce; an older failed start must
-            // not erase that new import while cleaning its own preconnect keys.
-            discardPrivateKeys(startingKeys)
             // Never forward native exception text: it may contain auth material.
             call.reject("Cannot start the SSH connection", "SSH_START_FAILED")
         }
@@ -160,12 +173,14 @@ class TabbySSHPlugin : Plugin() {
     @PluginMethod
     fun command(call: PluginCall) {
         val command = call.getObject("command")
+        var reserved: Pair<Session, Long>? = null
         try {
             val id = call.getString("connectionId")?.toLongOrNull() ?: error("id")
             val session = sessions[id] ?: error("closed")
             require(session.gate.isActive() && foreground && !destroyed)
             val input = command ?: error("command")
             val type = input.optString("type")
+            if (type in setOf("exec", "execCancel", "openTerminal", "outputAck")) require(input.has("generation"))
             val generation = if (input.has("generation")) BridgeNumbers.generation(input.opt("generation")) else session.gate.generation
             require(generation == session.gate.generation)
             val output = JSONObject().put("type", type).put("generation", generation)
@@ -206,6 +221,31 @@ class TabbySSHPlugin : Plugin() {
                     call.resolve()
                     return
                 }
+                "exec" -> {
+                    val requestId = BridgeNumbers.integer(input.opt("requestId"), 1, BridgeNumbers.MAX_SAFE_INTEGER)
+                    val text = SessionOperations.checkedCommand((input.opt("command") as? String) ?: error("command"))
+                    session.operations.reserveExec(requestId)
+                    reserved = session to requestId
+                    output.put("requestId", requestId).put("command", text)
+                }
+                "execCancel" -> {
+                    val requestId = BridgeNumbers.integer(input.opt("requestId"), 1, BridgeNumbers.MAX_SAFE_INTEGER)
+                    session.operations.cancelExec(requestId)
+                    output.put("requestId", requestId)
+                }
+                "openTerminal" -> {
+                    val requestId = BridgeNumbers.integer(input.opt("requestId"), 1, BridgeNumbers.MAX_SAFE_INTEGER)
+                    val kind = (input.opt("kind") as? String) ?: error("kind")
+                    require(kind == "shell" || kind == "exec")
+                    if (kind == "exec") output.put("command", SessionOperations.checkedCommand((input.opt("command") as? String) ?: error("command")))
+                    else require(!input.has("command"))
+                    for (dimension in listOf("cols", "rows")) {
+                        if (input.has(dimension)) output.put(dimension, BridgeNumbers.integer(input.opt(dimension), 1, 1000))
+                    }
+                    session.operations.reserveTerminal(requestId, kind)
+                    reserved = session to requestId
+                    output.put("requestId", requestId).put("kind", kind)
+                }
                 "cancel", "close" -> {
                     closeSession(session, "cancelled")
                     call.resolve()
@@ -214,8 +254,12 @@ class TabbySSHPlugin : Plugin() {
                 else -> error("unsupported")
             }
             NativeSSH.command(id, output.toString())
+            // Once native accepts a reservation, a response-delivery failure
+            // must not erase it before its eventual completion event arrives.
+            reserved = null
             call.resolve()
         } catch (_: Throwable) {
+            reserved?.let { (session, requestId) -> session.operations.rejected(requestId) }
             call.reject("SSH command was rejected or the connection is closed", "SSH_COMMAND_REJECTED")
         } finally {
             // Capacitor PluginCall lives until its callback is released. Drop
@@ -243,6 +287,7 @@ class TabbySSHPlugin : Plugin() {
                             val event = batch.getJSONObject(index)
                             if (event.optLong("generation", -1) != session.gate.generation) continue
                             event.put("connectionId", session.id.toString())
+                            session.ownerId?.let { event.put("ownerId", it) }
                             processEvent(session, event)
                         }
                     } catch (_: Throwable) {
@@ -273,14 +318,21 @@ class TabbySSHPlugin : Plugin() {
                     // Rust emits this only after matching the handshake against
                     // the native store's expectedHostKey. It needs no response.
                     require(decision == HostKeyDecision.ACCEPT)
+                    val previous = session.verifiedHostKey
+                    require(previous == null || previous == key)
+                    session.verifiedHostKey = key
                     emit(session, event)
                     return
                 }
                 val requestId = event.get("requestId").toString()
                 when (decision) {
                     HostKeyDecision.ACCEPT -> {
-                        event.put("status", "known")
-                        emit(session, event)
+                        // Deferred authentication waits for Rust's accepted-key
+                        // marker, rather than presenting a saved pin as proof.
+                        if (!session.operations.deferredTerminal) {
+                            event.put("status", "known")
+                            emit(session, event)
+                        }
                         NativeSSH.command(session.id, JSONObject()
                             .put("type", "hostKeyResponse").put("requestId", requestId.toLong())
                             .put("generation", session.gate.generation).put("accept", true).toString())
@@ -301,12 +353,42 @@ class TabbySSHPlugin : Plugin() {
                 require(session.gate.register(event.get("requestId").toString(), "auth"))
                 emit(session, event)
             }
-            "data" -> {
+            "data", "execData" -> {
+                // Even cancelled/unknown exec output must be delivered and ACKed;
+                // dropping it here could stall this transport's shared queue.
                 event.put("sequence", session.outputWindow.reserve(event.getString("data").length))
                 emit(session, event)
             }
+            "execExit", "execError" -> {
+                val requestId = BridgeNumbers.integer(event.opt("requestId"), 1, BridgeNumbers.MAX_SAFE_INTEGER)
+                if (event.optString("type") == "execExit") {
+                    require(event.opt("complete") == true)
+                    BridgeNumbers.integer(event.opt("exitStatus"), 0, 4_294_967_295L)
+                } else require(event.opt("complete") == false)
+                session.operations.completeExec(requestId)
+                emit(session, event)
+            }
+            "terminalError" -> {
+                session.operations.terminalFailed(BridgeNumbers.integer(event.opt("requestId"), 1, BridgeNumbers.MAX_SAFE_INTEGER))
+                emit(session, event)
+            }
             else -> {
-                if (event.optString("type") == "state" && event.optString("state") == "ready") session.ready = true
+                if (event.optString("type") == "state") {
+                    when (event.optString("state")) {
+                        "authenticated" -> {
+                            val key = session.verifiedHostKey ?: error("unverified")
+                            require(event.opt("deferredTerminal") == true)
+                            session.operations.authenticated()
+                            event.put("verifiedHostKey", key).put("nativeEndpoint", JSONObject()
+                                .put("host", session.host).put("port", session.port).put("username", session.username))
+                        }
+                        "ready" -> {
+                            if (session.operations.deferredTerminal) session.operations.ready(
+                                BridgeNumbers.integer(event.opt("requestId"), 1, BridgeNumbers.MAX_SAFE_INTEGER), event.getString("terminalKind"))
+                            else session.operations.ready()
+                        }
+                    }
+                }
                 emit(session, event)
                 if (event.optString("type") == "state" && event.optString("state") in setOf("closed", "error")) {
                     closeSession(session, event.optString("code", "closed"), notify = false)
@@ -323,41 +405,38 @@ class TabbySSHPlugin : Plugin() {
 
     private fun emitFailure(session: Session, code: String) {
         val event = JSObject().put("connectionId", session.id.toString()).put("generation", session.gate.generation)
-            .put("type", "state").put("state", "error").put("code", code)
+            .put("type", "state").put("state", "error").put("code", code).put("transportLost", false)
+        session.ownerId?.let { event.put("ownerId", it) }
         activity.runOnUiThread { notifyListeners("sshEvent", event) }
     }
 
-    private fun closeSession(session: Session, reason: String, notify: Boolean = true, clearUnusedKeys: Boolean = true) {
-        if (!sessions.remove(session.id, session)) return
+    private fun closeSession(session: Session, reason: String, notify: Boolean = true) {
+        if (!synchronized(sessionLock) { sessions.remove(session.id, session) }) return
         session.gate.close()
+        session.operations.close()
         session.hostKeys.clear()
         session.outputWindow.clear()
-        if (clearUnusedKeys && sessions.isEmpty()) clearPrivateKeys()
         try { NativeSSH.destroy(session.id) } catch (_: Throwable) { /* No secret-bearing exception logging. */ }
         if (notify) {
             val event = JSObject().put("connectionId", session.id.toString()).put("generation", session.gate.generation)
-                .put("type", "state").put("state", "closed").put("code", reason)
+                .put("type", "state").put("state", "closed").put("code", reason).put("transportLost", false)
+            session.ownerId?.let { event.put("ownerId", it) }
             activity.runOnUiThread { notifyListeners("sshEvent", event) }
         }
     }
 
-    private fun closeAll(reason: String, clearKeys: Boolean = true) {
-        sessions.values.toList().forEach { closeSession(it, reason, clearUnusedKeys = clearKeys) }
-        if (clearKeys) {
-            clearPrivateKeys()
-        }
+    private fun closeAll(reason: String) {
+        sessions.values.toList().forEach { closeSession(it, reason) }
+        clearPrivateKeys()
     }
 
     private fun clearPrivateKeys() {
         privateKeys.clear()
     }
 
-    private fun discardPrivateKeys(ids: Set<String>) {
-        privateKeys.discard(ids)
-    }
-
     override fun handleOnPause() {
         foreground = false
+        keyboardLease.clear()
         // Opening SAF pauses this Activity. A selected document is different:
         // its import is cancelled by the next genuine foreground loss.
         if (selection.get()?.returned == true) cancelSelection()
@@ -376,6 +455,7 @@ class TabbySSHPlugin : Plugin() {
     override fun handleOnDestroy() {
         destroyed = true
         foreground = false
+        keyboardLease.clear()
         cancelSelection()
         selection.get()?.takeIf { !it.returned }?.let { finishSelection(it) }
         keyImports.close()
@@ -396,15 +476,29 @@ class TabbySSHPlugin : Plugin() {
     }
 
     @PluginMethod
+    fun setActiveTab(call: PluginCall) {
+        try {
+            require(foreground && !destroyed)
+            val ownerId = (call.data.opt("ownerId") as? String) ?: error("ownerId")
+            keyboardLease.switch(ownerId, BridgeNumbers.integer(call.data.opt("epoch"), 1, BridgeNumbers.MAX_SAFE_INTEGER))
+            call.resolve()
+        } catch (_: Throwable) {
+            call.reject("The active Tab lease is unavailable", "KEYBOARD_NOT_READY")
+        }
+    }
+
+    @PluginMethod
     fun showKeyboard(call: PluginCall) {
         val id = call.getString("connectionId")?.toLongOrNull()
         val generation = try { BridgeNumbers.generation(call.data.opt("generation")) } catch (_: Throwable) { null }
         val session = id?.let { sessions[it] }
+        val lease = keyboardLease.capture()
         activity.runOnUiThread {
             try {
                 val webView = bridge.webView
                 require(id != null && session != null && sessions[id] === session && generation == session.gate.generation)
-                require(foreground && !destroyed && session.gate.isActive() && session.ready)
+                require(foreground && !destroyed && session.gate.isActive() && session.operations.isReady())
+                require(keyboardLease.permits(session.ownerId, lease))
                 require(activity.window.decorView.hasWindowFocus() && webView.hasWindowFocus()
                     && webView.hasFocus() && webView.isAttachedToWindow && webView.isShown && webView.onCheckIsTextEditor())
                 val manager = context.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
@@ -446,11 +540,15 @@ class TabbySSHPlugin : Plugin() {
 
     @PluginMethod
     fun selectPrivateKey(call: PluginCall) {
+        val scope = try { pickerScope(call) } catch (_: Throwable) {
+            call.reject("Key selection scope is invalid", "KEY_PICKER_UNAVAILABLE")
+            return
+        }
         if (!foreground || destroyed || !pickerPending.compareAndSet(false, true)) {
             call.reject("Key selection is unavailable or already in progress", "KEY_PICKER_UNAVAILABLE")
             return
         }
-        val chosen = Selection(call)
+        val chosen = Selection(call, scope)
         selection.set(chosen)
         val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
             addCategory(Intent.CATEGORY_OPENABLE)
@@ -470,18 +568,27 @@ class TabbySSHPlugin : Plugin() {
 
     @PluginMethod
     fun cancelPrivateKeySelection(call: PluginCall) {
-        cancelSelection()
+        val scope = try { pickerScope(call) } catch (_: Throwable) {
+            call.reject("Key selection scope is invalid", "KEY_PICKER_UNAVAILABLE")
+            return
+        }
+        cancelSelection(scope)
         call.resolve()
     }
 
-    private fun cancelSelection() {
+    private fun pickerScope(call: PluginCall): PickerScope {
+        fun text(name: String): String? = if (call.data.has(name)) (call.data.get(name) as? String) ?: error(name) else null
+        return PickerScope(text("ownerId"), text("requestId"))
+    }
+
+    private fun cancelSelection(scope: PickerScope? = null) {
         synchronized(selectionLock) {
-            selection.get()?.let { chosen ->
-                chosen.cancelled.set(true)
-                rejectSelection(chosen, "KEY_IMPORT_CANCELLED")
-            }
+            val chosen = selection.get() ?: return
+            if (scope != null && chosen.scope != scope) return
+            chosen.cancelled.set(true)
+            rejectSelection(chosen, "KEY_IMPORT_CANCELLED")
+            keyImports.cancel()
         }
-        keyImports.cancel()
     }
 
     private fun rejectSelection(chosen: Selection, code: String) {

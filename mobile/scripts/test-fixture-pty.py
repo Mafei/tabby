@@ -32,28 +32,44 @@ def signal_child(pid, sig):
             pass
 
 
-def reap_until(pid, deadline):
+def reap_until(pid, deadline, status_sink=None):
     while time.monotonic() < deadline:
         try:
-            done, _ = os.waitpid(pid, os.WNOHANG)
+            done, status = os.waitpid(pid, os.WNOHANG)
         except ChildProcessError:
             return True
         if done:
+            if status_sink is not None:
+                status_sink.append(status)
             return True
         time.sleep(0.01)
     return False
 
 
-def terminate(pid):
+def terminate(pid, status_sink=None):
     signal_child(pid, signal.SIGHUP)
-    if not reap_until(pid, time.monotonic() + 0.5):
+    if not reap_until(pid, time.monotonic() + 0.5, status_sink):
         signal_child(pid, signal.SIGKILL)
-        if not reap_until(pid, time.monotonic() + 0.5):
+        if not reap_until(pid, time.monotonic() + 0.5, status_sink):
             raise RuntimeError("PTY child did not terminate")
 
 
 def main():
     rows, cols = int(sys.argv[1]), int(sys.argv[2])
+    # An optional exec payload is read from a separate pipe, never argv/logs.
+    # The ordinary shell path and its initialization ordering are unchanged.
+    exec_command = None
+    if len(sys.argv) == 4 and sys.argv[3] == "--exec-fd":
+        command_bytes = bytearray()
+        while True:
+            part = os.read(3, 65536)
+            if not part:
+                break
+            command_bytes.extend(part)
+            if len(command_bytes) > 65536:
+                raise ValueError("PTY exec command too large")
+        os.close(3)
+        exec_command = command_bytes.decode("utf-8", errors="strict")
     running = True
 
     def stop(_signal, _frame):
@@ -81,7 +97,8 @@ def main():
         # login_tty also closes the original slave descriptor.
         os.login_tty(slave)
         os.environ["PS1"] = "FIXTURE$ "
-        os.execv("/bin/sh", ["/bin/sh", "-i"])
+        os.execv("/bin/sh", ["/bin/sh", "-i"] if exec_command is None
+                 else ["/bin/sh", "-c", exec_command])
     try:
         os.close(slave)
         # Only nonsecret lifecycle metadata goes to stderr.
@@ -123,7 +140,11 @@ def main():
                         running = False
     finally:
         os.close(master)
-        terminate(pid)
+        status = []
+        terminate(pid, status)
+    if exec_command is not None and status:
+        code = os.waitstatus_to_exitcode(status[0])
+        raise SystemExit(code if code >= 0 else 128 - code)
 
 
 if __name__ == "__main__":
