@@ -522,6 +522,7 @@ export class SessionPaneComponent implements AfterViewInit, OnDestroy {
     }
     closeKeyManager(): void {
         if (this.keyBusy && this.keyPhase === 'install') this.notice = '安装操作已取消或连接关闭，服务器可能已添加公钥。不会自动重试或删除；请重新检查并验证。'
+        if (this.keyBusy && this.keyPhase === 'generate') this.notice = '生成可能已完成。已加密保存的本机密钥会留在列表，尚未写入服务器；可稍后检查或删除。'
         ++this.keyEpoch; this.keyOperation?.abort(); this.keyOperation = undefined
         this.keyBusy = false; this.enrollmentPlan = undefined; this.selectedDeviceKey = undefined
         if (this.modal === 'keys') this.modal = undefined

@@ -119,3 +119,4 @@ input, select { min-height: 48px; padding: .45rem; width: 100%; background: #212
 .key-manager ul { padding-left: 0; list-style: none; }
 .key-manager li { margin-block: 16px; padding-block: 12px; border-top: 1px solid #607088; }
 .key-manager button { margin: 4px; min-height: 48px; }
+.key-manager > div { display: block; }
