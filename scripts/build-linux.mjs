@@ -18,7 +18,10 @@ builder({
     linux: options.targets,
     armv7l: process.env.ARCH === 'armv7l',
     arm64: process.env.ARCH === 'arm64',
-    config: {
+    // Portable resources replace the YAML arrays in one explicit config source.
+    // Merging object overrides into the auto-loaded YAML concatenates those
+    // arrays and makes generic and filtered copies write the same destination.
+    config: options.portable ? './scripts/linux-portable-config.mjs' : {
         npmRebuild: false,
         files: options.files,
         ...(options.extraResources ? { extraResources: options.extraResources } : {}),
