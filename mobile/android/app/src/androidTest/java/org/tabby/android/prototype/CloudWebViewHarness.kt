@@ -102,11 +102,14 @@ class CloudWebViewHarness {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         require(context.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE != 0)
         val done = File(context.filesDir, "tabby-cloud-webview.done")
+        require(!args.containsKey("cloudReadyFile") || args.getString("cloudReadyFile") == "tabby-cloud-webview.ready")
+        val ready = args.getString("cloudReadyFile")?.let { File(context.filesDir, it) }
         val input = File(context.filesDir, "tabby-cloud-input.json")
         val result = File(context.filesDir, "tabby-cloud-input.result.json")
         val resultTemporary = File(context.filesDir, "tabby-cloud-input.result.tmp")
         val inputEnabled = args.getString("cloudInputFile") == "tabby-cloud-input.json"
         done.delete()
+        ready?.delete()
         input.delete()
         result.delete()
         resultTemporary.delete()
@@ -119,6 +122,9 @@ class CloudWebViewHarness {
                     WebView.setWebContentsDebuggingEnabled(true)
                 }
                 val deadline = System.nanoTime() + 180_000_000_000L
+                // Setup no longer erases an early command from the next owned
+                // harness. This signal grants no window or editor focus.
+                ready?.writeText("READY")
                 while (!done.isFile && System.nanoTime() < deadline) {
                     if (inputEnabled && input.isFile) {
                         var ok = false
@@ -210,6 +216,7 @@ class CloudWebViewHarness {
                 WebView.setWebContentsDebuggingEnabled(false)
             }
             done.delete()
+            ready?.delete()
             input.delete()
             result.delete()
             resultTemporary.delete()

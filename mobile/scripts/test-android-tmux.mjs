@@ -1,5 +1,5 @@
 import { createRequire } from 'node:module'
-import { APP, RUNNER, DONE, INPUT, check, until, pause, TestFailure, instrumentationResult, observeUntil, observeReadUntil } from './test-android-utils.mjs'
+import { APP, RUNNER, DONE, READY, INPUT, check, until, pause, TestFailure, instrumentationResult, observeUntil, observeReadUntil } from './test-android-utils.mjs'
 import { TMUX_WEBVIEW_CASES } from './test-android-tmux-cases.mjs'
 import { javaScriptBootObservation } from './test-android-webview.mjs'
 import { connect as sshConnect, exec as sshExec, terminal as sshTerminal, quote } from '../test/ssh-fixture-client.mjs'
@@ -156,8 +156,9 @@ export async function tmuxWebviewAcceptance (android, fixture) {
     }
     async function beginHarness (index) {
         await android.removeFile(DONE)
+        await android.removeFile(READY)
         harnessDeadline = Date.now() + 180000
-        const command = `am instrument -w -r -e class ${APP}.CloudWebViewHarness -e fixtureMetadata ${METADATA} -e cloudDoneFile ${DONE} -e cloudInputFile ${INPUT} ${RUNNER}`
+        const command = `am instrument -w -r -e class ${APP}.CloudWebViewHarness -e fixtureMetadata ${METADATA} -e cloudDoneFile ${DONE} -e cloudReadyFile ${READY} -e cloudInputFile ${INPUT} ${RUNNER}`
         harness = android.launch(['shell', '-T', command], { timeout: 190000 })
         harness.result.catch(() => {})
         let view
@@ -166,6 +167,10 @@ export async function tmuxWebviewAcceptance (android, fixture) {
             return !!view
         }, 'ANDROID_TMUX_HARNESS_WEBVIEW_NOT_AVAILABLE', 45000)
         harnessPID = view.pid()
+        const readyDeadline = Math.min(harnessDeadline, Date.now() + 45000)
+        await step('owned-input-loop-ready', () => until(async () => await observeReadUntil(() => android.readFile(READY,
+            { timeout: Math.max(1, Math.min(5000, readyDeadline - Date.now())) }), readyDeadline,
+        'ANDROID_TMUX_HARNESS_INPUT_READY_TIMEOUT') === 'READY', 'ANDROID_TMUX_HARNESS_INPUT_READY_TIMEOUT', Math.max(1, readyDeadline - Date.now())))
         const record = { harness: `tmux-${index + 1}`, actions: [] }
         harnesses.push(record)
         record.beforeCDP = await step('focus-before-cdp-attach', focusSample)

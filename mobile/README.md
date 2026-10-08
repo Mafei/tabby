@@ -211,12 +211,14 @@ input-event categories and focus booleans, never editor text. The history-render
 gate also retains its last bounded geometry and a fixed synthetic-marker
 visibility flag before the later swipe initializes its baseline. Its original
 readiness predicate and deadline remain; no terminal contents are reported.
-When SystemUI's clipboard preview is observed, the harness sends one normal
-native outside touch to the passive app status label, using the existing
-app-window, focus, visibility and stable-geometry guards. It then still requires
-350ms of observed preview absence within the original 10-second phase budget.
-This changes no SystemUI settings, permissions or IME configuration and does
-not touch a foreign window, retry the gesture or synthesize DOM activation.
+When SystemUI's clipboard preview is observed, the harness selects the normal
+close button only inside the exact SystemUI clipboard container. If that control
+is absent, it uses one guarded native outside touch to the app's More button.
+It still requires 350ms of observed preview absence within the original
+10-second phase budget. Notification Stop similarly belongs to this app's exact
+notification card; a collapsed card is normally expanded once before clicking
+Stop. These bounded actions change no SystemUI settings, permissions or IME
+configuration and never dismiss an ANR, security dialog or foreign notification.
 See [Android's device-lock API](https://developer.android.com/reference/android/app/KeyguardManager#isDeviceLocked())
 and [TrustManager's direct user dump](https://github.com/aosp-mirror/platform_frameworks_base/blob/master/services/core/java/com/android/server/trust/TrustManagerService.java).
 The

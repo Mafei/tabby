@@ -1,7 +1,8 @@
 import { mkdir, writeFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import { createRequire } from 'node:module'
-import { APP, RUNNER, DONE, INPUT, METADATA, check, until, pause, TestFailure, instrumentationResult, observeUntil, observeReadUntil } from './test-android-utils.mjs'
+import { systemUIActionPoint } from './android-system-ui.mjs'
+import { APP, RUNNER, DONE, READY, INPUT, METADATA, check, until, pause, TestFailure, instrumentationResult, observeUntil, observeReadUntil } from './test-android-utils.mjs'
 
 const require = createRequire(import.meta.url)
 const quote = value => `'${value.replace(/'/g, `'"'"'`)}'`
@@ -351,10 +352,9 @@ export async function webviewAcceptance (android, fixture) {
         return page.evaluate(async ({ method, options }) => window.Capacitor.Plugins.TabbySSH[method](options), { method, options })
     }
     async function clipboardOverlayCleared (phase) {
-        // A normal outside touch dismisses SystemUI's clipboard preview. Touch
-        // the app's More control, through the existing native input
-        // guards, once within this phase's unchanged budget. Still observe real
-        // disappearance before activating any app command.
+        // One normal close touch inside SystemUI's exact clipboard container,
+        // or one guarded outside touch on More when the control is unavailable.
+        // Still observe real disappearance within the unchanged phase budget.
         let observed = false
         let dismissalSent = false
         let clearSince
@@ -372,11 +372,23 @@ export async function webviewAcceptance (android, fixture) {
             if (windows.clipboardOverlayVisible) {
                 observed = true; clearSince = undefined
                 if (!dismissalSent) {
-                    const target = page.getByRole('button', { name: '更多终端操作', exact: true })
-                    check(await target.count() === 1, 'ANDROID_CLIPBOARD_DISMISS_TARGET_AMBIGUOUS')
+                    let point
+                    try {
+                        await android.shell('uiautomator dump /data/local/tmp/tabby-owned-clipboard.xml', { timeout: Math.max(1, Math.min(3000, deadline - Date.now())) })
+                        point = systemUIActionPoint(await android.shell('cat /data/local/tmp/tabby-owned-clipboard.xml',
+                            { timeout: Math.max(1, Math.min(1000, deadline - Date.now())) }), 'clipboardDismiss')
+                    } finally { await android.shell('rm -f /data/local/tmp/tabby-owned-clipboard.xml', { timeout: Math.max(1, Math.min(1000, deadline - Date.now())) }) }
                     inTime()
                     dismissalSent = true
-                    await nativeTouch(target, 100, deadline)
+                    if (point) {
+                        const state = await android.input({ type: 'deviceState' }, { deadline })
+                        check(state.interactive && state.deviceLocked === false && state.keyguardShowing === false && state.secure === false, 'ANDROID_CLIPBOARD_DEVICE_NOT_READY')
+                        await android.shell(`input tap ${point.x} ${point.y}`, { timeout: Math.max(1, deadline - Date.now()) })
+                    } else {
+                        const target = page.getByRole('button', { name: '更多终端操作', exact: true })
+                        check(await target.count() === 1, 'ANDROID_CLIPBOARD_DISMISS_TARGET_AMBIGUOUS')
+                        await nativeTouch(target, 100, deadline)
+                    }
                     inTime()
                 }
             }
@@ -484,7 +496,8 @@ export async function webviewAcceptance (android, fixture) {
     }
     async function beginHarness (previousPID) {
         await android.removeFile(DONE)
-        const command = `am instrument -w -r -e class ${APP}.CloudWebViewHarness -e fixtureMetadata ${METADATA} -e cloudDoneFile ${DONE} -e cloudInputFile ${INPUT} ${RUNNER}`
+        await android.removeFile(READY)
+        const command = `am instrument -w -r -e class ${APP}.CloudWebViewHarness -e fixtureMetadata ${METADATA} -e cloudDoneFile ${DONE} -e cloudReadyFile ${READY} -e cloudInputFile ${INPUT} ${RUNNER}`
         harnessDeadline = Date.now() + 180000
         harness = android.launch(['shell', '-T', command], { timeout: 190000 })
         // Keep the promise handled if the test-only harness fails during startup.
@@ -495,6 +508,10 @@ export async function webviewAcceptance (android, fixture) {
             return !!view
         }, 'ANDROID_TEST_HARNESS_WEBVIEW_NOT_AVAILABLE', 45000)
         harnessPID = view.pid()
+        const readyDeadline = Math.min(harnessDeadline, Date.now() + 45000)
+        await step('owned-input-loop-ready', () => until(async () => await observeReadUntil(() => android.readFile(READY,
+            { timeout: Math.max(1, Math.min(5000, readyDeadline - Date.now())) }), readyDeadline,
+        'ANDROID_HARNESS_INPUT_READY_TIMEOUT') === 'READY', 'ANDROID_HARNESS_INPUT_READY_TIMEOUT', Math.max(1, readyDeadline - Date.now())))
         const preparation = { harness: previousPID === undefined ? 'first' : 'fresh-process', actions: [] }
         deviceStates.push(preparation)
         preparation.beforeCDP = await step('focus-before-cdp-attach', () => focusSample())
@@ -1082,8 +1099,27 @@ export async function webviewAcceptance (android, fixture) {
         await sendLine("printf '%s%s\\n' 'W_BACKGROUND_' 'RETAINED'")
         await output('W_BACKGROUND_RETAINED')
         await android.shell('cmd statusbar expand-notifications')
+        const notificationDeadline = Date.now() + 20000
+        async function notificationXML () {
+            const remaining = () => Math.max(1, notificationDeadline - Date.now())
+            await android.shell('uiautomator dump /data/local/tmp/tabby-owned-notification.xml', { timeout: Math.min(12000, remaining()) })
+            return android.shell('cat /data/local/tmp/tabby-owned-notification.xml', { timeout: Math.min(3000, remaining()) })
+        }
+        let stopPoint
+        let expanded = false
+        await until(async () => {
+            const xml = await notificationXML()
+            stopPoint = systemUIActionPoint(xml, 'notificationStop')
+            if (stopPoint) return true
+            if (!expanded) {
+                const point = systemUIActionPoint(xml, 'notificationExpand')
+                if (point) { expanded = true; await android.shell(`input tap ${point.x} ${point.y}`) }
+            }
+            return false
+        }, 'ANDROID_NOTIFICATION_STOP_ACTION_MISSING', Math.max(1, notificationDeadline - Date.now()))
         await capture('connection-notification')
-        await systemButton(/text="停止全部"[^>]*package="com\.android\.systemui"|package="com\.android\.systemui"[^>]*text="停止全部"/, 'ANDROID_NOTIFICATION_STOP_ACTION_MISSING')
+        await android.shell(`input tap ${stopPoint.x} ${stopPoint.y}`)
+        await android.shell('rm -f /data/local/tmp/tabby-owned-notification.xml')
         await quiet()
         await android.shell('cmd statusbar collapse')
         await android.shell(`am start -n ${APP}/.MainActivity`)
@@ -1147,6 +1183,7 @@ export async function webviewAcceptance (android, fixture) {
         throw failure
     } finally {
         for (const observation of bootObservations) { observation.dispose() }
+        try { await android.shell('rm -f /data/local/tmp/tabby-owned-notification.xml /data/local/tmp/tabby-owned-clipboard.xml') } catch {}
         if (harness) {
             try { await android.privateFile(DONE, ''); await harness.result } catch { harness.terminate() }
         }

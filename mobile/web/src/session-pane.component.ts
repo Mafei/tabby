@@ -335,6 +335,9 @@ export class SessionPaneComponent implements AfterViewInit, OnDestroy {
             this.connectionId = result.connectionId
             const events = this.events; this.events = []
             events.forEach(event => this.onEvent(event))
+            // Native callbacks can arrive before the start promise resolves.
+            // Buffered security dialogs must render without another touch.
+            this.changes.markForCheck()
         } catch {
             if (generation === this.generation) { this.fail('无法建立 SSH 连接。请检查地址和网络。') }
         }

@@ -24,6 +24,22 @@ async function writes(page: Page): Promise<string[]> {
 
 test.beforeEach(async ({ page }) => { await page.goto('/tests/harness.html') })
 
+test('a host-key challenge before start resolution renders without another user gesture', async ({ page }) => {
+    await page.evaluate(() => { window.testBridge.holdStart = true })
+    await pane(page).getByLabel('主机', { exact: true }).fill('fixture.invalid')
+    await pane(page).getByLabel('用户名', { exact: true }).fill('synthetic-user')
+    await page.getByRole('button', { name: '连接', exact: true }).click()
+    await expect.poll(() => page.evaluate(() => window.testBridge.starts.length)).toBe(1)
+    await page.evaluate(() => {
+        const start = window.testBridge.starts[0]
+        window.testBridge.emit({ ...start, type: 'hostKey', status: 'unknown', requestId: 1,
+            keyBase64: 'fixture-public-blob', algorithm: 'ssh-ed25519', fingerprint: 'SHA256:fixture' })
+        window.testBridge.holdStart = false; window.testBridge.resolveStarts()
+    })
+    await expect(page.getByRole('dialog', { name: '确认主机密钥' })).toBeVisible()
+    expect(await page.evaluate(() => window.testBridge.commands.some(item => item.command.type === 'authResponse'))).toBe(false)
+})
+
 test('Home clears modifiers and composition without closing SSH or losing parsed output', async ({ page }) => {
     await connected(page)
     await page.getByRole('button', { name: 'Ctrl', exact: true }).click()
