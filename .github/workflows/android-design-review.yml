@@ -1,0 +1,55 @@
+name: Android design review
+
+on:
+  push:
+    branches: [candidate/android-mobile-ux-20261008]
+    paths:
+      - docs/design/android-mobile-ux/**
+      - .github/workflows/android-design-review.yml
+  pull_request:
+    branches: [prototype/android-direct-ssh]
+    paths:
+      - docs/design/android-mobile-ux/**
+      - .github/workflows/android-design-review.yml
+
+permissions:
+  contents: read
+
+jobs:
+  design:
+    if: github.repository == 'Mafei/tabby'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Record exact candidate commit
+        run: git rev-parse HEAD
+      - name: Build deterministic fictional design
+        run: python3 docs/design/android-mobile-ux/build.py
+      - name: Validate budgets, contrast, flow destinations and change scope
+        run: python3 docs/design/android-mobile-ux/validate.py
+      - name: Check generated artifacts match committed sources
+        run: git diff --exit-code -- docs/design/android-mobile-ux/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android-design-review-${{ github.event.pull_request.head.sha || github.sha }}
+          path: |
+            docs/design/android-mobile-ux/README.md
+            docs/design/android-mobile-ux/prototype.html
+            docs/design/android-mobile-ux/review.html
+            docs/design/android-mobile-ux/budgets.json
+            docs/design/android-mobile-ux/sources.json
+            docs/design/android-mobile-ux/states.json
+            docs/design/android-mobile-ux/build.py
+            docs/design/android-mobile-ux/navigation.py
+            docs/design/android-mobile-ux/navigation_checks.py
+            docs/design/android-mobile-ux/render.py
+            docs/design/android-mobile-ux/validate.py
+            docs/design/android-mobile-ux/preview/
+          retention-days: 14

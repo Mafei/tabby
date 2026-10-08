@@ -1,0 +1,611 @@
+{
+  "kind": "fictional-design-browser-checks-not-Android-runtime",
+  "baseSourceSha": "ded417ba852295f3ad76bcca4e6e557d1288ca12",
+  "externalRequests": [],
+  "consoleErrors": [],
+  "checks": [
+    {
+      "state": "hosts",
+      "width": 360,
+      "height": 800,
+      "smallTargets": [],
+      "terminalHeight": null
+    },
+    {
+      "state": "connect",
+      "width": 360,
+      "height": 800,
+      "smallTargets": [],
+      "terminalHeight": null
+    },
+    {
+      "state": "trust",
+      "width": 360,
+      "height": 800,
+      "smallTargets": [],
+      "terminalHeight": null
+    },
+    {
+      "state": "tmux",
+      "width": 360,
+      "height": 800,
+      "smallTargets": [],
+      "terminalHeight": null
+    },
+    {
+      "state": "new-session",
+      "width": 360,
+      "height": 800,
+      "smallTargets": [],
+      "terminalHeight": 752
+    },
+    {
+      "state": "occupied",
+      "width": 360,
+      "height": 800,
+      "smallTargets": [],
+      "terminalHeight": 752
+    },
+    {
+      "state": "takeover",
+      "width": 360,
+      "height": 800,
+      "smallTargets": [],
+      "terminalHeight": 752
+    },
+    {
+      "state": "terminal",
+      "width": 360,
+      "height": 800,
+      "smallTargets": [],
+      "terminalHeight": 752
+    },
+    {
+      "state": "terminal-ime",
+      "width": 360,
+      "height": 800,
+      "smallTargets": [],
+      "terminalHeight": 404
+    },
+    {
+      "state": "sessions",
+      "width": 360,
+      "height": 800,
+      "smallTargets": [],
+      "terminalHeight": 752
+    },
+    {
+      "state": "directions",
+      "width": 360,
+      "height": 800,
+      "smallTargets": [],
+      "terminalHeight": 404
+    },
+    {
+      "state": "more",
+      "width": 360,
+      "height": 800,
+      "smallTargets": [],
+      "terminalHeight": 752
+    },
+    {
+      "state": "font",
+      "width": 360,
+      "height": 800,
+      "smallTargets": [],
+      "terminalHeight": 752
+    },
+    {
+      "state": "fold",
+      "width": 840,
+      "height": 900,
+      "smallTargets": [],
+      "terminalHeight": 852
+    },
+    {
+      "state": "fold-ime",
+      "width": 840,
+      "height": 900,
+      "smallTargets": [],
+      "terminalHeight": 484
+    },
+    {
+      "state": "fold-panel",
+      "width": 840,
+      "height": 900,
+      "smallTargets": [],
+      "terminalHeight": 852
+    },
+    {
+      "state": "landscape",
+      "width": 800,
+      "height": 360,
+      "smallTargets": [],
+      "terminalHeight": 132
+    },
+    {
+      "state": "selection",
+      "width": 360,
+      "height": 800,
+      "smallTargets": [],
+      "terminalHeight": 752
+    },
+    {
+      "state": "history",
+      "width": 360,
+      "height": 800,
+      "smallTargets": [],
+      "terminalHeight": 752
+    },
+    {
+      "state": "paste",
+      "width": 360,
+      "height": 800,
+      "smallTargets": [],
+      "terminalHeight": 752
+    },
+    {
+      "state": "readonly",
+      "width": 360,
+      "height": 800,
+      "smallTargets": [],
+      "terminalHeight": 752
+    },
+    {
+      "state": "mouse",
+      "width": 360,
+      "height": 800,
+      "smallTargets": [],
+      "terminalHeight": 752
+    },
+    {
+      "state": "mouse-active",
+      "width": 360,
+      "height": 800,
+      "smallTargets": [],
+      "terminalHeight": 752
+    },
+    {
+      "state": "offline",
+      "width": 360,
+      "height": 800,
+      "smallTargets": [],
+      "terminalHeight": 752
+    },
+    {
+      "state": "offline-details",
+      "width": 360,
+      "height": 800,
+      "smallTargets": [],
+      "terminalHeight": 752
+    },
+    {
+      "state": "changed",
+      "width": 360,
+      "height": 800,
+      "smallTargets": [],
+      "terminalHeight": null
+    },
+    {
+      "state": "missing",
+      "width": 360,
+      "height": 800,
+      "smallTargets": [],
+      "terminalHeight": 752
+    },
+    {
+      "state": "collision",
+      "width": 360,
+      "height": 800,
+      "smallTargets": [],
+      "terminalHeight": 752
+    },
+    {
+      "state": "credentials",
+      "width": 360,
+      "height": 800,
+      "smallTargets": [],
+      "terminalHeight": null
+    },
+    {
+      "state": "update-password",
+      "width": 360,
+      "height": 800,
+      "smallTargets": [],
+      "terminalHeight": 752
+    },
+    {
+      "state": "update-failed",
+      "width": 360,
+      "height": 800,
+      "smallTargets": [],
+      "terminalHeight": 752
+    },
+    {
+      "state": "delete-password",
+      "width": 360,
+      "height": 800,
+      "smallTargets": [],
+      "terminalHeight": 752
+    },
+    {
+      "state": "deleted",
+      "width": 360,
+      "height": 800,
+      "smallTargets": [],
+      "terminalHeight": null
+    },
+    {
+      "state": "background",
+      "width": 360,
+      "height": 800,
+      "smallTargets": [],
+      "terminalHeight": 752
+    },
+    {
+      "state": "permission",
+      "width": 360,
+      "height": 800,
+      "smallTargets": [],
+      "terminalHeight": 752
+    },
+    {
+      "state": "permission-denied",
+      "width": 360,
+      "height": 800,
+      "smallTargets": [],
+      "terminalHeight": 752
+    },
+    {
+      "state": "notification",
+      "width": 360,
+      "height": 800,
+      "smallTargets": [],
+      "terminalHeight": null
+    },
+    {
+      "state": "disconnect",
+      "width": 360,
+      "height": 800,
+      "smallTargets": [],
+      "terminalHeight": 752
+    },
+    {
+      "state": "stopped",
+      "width": 360,
+      "height": 800,
+      "smallTargets": [],
+      "terminalHeight": null
+    },
+    {
+      "state": "navigation-phone",
+      "width": 360,
+      "height": 800,
+      "smallTargets": [],
+      "terminalHeight": 752
+    },
+    {
+      "state": "navigation-ime",
+      "width": 360,
+      "height": 800,
+      "smallTargets": [],
+      "terminalHeight": 404
+    },
+    {
+      "state": "navigation-first",
+      "width": 360,
+      "height": 800,
+      "smallTargets": [],
+      "terminalHeight": 752
+    },
+    {
+      "state": "navigation-last",
+      "width": 360,
+      "height": 800,
+      "smallTargets": [],
+      "terminalHeight": 752
+    },
+    {
+      "state": "navigation-locked",
+      "width": 360,
+      "height": 800,
+      "smallTargets": [],
+      "terminalHeight": 404
+    },
+    {
+      "state": "navigation-wide",
+      "width": 840,
+      "height": 900,
+      "smallTargets": [],
+      "terminalHeight": 852
+    },
+    {
+      "state": "navigation-sessions",
+      "width": 360,
+      "height": 800,
+      "smallTargets": [],
+      "terminalHeight": 752
+    },
+    {
+      "state": "navigation-home",
+      "width": 360,
+      "height": 800,
+      "smallTargets": [],
+      "terminalHeight": null
+    },
+    {
+      "state": "navigation-manage",
+      "width": 360,
+      "height": 800,
+      "smallTargets": [],
+      "terminalHeight": 752
+    },
+    {
+      "state": "navigation-all-keys",
+      "width": 360,
+      "height": 800,
+      "smallTargets": [],
+      "terminalHeight": 752
+    },
+    {
+      "state": "key-generate",
+      "width": 360,
+      "height": 800,
+      "smallTargets": [],
+      "terminalHeight": 752
+    },
+    {
+      "state": "key-install",
+      "width": 360,
+      "height": 800,
+      "smallTargets": [],
+      "terminalHeight": 752
+    },
+    {
+      "state": "key-verified",
+      "width": 360,
+      "height": 800,
+      "smallTargets": [],
+      "terminalHeight": 752
+    },
+    {
+      "state": "key-import",
+      "width": 360,
+      "height": 800,
+      "smallTargets": [],
+      "terminalHeight": 752
+    },
+    {
+      "state": "key-settings",
+      "width": 360,
+      "height": 800,
+      "smallTargets": [],
+      "terminalHeight": 752
+    },
+    {
+      "state": "key-delete",
+      "width": 360,
+      "height": 800,
+      "smallTargets": [],
+      "terminalHeight": 752
+    },
+    {
+      "state": "key-export",
+      "width": 360,
+      "height": 800,
+      "smallTargets": [],
+      "terminalHeight": 752
+    },
+    {
+      "state": "key-restricted",
+      "width": 360,
+      "height": 800,
+      "smallTargets": [],
+      "terminalHeight": 752
+    },
+    {
+      "state": "key-generation-failed",
+      "width": 360,
+      "height": 800,
+      "smallTargets": [],
+      "terminalHeight": 752
+    },
+    {
+      "flow": "first-login",
+      "transitions": 4,
+      "passed": true
+    },
+    {
+      "flow": "takeover",
+      "transitions": 3,
+      "passed": true
+    },
+    {
+      "flow": "duplicate",
+      "transitions": 3,
+      "passed": true
+    },
+    {
+      "flow": "paste-cancel",
+      "transitions": 3,
+      "passed": true
+    },
+    {
+      "flow": "delete",
+      "transitions": 3,
+      "passed": true
+    },
+    {
+      "flow": "update-failure",
+      "transitions": 3,
+      "passed": true
+    },
+    {
+      "flow": "notification-stop",
+      "transitions": 5,
+      "passed": true
+    },
+    {
+      "flow": "permission-denial",
+      "transitions": 3,
+      "passed": true
+    },
+    {
+      "flow": "missing-recovery",
+      "transitions": 3,
+      "passed": true
+    },
+    {
+      "flow": "key-generation-proposal",
+      "transitions": 3,
+      "passed": true
+    },
+    {
+      "proposalInteraction": "title-short-drag-cancels-click-and-switch",
+      "passed": true
+    },
+    {
+      "proposalInteraction": "title-next-and-last-boundary-no-wrap",
+      "passed": true
+    },
+    {
+      "proposalInteraction": "title-first-boundary-no-wrap",
+      "passed": true
+    },
+    {
+      "proposalInteraction": "vertical-dominant-drag-cancels",
+      "passed": true
+    },
+    {
+      "proposalInteraction": "title-reversed-short-release-cancels",
+      "passed": true
+    },
+    {
+      "proposalInteraction": "pointercancel-does-not-switch",
+      "passed": true
+    },
+    {
+      "proposalInteraction": "terminal-content-drag-does-not-switch",
+      "passed": true
+    },
+    {
+      "proposalInteraction": "key-strip-drag-scrolls-with-zero-simulated-keys",
+      "passed": true
+    },
+    {
+      "proposalInteraction": "explicit-key-click-consumes-one-shot-modifier-once",
+      "passed": true
+    },
+    {
+      "proposalInteraction": "locked-modifier-remains-visible-while-key-strip-scrolls",
+      "passed": true
+    },
+    {
+      "proposalInteraction": "offline-selection-clears-modifiers-and-input-focus-intent",
+      "passed": true
+    },
+    {
+      "proposalInteraction": "offline-key-and-lock-controls-disabled",
+      "passed": true
+    },
+    {
+      "proposalInteraction": "home-and-return-preserve-terminal-viewport",
+      "passed": true
+    },
+    {
+      "proposalInteraction": "wide-tab-drag-scrolls-without-selecting",
+      "passed": true
+    },
+    {
+      "proposalInteraction": "wide-tab-explicit-click-selects-readonly",
+      "passed": true
+    },
+    {
+      "proposalInteraction": "ownership-labels-accessible-buttons-and-single-48px-header",
+      "passed": true
+    },
+    {
+      "viewport": [
+        360,
+        800
+      ],
+      "screen": "terminal-ime",
+      "passed": true
+    },
+    {
+      "viewport": [
+        420,
+        900
+      ],
+      "screen": "terminal",
+      "passed": true
+    },
+    {
+      "viewport": [
+        840,
+        900
+      ],
+      "screen": "fold-ime",
+      "passed": true
+    },
+    {
+      "viewport": [
+        800,
+        360
+      ],
+      "screen": "landscape",
+      "passed": true
+    }
+  ],
+  "proposalGestureChecks": 16,
+  "exportedScreenBodyTextMinimumContrast": 8.09,
+  "storageEntries": 0,
+  "status": "passed",
+  "renderedDesign": {
+    "prototype.html": "8112273b7e07897cba287ddefb299a2c8b9f0df2a199716080b1064b09f51fd3",
+    "review.html": "39845d2a0a6c8d9ce8a84cfbadbec49150438a5d94032d2b703c3a0f00e4e1c9",
+    "states.json": "c1f22ddecf438f3c8da46e93bc0448314a6188ddb41ef025fe302c11784b5465"
+  },
+  "artifacts": {
+    "Tabby-Android-First-Connection-Design.png": {
+      "bytes": 272690,
+      "sha256": "305c97659e10109440fb68b7f0d52a61c2c31f0a219a0f5d83a0baa502a86d5b"
+    },
+    "Tabby-Android-Foldable-Design.png": {
+      "bytes": 181017,
+      "sha256": "d7832d979869e2f656e82e0a7af2b59312b1363a021eb2823a2dffd0d81c98d0"
+    },
+    "fold-ime.png": {
+      "bytes": 248519,
+      "sha256": "fcc9c98fbf63fe889442bb849e96a5f9741c75410b807778f4087332901c72a7"
+    },
+    "Tabby-Android-Key-Setup-Design.png": {
+      "bytes": 358786,
+      "sha256": "463140f369be975d9cee4acf0e9f2a93b2a2f0eac9437c37f55551589cadef08"
+    },
+    "landscape.png": {
+      "bytes": 90858,
+      "sha256": "89541c156920d74c86592069649ff61fbfe5ce441f7d66078aeed11d1a6eb594"
+    },
+    "Tabby-Android-Design-Review.pdf": {
+      "bytes": 1689910,
+      "sha256": "ce2f7764d388bc498b5a65fc23998d0b0f1ba38911b586832e53225298e168e3"
+    },
+    "Tabby-Android-Terminal-Design.png": {
+      "bytes": 296704,
+      "sha256": "9b874849cf5622e9ed984b773a3d162530fb3d54c381891962528aea734067e2"
+    },
+    "terminal.png": {
+      "bytes": 250111,
+      "sha256": "7f3ea353b59bb74ec95c3be109d81ac5a6836d05da771969025d18c0ae8c1e1b"
+    },
+    "Tabby-Android-Navigation-Design.png": {
+      "bytes": 239980,
+      "sha256": "c28effe8b2e6cc3242aa1fe370555b258f643542d4d1041f56883ac292292cc5"
+    },
+    "terminal-ime.png": {
+      "bytes": 184706,
+      "sha256": "252f07513d531b723b4fc1d34029def3e8ce7d8ed0094f1365901e392ca87cf6"
+    }
+  }
+}

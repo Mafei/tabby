@@ -1,0 +1,432 @@
+<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Tabby Android · 设计评审包</title><style>
+*{box-sizing:border-box}body{margin:0;background:#edf1f3;color:#152330;font-family:Arial,"Noto Sans CJK SC",sans-serif;font-size:16px}
+button,a,input,select{font:inherit}button{cursor:pointer;border:0}button:focus-visible,a:focus-visible,select:focus-visible{outline:3px solid #228771;outline-offset:2px}
+.mobile{position:relative;width:360px;height:800px;display:flex;flex-direction:column;background:#111820;color:#e7edf3;overflow:hidden;flex-shrink:0;font-size:16px}
+.mobile.wide{width:840px;height:900px}.mobile.landscape{width:800px;height:360px}
+.status{display:flex;align-items:center;height:48px;min-height:48px;background:#19232e;border-bottom:1px solid #30404e}
+.status button{height:48px;min-width:48px;padding:0 12px;background:transparent;color:#e7edf3}
+.status .identity{flex:1;min-width:0;text-align:left;line-height:1.1;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.identity span{display:block;font-size:11px;color:#74e4c8;margin-top:3px}.identity .warning{color:#ffc780}.identity .danger{color:#ff9c9c}
+.body{flex:1;min-height:0;overflow:auto;padding:24px 20px}.body h1{font-size:26px;margin:0 0 12px;font-weight:600;letter-spacing:-.5px}
+.body h2{font-size:18px;margin:24px 0 10px}.body p{line-height:1.6;margin:10px 0;color:#acbbc7}
+.eyebrow{font-size:11px;color:#74e4c8;letter-spacing:1.4px;margin-bottom:10px}
+.card{border:1px solid #30404e;background:#19232e;border-radius:14px;margin:12px 0;padding:16px}
+.card p{font-size:14px}.card .small,.small{font-size:12px;color:#acbbc7;line-height:1.6}
+.action{display:block;min-height:48px;border-radius:9px;margin:10px 0;padding:12px 16px;width:100%;background:#74e4c8;color:#111820;text-align:center;font-weight:600}
+.action.secondary{color:#e7edf3;background:#253342;border:1px solid #3c5061}.action.danger{background:#ff9c9c;color:#111820}.action.quiet{color:#acbbc7;background:transparent}
+.host{display:block;width:100%;text-align:left;min-height:76px;padding:16px;background:#19232e;color:#e7edf3;border-radius:12px;margin:10px 0;border:1px solid #30404e}
+.host strong{font-weight:500}.host span{display:block;color:#acbbc7;font-size:13px;margin-top:8px}.dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:#74e4c8;margin-right:7px}
+.field{border:1px solid #3c5061;background:#111820;border-radius:8px;padding:13px 12px;min-height:48px;margin-top:5px;line-height:1.5}.label{display:block;font-size:13px;color:#acbbc7;margin-top:15px}
+.check{display:flex;align-items:center;min-height:48px;font-size:14px;gap:10px}.box{width:20px;height:20px;border:1px solid #5d7386;border-radius:4px;flex-shrink:0}.check.on .box{background:#74e4c8;color:#111820;text-align:center}
+.terminal{flex:1;min-height:0;padding:8px;overflow:hidden;background:#111820;position:relative}.terminal pre{margin:0;white-space:pre-wrap;overflow-wrap:anywhere;font:16px/20.8px "DejaVu Sans Mono",monospace;font-variant-ligatures:none}
+.terminal .green{color:#74e4c8}.terminal .dim{color:#acbbc7}.terminal .amber{color:#ffc780}.cursor{display:inline-block;background:#e7edf3;color:#111820}
+.keys{height:48px;min-height:48px;display:flex;background:#19232e;border-top:1px solid #30404e;overflow-x:auto}
+.keys button{flex:1;min-width:48px;height:48px;background:transparent;color:#e7edf3;border-right:1px solid #30404e;font-size:14px}
+.ime{height:300px;min-height:300px;background:#26333f;padding:10px 5px;color:#e7edf3;display:flex;flex-direction:column;justify-content:space-between;border-top:1px solid #465967}
+.wide .ime{height:320px;min-height:320px}.landscape .ime{height:180px;min-height:180px}
+.suggest{display:flex;justify-content:space-around;color:#d1dde5;font-size:15px;padding:4px 0 12px}.keyrow{display:flex;gap:4px;justify-content:center;margin:3px 0}
+.keyrow span{flex:1;background:#3b4a57;border-radius:6px;min-height:42px;display:flex;align-items:center;justify-content:center;font-size:16px}
+.keyrow .space{flex:4}.keyrow .enter{background:#74e4c8;color:#111820}.ime-note{text-align:center;font-size:10px;color:#acbbc7;padding:3px}
+.landscape .keyrow span{min-height:20px;font-size:12px}.landscape .suggest{padding-bottom:0}.landscape .keyrow{margin:1px 0}
+.scrim{position:absolute;inset:48px 0 0;background:#070c12a8;display:flex;align-items:flex-end}
+.sheet{width:100%;max-height:100%;overflow:auto;padding:18px 20px 16px;background:#19232e;border-top:1px solid #496172;border-radius:20px 20px 0 0;box-shadow:0 -20px 60px #0003}
+.sheet h2{margin:8px 0 12px;font-size:21px}.sheet p{font-size:14px;line-height:1.6;color:#acbbc7}
+.handle{width:40px;height:4px;background:#687e8d;border-radius:4px;margin:0 auto 18px}
+.menu{display:block;width:100%;min-height:48px;text-align:left;background:transparent;color:#e7edf3;padding:12px 0;border-bottom:1px solid #30404e}
+.menu small{display:block;color:#acbbc7;margin-top:5px}.menu:last-child{border:0}
+.split{display:flex;flex:1;min-height:0}.sidebar{width:240px;flex-shrink:0;background:#19232e;border-right:1px solid #30404e;padding:20px 14px;overflow:auto}
+.sidebar h2{font-size:16px}.sidebar .host{background:#111820;padding:12px;min-height:72px}
+.notice{position:absolute;left:12px;right:12px;bottom:20px;background:#253342;border:1px solid #506676;border-radius:12px;padding:16px;font-size:14px;line-height:1.5}
+.selected{background:#315d73}.selection-toolbar{display:flex;background:#e7edf3;color:#111820;width:max-content;border-radius:8px;margin:12px 0 14px}
+.selection-toolbar button{background:transparent;min-height:48px;padding:0 18px}.selection-handle{color:#74e4c8;font-size:23px}.fingerprint{font:12px/1.7 "DejaVu Sans Mono",monospace;overflow-wrap:anywhere;color:#e7edf3;background:#111820;padding:12px;border-radius:8px}
+.badge{display:inline-block;padding:4px 8px;border:1px solid #465967;border-radius:5px;color:#acbbc7;font-size:12px;margin-top:8px}
+.prototype-header{padding:18px 24px;background:#fff;border-bottom:1px solid #cad4dc;display:flex;align-items:center;gap:16px;flex-wrap:wrap}.prototype-header strong{font-size:19px}
+.prototype-header select{min-height:48px;max-width:100%;padding:8px;border:1px solid #a9bbc8;border-radius:8px;background:#fff}.prototype-header a{color:#246e60}
+.prototype-note{max-width:960px;margin:16px auto;color:#506676;line-height:1.6;font-size:14px;padding:0 16px}
+.stage{display:flex;justify-content:center;align-items:flex-start;padding:24px;overflow:auto}
+.capture .prototype-header,.capture .prototype-note{display:none}.capture .stage{padding:0;justify-content:flex-start}.capture{background:#111820}
+.review{max-width:1120px;margin:auto;background:#fff}.page{padding:40px 48px;border-bottom:1px solid #dce4e9}
+.page > h1{font-size:39px;line-height:1.2;letter-spacing:-1px;margin:0 0 20px}.page > h2{font-size:26px;margin:0 0 14px}.page h3{font-size:18px;margin:12px 0}.page > p,.page .gallery > div > p{line-height:1.65;color:#43586a;margin:8px 0}
+.page .kicker{color:#246e60;font-size:12px;letter-spacing:2px;margin-bottom:16px}.pill{display:inline-block;border:1px solid #9fb9b2;color:#246e60;border-radius:30px;padding:8px 14px;font-size:12px;margin:0 5px 12px 0}
+.gallery{display:flex;gap:30px;justify-content:space-between;align-items:flex-start;margin-top:22px}.tile{flex:1;min-width:0;margin:0}.frame{width:216px;height:480px;border:1px solid #30404e;border-radius:16px;overflow:hidden;background:#111820;box-shadow:0 10px 24px #10233020}
+.frame .mobile{transform:scale(.6);transform-origin:top left}.tile figcaption{font-size:13px;line-height:1.6;color:#43586a;margin-top:12px;max-width:230px}
+.wideframe{width:462px;height:495px;border:1px solid #30404e;overflow:hidden;border-radius:12px}.wideframe .mobile{transform:scale(.55);transform-origin:top left}
+.landscapeframe{width:560px;height:252px;border:1px solid #30404e;overflow:hidden;border-radius:12px}.landscapeframe .mobile{transform:scale(.7);transform-origin:top left}
+.callout{padding:16px 20px;background:#edf6f3;border-left:4px solid #278b76;margin:16px 0;font-size:14px;line-height:1.7}.flow{padding:16px;background:#f1f4f6;border:1px solid #d7e1e8;border-radius:8px;font-size:15px;line-height:1.9}
+.wire{display:flex;gap:24px;margin:20px 0}.wirebox{border:1px solid #627888;padding:14px;width:180px;height:250px;font-size:13px;display:flex;flex-direction:column;gap:8px}
+.wirebox span{border:1px solid #8498a7;padding:7px;text-align:center}.wirebox .grow{flex:1;display:flex;align-items:center;justify-content:center}
+.details{padding:36px 48px}.details h1{font-size:26px}.details h2{font-size:21px;break-after:avoid}.details p,.details li{font-size:13px;line-height:1.75}.details ul,.details ol{padding-left:22px}
+table{width:100%;border-collapse:collapse;font-size:12px;line-height:1.5;margin:16px 0}th,td{border-bottom:1px solid #d5dfe6;padding:8px;text-align:left;vertical-align:top}th{background:#edf1f3}
+a{color:#246e60}code{font-size:.94em;background:#edf1f3;padding:1px 4px;overflow-wrap:anywhere}.details table{font-size:10px}.details a{overflow-wrap:anywhere}
+@page{size:A4 landscape;margin:12mm}@media print{body{background:#fff}.review{max-width:none}.page{break-after:page;padding:12px 10px;border:0}.page > h1{font-size:34px}.page > h2{font-size:24px}
+.gallery{justify-content:flex-start;gap:42px;margin-top:15px}.frame{box-shadow:none;width:194.4px;height:432px}.frame .mobile{transform:scale(.54)}.wideframe{width:420px;height:450px}.wideframe .mobile{transform:scale(.5)}.page > p,.page .gallery > div > p{font-size:13px}.tile figcaption{font-size:12px}.details{padding:0}.details table{break-inside:auto}tr{break-inside:avoid}.details h2{margin-top:22px}.pill{margin-bottom:8px}}
+
+.nav-root{display:flex;flex-direction:column;flex:1;min-height:0;position:relative}
+.nav-root [hidden]{display:none!important}.nav-root .home{flex:0 0 48px;font-size:23px}
+.nav-title{touch-action:pan-y}.nav-title .title-line{display:block;font-size:14px;color:#e7edf3;margin:0}
+.nav-title .title-meta{font-size:11px;color:#acbbc7}.nav-title .arrows{display:inline;color:#acbbc7;font-size:12px}
+.nav-tabs{display:flex;overflow-x:auto;flex:1;min-width:0;touch-action:pan-y;scrollbar-width:none}
+.status .nav-tabs button{flex:0 0 176px;text-align:left;border-bottom:3px solid transparent;padding:4px 12px;font-size:14px}
+.nav-tabs button span{display:block;font-size:11px;color:#acbbc7;margin-top:3px}
+.nav-tabs button[aria-selected=true]{border-bottom-color:#74e4c8;background:#253342}
+.wide-context{flex:0 0 160px;padding:0 8px;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.wide-context span{display:block;font-size:11px;color:#acbbc7;margin-top:4px}.nav-terminal{overflow:auto;overscroll-behavior:contain}
+.quickkeys{height:48px;min-height:48px;display:flex;background:#19232e;box-shadow:inset 0 2px #74e4c8;position:relative}
+.key-viewport{display:flex;flex:1;min-width:0;overflow-x:auto;scrollbar-width:none;touch-action:pan-y}
+.quickkeys button{height:48px;min-width:48px;flex:0 0 56px;background:transparent;color:#e7edf3;border-right:1px solid #30404e;font-size:14px}
+.quickkeys .all-keys{flex:0 0 64px;font-size:13px;background:#253342;z-index:1}.key-viewport .group-end{margin-right:12px}
+.key-fade{position:absolute;right:64px;top:0;width:22px;height:46px;pointer-events:none;background:linear-gradient(90deg,transparent,#19232e);text-align:right;line-height:46px;color:#74e4c8}
+.quickkeys .modifier{flex:0 0 64px;background:#74e4c8;color:#111820;font-size:12px;line-height:1.25}
+.quickkeys button:disabled,.key-grid button:disabled{color:#627788}.key-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+.key-grid button{min-height:48px;min-width:48px;background:#253342;color:#e7edf3;border:1px solid #465967;border-radius:6px}
+.nav-feedback{position:absolute;left:8px;right:8px;bottom:8px;background:#253342;color:#e7edf3;padding:10px;font-size:12px;border-radius:8px;pointer-events:none}
+.status{border-bottom:0;box-shadow:inset 0 -1px #30404e}
+.ime{border-top:2px dashed #7795ab}.suggest:before{content:"IME候选示意";font-size:10px;color:#acbbc7;align-self:center}
+.ime-note{font-size:11px}.keyboard-boundary{color:#246e60;font-weight:600}
+</style><body><main class="review"><section class="page"><div class="kicker">TABBY ANDROID / DESIGN PROPOSAL / 2026.10.08</div><h1>让终端回到主角。<br>手机、折叠屏，接着工作。</h1><span class="pill">独立候选 · 不修改 Linux PR3</span><span class="pill">设计阶段 · 待评审</span><span class="pill">虚构主机 · 零真实凭据</span><p>当前原型基本运行，但状态栏、会话栏、工具与输入条叠加。首批方案把连接配置放回工作台，让登录后的终端尽量占据可用窗口；后台连接和密码保存有明确用户控制。</p><div class="callout">所有界面是设计提案，不是运行中的 Android 应用截图。字体、网格、键盘高度、折叠与后台行为仍需实施后测试。用户确认旧候选在 Find N6 基本运行，不等于本方案验收。</div><div class="flow">工作台 → 主机 / 可选本地密码 → 主机校验 → SSH / tmux列表 → 专注终端<br>终端 → 会话选择 / 更多 / 临时面板；网络失联 → 暂停输入 → 核对完整身份 → 有限恢复<br>后台开启 → 可见通知与停止；密码默认不保存 → Keystore本地加密 → 更新 / 删除</div><p>旧已验证候选：ded417ba852295f3ad76bcca4e6e557d1288ca12<br>候选分支：candidate/android-mobile-ux-20261008<br>完整来源、状态文案、约束与实施验收表在后半部分；离线点击稿见 prototype.html。</p></section><section class="page" id="structure"><div class="kicker">TABBY ANDROID / DESIGN REVIEW / 2026.10.08</div><h2>信息架构与布局骨架</h2><p>连接前配置，连接后专注。一个状态行承载身份与会话入口；工具按需出现，不在终端重复整个导航结构。</p><div class="wire"><div class="wirebox"><span>连接工作台</span><span>活动 / 待恢复会话</span><span class="grow">本地主机列表</span><span>＋ 新连接</span></div><div class="wirebox"><span>会话身份 / 状态 · 48dp</span><span class="grow">终端网格<br>真实字体、真实 PTY</span></div><div class="wirebox"><span>会话身份 / 状态 · 48dp</span><span class="grow">终端网格</span><span>单行快捷键 · 48dp</span><span>系统 IME</span></div><div class="wirebox"><span>终端保持可见</span><span class="grow">按需底部面板<br>安全确认 / 会话 / 字号</span></div></div><div class="callout">系统返回依次关闭临时面板、退出选择、收起键盘、返回工作台；不会发送 Esc，也不会默认断开。只读、鼠标、失联与安全失败保留文字标识。</div><p>首批不加入云同步、分屏广播、SFTP 或 AI 工具栏；独立保留主机、密码条目、已验证主机密钥与完整 tmux 身份。</p></section><section class="page" id="first"><div class="kicker">TABBY ANDROID / DESIGN REVIEW / 2026.10.08</div><h2>首次连接：默认不保存密码</h2><div class="gallery"><figure class="tile"><div class="frame"><div class="mobile " data-state="hosts"><div class="status"><button class="identity" data-screen="hosts">连接<span class="">此设备 · 本地</span></button><button class="icon" data-screen="terminal-ime" aria-label="显示键盘">⌨</button><button class="icon" data-screen="more" aria-label="更多终端操作">•••</button></div><div class="body"><div class="eyebrow">你的工作，随时接着做</div><h1>连接</h1><p>主机配置与活动会话分开。<br>密码仅在你选择后保存在此设备。</p><h2>正在进行</h2><button class="host" data-screen="terminal"><strong>work</strong><span>demo@lab.example · tmux</span><div class=badge>已连接</div></button><button class="host" data-screen="offline"><strong>logs</strong><span>demo@lab.example · tmux</span><div class=badge>待恢复</div></button><h2>主机</h2><button class="host" data-screen="connect"><strong>实验环境</strong><span>lab.example:22 · demo</span></button><button class="action" data-screen="connect">＋ 添加主机 / 快速连接</button><button class="action quiet" data-screen="credentials">密码与后台设置</button></div></div></div><figcaption><strong>01 · 连接工作台</strong><br>活动会话和本地主机分开；一只手从下方进入新连接。<br><em>设计提案 · 虚构数据</em></figcaption></figure><figure class="tile"><div class="frame"><div class="mobile " data-state="connect"><div class="status"><button class="identity" data-screen="hosts">新连接<span class="">密码默认不保存</span></button><button class="icon" data-screen="terminal-ime" aria-label="显示键盘">⌨</button><button class="icon" data-screen="more" aria-label="更多终端操作">•••</button></div><div class="body"><h1>连接主机</h1><label class="label">主机<div class="field">lab.example</div></label><label class="label">端口<div class="field">22</div></label><label class="label">账号<div class="field">demo</div></label><label class="label">认证方式<div class="field">密码 · 支持私钥文件 / 交互认证</div></label><label class="label">密码<div class="field">••••••••</div></label><div class="check "><span class="box"></span>保存主机配置</div><div class="check "><span class="box"></span>在此设备保存密码</div><p class="small">虚构字段；此设计稿不接受真实凭据。<br>仅主机校验与认证都成功后才保存密码。</p><button class="action" data-screen="trust">连接</button><button class="action secondary" data-screen="key-import">改用私钥文件…</button><button class="action quiet" data-screen="hosts">取消</button></div></div></div><figcaption><strong>02 · 首次连接</strong><br>保存配置与保存密码是两个选项。连接与校验失败不写密码。<br><em>设计提案 · 虚构数据</em></figcaption></figure><figure class="tile"><div class="frame"><div class="mobile " data-state="trust"><div class="status"><button class="identity" data-screen="hosts">新连接<span class="">等待主机校验</span></button><button class="icon" data-screen="terminal-ime" aria-label="显示键盘">⌨</button><button class="icon" data-screen="more" aria-label="更多终端操作">•••</button></div><div class="body"></div><div class="scrim"><section class="sheet"><div class="handle"></div><h2>核对主机身份</h2><p>首次连接 lab.example:22。请与管理员提供的指纹核对，确认你正在连接正确主机。</p><div class="fingerprint">ED25519 · SHA256<br>FICTITIOUS-DESIGN-FINGERPRINT<br>非真实主机密钥</div><p>接受后只在此设备记录。尚未发送认证密码。</p><button class="action" data-screen="tmux">已核对，信任并继续</button><button class="action secondary" data-screen="hosts">取消连接</button></section></div></div></div><figcaption><strong>03 · 首次主机校验</strong><br>主机校验先于认证；指纹不匹配立即停止。<br><em>设计提案 · 虚构数据</em></figcaption></figure></div></section><section class="page" id="focus"><div class="kicker">TABBY ANDROID / DESIGN REVIEW / 2026.10.08</div><h2>登录后：屏幕属于终端</h2><div class="gallery"><figure class="tile"><div class="frame"><div class="mobile " data-state="terminal"><section class="nav-root" data-nav-index="1" data-nav-wide="0" data-nav-ime="0" data-nav-locked="0"><div class="status"><button class="home" data-screen="navigation-home" aria-label="回到连接与会话">⌂</button><button class="identity nav-title" data-screen="navigation-sessions" aria-label="当前work，第2项，共3项；点击查看全部，左右拖标题切换"><span class="title-line"><span class="arrows" aria-hidden="true">‹ </span><b data-current-name>work</b> <small data-current-position>2/3</small> <span class="arrows" aria-hidden="true"> › ▾</span></span><span class="title-meta" data-current-summary>demo@lab.example · 已连接</span></button><button data-screen="navigation-ime" aria-label="显示键盘">⌨</button><button data-screen="more" aria-label="更多终端操作">•••</button></div><div class="terminal nav-terminal"><pre><span class="dim">demo@lab:~/project</span>
+<span class="green">$ </span>git status --short
+ M src/main.ts
+
+<span class="green">$ </span>printf "你好，终端\n"
+你好，终端
+
+<span class="green">$ </span>tmux display -p "#S"
+work
+
+<span class="green">$ </span><span class="cursor"> </span></pre><div class="nav-feedback" role="status" hidden></div></div></section></div></div><figcaption><strong>08 · 专注终端 · 键盘关</strong><br>关闭键盘，不常驻辅助键。Home与标题切换区分开。<br><em>设计提案 · 虚构数据</em></figcaption></figure><figure class="tile"><div class="frame"><div class="mobile " data-state="terminal-ime"><section class="nav-root" data-nav-index="1" data-nav-wide="0" data-nav-ime="1" data-nav-locked="0"><div class="status"><button class="home" data-screen="navigation-home" aria-label="回到连接与会话">⌂</button><button class="identity nav-title" data-screen="navigation-sessions" aria-label="当前work，第2项，共3项；点击查看全部，左右拖标题切换"><span class="title-line"><span class="arrows" aria-hidden="true">‹ </span><b data-current-name>work</b> <small data-current-position>2/3</small> <span class="arrows" aria-hidden="true"> › ▾</span></span><span class="title-meta" data-current-summary>demo@lab.example · 已连接</span></button><button data-screen="navigation-ime" aria-label="显示键盘">⌨</button><button data-screen="more" aria-label="更多终端操作">•••</button></div><div class="terminal nav-terminal"><pre><span class="dim">demo@lab:~/project</span>
+<span class="green">$ </span>git status --short
+ M src/main.ts
+
+<span class="green">$ </span>printf "你好，终端\n"
+你好，终端
+
+<span class="green">$ </span>tmux display -p "#S"
+work
+
+<span class="green">$ </span><span class="cursor"> </span></pre><div class="nav-feedback" role="status" hidden></div></div><div class="quickkeys" role="toolbar" aria-label="Tabby终端快捷键栏"><div class="key-viewport"><button data-nav-key="Esc" class="" aria-label="终端Esc键">Esc</button><button data-nav-key="Tab" class="" aria-label="终端Tab键">Tab</button><button data-nav-key="Ctrl" class="" aria-label="终端Ctrl键">Ctrl</button><button data-nav-key="Alt" class="group-end" aria-label="终端Alt键">Alt</button><button data-nav-key="←" class="" aria-label="终端←键">←</button><button data-nav-key="↑" class="" aria-label="终端↑键">↑</button><button data-nav-key="↓" class="" aria-label="终端↓键">↓</button><button data-nav-key="→" class="group-end" aria-label="终端→键">→</button><button data-nav-key="Home" class="" aria-label="终端Home键">Home</button><button data-nav-key="End" class="" aria-label="终端End键">End</button><button data-nav-key="PgUp" class="" aria-label="终端PgUp键">PgUp</button><button data-nav-key="PgDn" class="" aria-label="终端PgDn键">PgDn</button><button data-nav-key="Del" class="" aria-label="终端Del键">Del</button><button data-nav-key="Ins" class="" aria-label="终端Ins键">Ins</button></div><span class="key-fade" aria-hidden="true">›</span><button class="all-keys" data-screen="navigation-all-keys">全部键</button></div><div class="ime" aria-label="系统输入法区域，仅示意，不是Tabby提供"><div class="suggest"><span>demo</span><span>工作</span><span>输入法</span></div><div class="keyrow"><span>q</span><span>w</span><span>e</span><span>r</span><span>t</span><span>y</span><span>u</span><span>i</span><span>o</span><span>p</span></div><div class="keyrow"><span>a</span><span>s</span><span>d</span><span>f</span><span>g</span><span>h</span><span>j</span><span>k</span><span>l</span></div><div class="keyrow"><span>⇧</span><span>z</span><span>x</span><span>c</span><span>v</span><span>b</span><span>n</span><span>m</span><span>⌫</span></div><div class="keyrow"><span>123</span><span>中/英</span><span class="space">空格</span><span class="enter">↵</span></div><div class="ime-note">系统输入法区域 · 候选与皮肤由用户IME提供</div></div></section></div></div><figcaption><strong>09 · 专注终端 · 键盘开</strong><br>09编号保留。上方薄荷边界快捷栏归Tabby；demo/工作/输入法是系统IME候选示意。<br><em>设计提案 · 虚构数据</em></figcaption></figure><figure class="tile"><div class="frame"><div class="mobile " data-state="more"><div class="status"><button class="identity" data-screen="sessions">work · demo@lab.example<span class="">已连接</span></button><button class="icon" data-screen="terminal-ime" aria-label="显示键盘">⌨</button><button class="icon" data-screen="more" aria-label="更多终端操作">•••</button></div><div class="terminal"><pre><span class="dim">demo@lab:~/project</span>
+<span class="green">$ </span>npm run check
+
+> app@0.1.0 check
+> tsc --noEmit
+
+✓ 类型检查通过
+
+<span class="green">$ </span>git status --short
+ M src/main.ts
+
+<span class="green">$ </span>printf "你好，终端\n"
+你好，终端
+
+<span class="green">$ </span>tmux display -p "#S"
+work
+
+<span class="green">$ </span>ls
+README.md  src  test
+
+<span class="green">$ </span><span class="cursor"> </span></pre></div><div class="scrim"><section class="sheet"><div class="handle"></div><h2>终端操作</h2><button class="menu" data-screen="selection">选择 / 复制文本</button><button class="menu" data-screen="paste">粘贴…</button><button class="menu" data-screen="font">字号 · 16sp</button><button class="menu" data-screen="mouse">鼠标模式 · 关闭</button><button class="menu" data-screen="background">后台保持连接 · 关闭</button><button class="menu" data-screen="navigation-sessions">连接详情 / 会话</button><button class="menu" data-screen="credentials">密码与本地存储</button><button class="menu" data-screen="key-generate">设置密钥登录…</button><button class="menu" data-screen="disconnect">断开此连接…</button><button class="action quiet" data-screen="terminal">关闭</button></section></div></div></div><figcaption><strong>12 · 按需操作</strong><br>字号、选择、粘贴、后台与断开集中到按需面板。<br><em>设计提案 · 虚构数据</em></figcaption></figure></div><p>16sp / cell9.6×20.8dp均为估算。360×800、IME300：终端404dp，占扣IME后窗口80.8%，约35×18。键盘区域皮肤与候选由用户输入法决定，图中标签是设计注释。</p></section><section class="page" id="navigation"><div class="kicker">TABBY ANDROID / DESIGN REVIEW / 2026.10.08</div><h2>会话切换、Home与快捷键：各有自己的区域</h2><div class="gallery"><figure class="tile"><div class="frame"><div class="mobile " data-state="navigation-phone"><section class="nav-root" data-nav-index="1" data-nav-wide="0" data-nav-ime="0" data-nav-locked="0"><div class="status"><button class="home" data-screen="navigation-home" aria-label="回到连接与会话">⌂</button><button class="identity nav-title" data-screen="navigation-sessions" aria-label="当前work，第2项，共3项；点击查看全部，左右拖标题切换"><span class="title-line"><span class="arrows" aria-hidden="true">‹ </span><b data-current-name>work</b> <small data-current-position>2/3</small> <span class="arrows" aria-hidden="true"> › ▾</span></span><span class="title-meta" data-current-summary>demo@lab.example · 已连接</span></button><button data-screen="navigation-ime" aria-label="显示键盘">⌨</button><button data-screen="more" aria-label="更多终端操作">•••</button></div><div class="terminal nav-terminal"><pre><span class="dim">demo@lab:~/project</span>
+<span class="green">$ </span>git status --short
+ M src/main.ts
+
+<span class="green">$ </span>printf "你好，终端\n"
+你好，终端
+
+<span class="green">$ </span>tmux display -p "#S"
+work
+
+<span class="green">$ </span><span class="cursor"> </span></pre><div class="nav-feedback" role="status" hidden></div></div></section></div></div><figcaption><strong>40 · 窄屏会话导航</strong><br>左Home回主页不断开；只滑中央标题切会话，点击看列表。<br><em>设计提案 · 虚构数据</em></figcaption></figure><figure class="tile"><div class="frame"><div class="mobile " data-state="navigation-ime"><section class="nav-root" data-nav-index="1" data-nav-wide="0" data-nav-ime="1" data-nav-locked="0"><div class="status"><button class="home" data-screen="navigation-home" aria-label="回到连接与会话">⌂</button><button class="identity nav-title" data-screen="navigation-sessions" aria-label="当前work，第2项，共3项；点击查看全部，左右拖标题切换"><span class="title-line"><span class="arrows" aria-hidden="true">‹ </span><b data-current-name>work</b> <small data-current-position>2/3</small> <span class="arrows" aria-hidden="true"> › ▾</span></span><span class="title-meta" data-current-summary>demo@lab.example · 已连接</span></button><button data-screen="navigation-ime" aria-label="显示键盘">⌨</button><button data-screen="more" aria-label="更多终端操作">•••</button></div><div class="terminal nav-terminal"><pre><span class="dim">demo@lab:~/project</span>
+<span class="green">$ </span>git status --short
+ M src/main.ts
+
+<span class="green">$ </span>printf "你好，终端\n"
+你好，终端
+
+<span class="green">$ </span>tmux display -p "#S"
+work
+
+<span class="green">$ </span><span class="cursor"> </span></pre><div class="nav-feedback" role="status" hidden></div></div><div class="quickkeys" role="toolbar" aria-label="Tabby终端快捷键栏"><div class="key-viewport"><button data-nav-key="Esc" class="" aria-label="终端Esc键">Esc</button><button data-nav-key="Tab" class="" aria-label="终端Tab键">Tab</button><button data-nav-key="Ctrl" class="" aria-label="终端Ctrl键">Ctrl</button><button data-nav-key="Alt" class="group-end" aria-label="终端Alt键">Alt</button><button data-nav-key="←" class="" aria-label="终端←键">←</button><button data-nav-key="↑" class="" aria-label="终端↑键">↑</button><button data-nav-key="↓" class="" aria-label="终端↓键">↓</button><button data-nav-key="→" class="group-end" aria-label="终端→键">→</button><button data-nav-key="Home" class="" aria-label="终端Home键">Home</button><button data-nav-key="End" class="" aria-label="终端End键">End</button><button data-nav-key="PgUp" class="" aria-label="终端PgUp键">PgUp</button><button data-nav-key="PgDn" class="" aria-label="终端PgDn键">PgDn</button><button data-nav-key="Del" class="" aria-label="终端Del键">Del</button><button data-nav-key="Ins" class="" aria-label="终端Ins键">Ins</button></div><span class="key-fade" aria-hidden="true">›</span><button class="all-keys" data-screen="navigation-all-keys">全部键</button></div><div class="ime" aria-label="系统输入法区域，仅示意，不是Tabby提供"><div class="suggest"><span>demo</span><span>工作</span><span>输入法</span></div><div class="keyrow"><span>q</span><span>w</span><span>e</span><span>r</span><span>t</span><span>y</span><span>u</span><span>i</span><span>o</span><span>p</span></div><div class="keyrow"><span>a</span><span>s</span><span>d</span><span>f</span><span>g</span><span>h</span><span>j</span><span>k</span><span>l</span></div><div class="keyrow"><span>⇧</span><span>z</span><span>x</span><span>c</span><span>v</span><span>b</span><span>n</span><span>m</span><span>⌫</span></div><div class="keyrow"><span>123</span><span>中/英</span><span class="space">空格</span><span class="enter">↵</span></div><div class="ime-note">系统输入法区域 · 候选与皮肤由用户IME提供</div></div></section></div></div><figcaption><strong>41 · 标题与键栏各自横滑</strong><br>上方键栏归Tabby。下方候选词/键盘归系统IME，皮肤不由Tabby控制。<br><em>设计提案 · 虚构数据</em></figcaption></figure><figure class="tile"><div class="frame"><div class="mobile " data-state="navigation-locked"><section class="nav-root" data-nav-index="1" data-nav-wide="0" data-nav-ime="1" data-nav-locked="1"><div class="status"><button class="home" data-screen="navigation-home" aria-label="回到连接与会话">⌂</button><button class="identity nav-title" data-screen="navigation-sessions" aria-label="当前work，第2项，共3项；点击查看全部，左右拖标题切换"><span class="title-line"><span class="arrows" aria-hidden="true">‹ </span><b data-current-name>work</b> <small data-current-position>2/3</small> <span class="arrows" aria-hidden="true"> › ▾</span></span><span class="title-meta" data-current-summary>demo@lab.example · 已连接</span></button><button data-screen="navigation-ime" aria-label="显示键盘">⌨</button><button data-screen="more" aria-label="更多终端操作">•••</button></div><div class="terminal nav-terminal"><pre><span class="dim">demo@lab:~/project</span>
+<span class="green">$ </span>git status --short
+ M src/main.ts
+
+<span class="green">$ </span>printf "你好，终端\n"
+你好，终端
+
+<span class="green">$ </span>tmux display -p "#S"
+work
+
+<span class="green">$ </span><span class="cursor"> </span></pre><div class="nav-feedback" role="status" hidden></div></div><div class="quickkeys" role="toolbar" aria-label="Tabby终端快捷键栏"><button class="modifier" data-clear-modifier aria-label="Ctrl已锁定，点击解除">Ctrl<br>锁定 ×</button><div class="key-viewport"><button data-nav-key="Esc" class="" aria-label="终端Esc键">Esc</button><button data-nav-key="Tab" class="" aria-label="终端Tab键">Tab</button><button data-nav-key="Ctrl" class="" aria-label="终端Ctrl键">Ctrl</button><button data-nav-key="Alt" class="group-end" aria-label="终端Alt键">Alt</button><button data-nav-key="←" class="" aria-label="终端←键">←</button><button data-nav-key="↑" class="" aria-label="终端↑键">↑</button><button data-nav-key="↓" class="" aria-label="终端↓键">↓</button><button data-nav-key="→" class="group-end" aria-label="终端→键">→</button><button data-nav-key="Home" class="" aria-label="终端Home键">Home</button><button data-nav-key="End" class="" aria-label="终端End键">End</button><button data-nav-key="PgUp" class="" aria-label="终端PgUp键">PgUp</button><button data-nav-key="PgDn" class="" aria-label="终端PgDn键">PgDn</button><button data-nav-key="Del" class="" aria-label="终端Del键">Del</button><button data-nav-key="Ins" class="" aria-label="终端Ins键">Ins</button></div><span class="key-fade" aria-hidden="true">›</span><button class="all-keys" data-screen="navigation-all-keys">全部键</button></div><div class="ime" aria-label="系统输入法区域，仅示意，不是Tabby提供"><div class="suggest"><span>demo</span><span>工作</span><span>输入法</span></div><div class="keyrow"><span>q</span><span>w</span><span>e</span><span>r</span><span>t</span><span>y</span><span>u</span><span>i</span><span>o</span><span>p</span></div><div class="keyrow"><span>a</span><span>s</span><span>d</span><span>f</span><span>g</span><span>h</span><span>j</span><span>k</span><span>l</span></div><div class="keyrow"><span>⇧</span><span>z</span><span>x</span><span>c</span><span>v</span><span>b</span><span>n</span><span>m</span><span>⌫</span></div><div class="keyrow"><span>123</span><span>中/英</span><span class="space">空格</span><span class="enter">↵</span></div><div class="ime-note">系统输入法区域 · 候选与皮肤由用户IME提供</div></div></section></div></div><figcaption><strong>44 · Ctrl锁定可见</strong><br>Ctrl单次或锁定有文字反馈；锁定固定可见，切换/Home/断线清除。<br><em>设计提案 · 虚构数据</em></figcaption></figure></div><p>每次只切一项，首尾不循环。键栏拖动仅滚动，完整按键点击才触发。所有图为设计提案，非Android截图。</p></section><section class="page" id="navigation-wide"><div class="kicker">TABBY ANDROID / DESIGN REVIEW / 2026.10.08</div><h2>宽屏：同一行Tab，身份始终可见</h2><div class="gallery"><div><div class="wideframe"><div class="mobile wide" data-state="navigation-wide"><section class="nav-root" data-nav-index="1" data-nav-wide="1" data-nav-ime="0" data-nav-locked="0"><div class="status"><button class="home" data-screen="navigation-home" aria-label="回到连接与会话">⌂</button><div class="wide-context">demo@lab.example<span data-current-summary>work · 已连接</span></div><div class="nav-tabs" role="tablist" aria-label="终端会话"><button role="tab" data-nav-session="0" aria-selected="false" aria-label="logs，demo@lab.example，只读，第1项，共3项">logs<span>只读</span></button><button role="tab" data-nav-session="1" aria-selected="true" aria-label="work，demo@lab.example，已连接，第2项，共3项">work<span>已连接</span></button><button role="tab" data-nav-session="2" aria-selected="false" aria-label="jobs，demo@lab.example，已断线，第3项，共3项">jobs<span>已断线</span></button></div><button data-screen="navigation-sessions" aria-label="全部会话，3项">3 ▾</button><button data-screen="navigation-ime" aria-label="显示键盘">⌨</button><button data-screen="more" aria-label="更多终端操作">•••</button></div><div class="terminal nav-terminal"><pre><span class="dim">demo@lab:~/project</span>
+<span class="green">$ </span>git status --short
+ M src/main.ts
+
+<span class="green">$ </span>printf "你好，终端\n"
+你好，终端
+
+<span class="green">$ </span>tmux display -p "#S"
+work
+
+<span class="green">$ </span><span class="cursor"> </span></pre><div class="nav-feedback" role="status" hidden></div></div></section></div></div><p>Tab拖动只滚动；点击才选中。不添第二条导航。</p></div><div style="max-width:240px"><h3>三种横向动作分开</h3><p>窄屏标题：切相邻会话。<br>宽屏Tab：找Tab，点击选择。<br>键盘快捷栏：找键，点击发送。</p><p>终端内容区不切会话。重排/关闭只在管理入口；断线项不自动重连。</p><p>原终端buffer与回看锚点保留；旧预编辑、修饰键与待确认粘贴取消。只读/断线不接受输入。</p><p>门槛、首次提示、锁定布局与密钥策略仍需真机调校/评审。</p></div></div></section><section class="page" id="key-setup"><div class="kicker">TABBY ANDROID / DESIGN REVIEW / 2026.10.08</div><h2>设备生成密钥与公钥安装：每个目标明确确认</h2><div class="gallery"><figure class="tile"><div class="frame"><div class="mobile " data-state="key-generate"><div class="status"><button class="identity" data-screen="sessions">work · demo@lab.example<span class="">已连接</span></button><button class="icon" data-screen="terminal-ime" aria-label="显示键盘">⌨</button><button class="icon" data-screen="more" aria-label="更多终端操作">•••</button></div><div class="terminal"><pre><span class="dim">demo@lab:~/project</span>
+<span class="green">$ </span>npm run check
+
+> app@0.1.0 check
+> tsc --noEmit
+
+✓ 类型检查通过
+
+<span class="green">$ </span>git status --short
+ M src/main.ts
+
+<span class="green">$ </span>printf "你好，终端\n"
+你好，终端
+
+<span class="green">$ </span>tmux display -p "#S"
+work
+
+<span class="green">$ </span>ls
+README.md  src  test
+
+<span class="green">$ </span><span class="cursor"> </span></pre></div><div class="scrim"><section class="sheet"><div class="handle"></div><h2>为此设备创建SSH密钥</h2><p>仅用户主动允许后生成。此设计稿不会生成密钥。</p><div class="card">名称：此设备 · 实验环境<br>候选：Ed25519（软件生成）<br><span class="small">以Keystore AES密钥包裹本地加密保存，不能称Ed25519硬件不可导出。算法兼容性仍须实测。</span></div><p>无云同步、默认不导出私钥。导出/备份与删除有独立说明和确认。</p><button class="action" data-screen="key-install">示意：允许生成并查看安装目标</button><button class="action secondary" data-screen="credentials">取消</button></section></div></div></div><figcaption><strong>50 · 用户允许生成密钥</strong><br>用户允许才生成；软件Ed25519以Keystore AES包裹，不夸大硬件不可导出。<br><em>设计提案 · 虚构数据</em></figcaption></figure><figure class="tile"><div class="frame"><div class="mobile " data-state="key-install"><div class="status"><button class="identity" data-screen="sessions">work · demo@lab.example<span class="">已连接</span></button><button class="icon" data-screen="terminal-ime" aria-label="显示键盘">⌨</button><button class="icon" data-screen="more" aria-label="更多终端操作">•••</button></div><div class="terminal"><pre><span class="dim">demo@lab:~/project</span>
+<span class="green">$ </span>npm run check
+
+> app@0.1.0 check
+> tsc --noEmit
+
+✓ 类型检查通过
+
+<span class="green">$ </span>git status --short
+ M src/main.ts
+
+<span class="green">$ </span>printf "你好，终端\n"
+你好，终端
+
+<span class="green">$ </span>tmux display -p "#S"
+work
+
+<span class="green">$ </span>ls
+README.md  src  test
+
+<span class="green">$ </span><span class="cursor"> </span></pre></div><div class="scrim"><section class="sheet"><div class="handle"></div><h2>将公钥加入此账号？</h2><div class="card">demo@lab.example:22<br>已核对主机：FICTITIOUS-HOST<br>公钥：Ed25519 · FICTITIOUS-PUBLIC<br><span class="small">虚构指纹，不能用于真实核对</span></div><p>只追加公钥，保留已有授权与限制。同一key已存在时不重复加无限制条目。不是每次密码登录自动执行。</p><button class="action" data-screen="key-verified">确认此目标，示意安装并验证</button><button class="action secondary" data-screen="credentials">取消，不更改服务器</button></section></div></div></div><figcaption><strong>51 · 确认安装公钥</strong><br>密码认证与主机校验后，再确认host/port/account与公钥指纹，只追加公钥。<br><em>设计提案 · 虚构数据</em></figcaption></figure><figure class="tile"><div class="frame"><div class="mobile " data-state="key-verified"><div class="status"><button class="identity" data-screen="sessions">work · demo@lab.example<span class="">已连接</span></button><button class="icon" data-screen="terminal-ime" aria-label="显示键盘">⌨</button><button class="icon" data-screen="more" aria-label="更多终端操作">•••</button></div><div class="terminal"><pre><span class="dim">demo@lab:~/project</span>
+<span class="green">$ </span>npm run check
+
+> app@0.1.0 check
+> tsc --noEmit
+
+✓ 类型检查通过
+
+<span class="green">$ </span>git status --short
+ M src/main.ts
+
+<span class="green">$ </span>printf "你好，终端\n"
+你好，终端
+
+<span class="green">$ </span>tmux display -p "#S"
+work
+
+<span class="green">$ </span>ls
+README.md  src  test
+
+<span class="green">$ </span><span class="cursor"> </span></pre></div><div class="scrim"><section class="sheet"><div class="handle"></div><h2>密钥登录已验证（示意）</h2><p>新独立连接只用该公钥认证成功，才更新此状态；原密码连接保留。</p><div class="card">demo@lab.example · 此设备密钥<br><span class="small">只对已确认的这一目标有效</span></div><p>失败/超时不移除密码方式。结果不确定时不自动删密钥；回滚只针对可证明本次新增的精确条目并再次确认。</p><button class="action" data-screen="navigation-phone">返回当前终端</button><button class="action secondary" data-screen="credentials">查看本地密钥设置（示意）</button></section></div></div></div><figcaption><strong>52 · 新连接验证结果</strong><br>新独立连接仅用公钥验证成功才更新状态；失败不移除密码方式或已有key。<br><em>设计提案 · 虚构数据</em></figcaption></figure></div></section><section class="page" id="tmux"><div class="kicker">TABBY ANDROID / DESIGN REVIEW / 2026.10.08</div><h2>会话安全：共享、只读、显式接管</h2><div class="gallery"><figure class="tile"><div class="frame"><div class="mobile " data-state="tmux"><div class="status"><button class="identity" data-screen="hosts">demo@lab.example<span class="">选择终端会话</span></button><button class="icon" data-screen="terminal-ime" aria-label="显示键盘">⌨</button><button class="icon" data-screen="more" aria-label="更多终端操作">•••</button></div><div class="body"><h1>接着工作</h1><p>tmux · 当前 socket: default<br>共享、只读与接管均由你选择。</p><button class="host" data-screen="terminal"><strong>work</strong><span>暂无客户端 · 点击恢复</span></button><button class="host" data-screen="occupied"><strong>logs</strong><span>已有 1 个客户端</span></button><button class="action" data-screen="new-session">＋ 新建会话</button><button class="action secondary" data-screen="terminal">直接 SSH 终端</button><button class="action quiet" data-screen="tmux">刷新列表</button></div></div></div><figcaption><strong>04 · tmux 列表</strong><br>保留 socket、会话列表和直接 SSH 路径。<br><em>设计提案 · 虚构数据</em></figcaption></figure><figure class="tile"><div class="frame"><div class="mobile " data-state="occupied"><div class="status"><button class="identity" data-screen="sessions">work · demo@lab.example<span class="">已连接</span></button><button class="icon" data-screen="terminal-ime" aria-label="显示键盘">⌨</button><button class="icon" data-screen="more" aria-label="更多终端操作">•••</button></div><div class="terminal"><pre><span class="dim">demo@lab:~/project</span>
+<span class="green">$ </span>npm run check
+
+> app@0.1.0 check
+> tsc --noEmit
+
+✓ 类型检查通过
+
+<span class="green">$ </span>git status --short
+ M src/main.ts
+
+<span class="green">$ </span>printf "你好，终端\n"
+你好，终端
+
+<span class="green">$ </span>tmux display -p "#S"
+work
+
+<span class="green">$ </span>ls
+README.md  src  test
+
+<span class="green">$ </span><span class="cursor"> </span></pre></div><div class="scrim"><section class="sheet"><div class="handle"></div><h2>logs 已有客户端</h2><p>请选择这次连接方式。恢复时检测到占用也会暂停，不自动接管。</p><button class="action" data-screen="terminal">共享连接</button><button class="action secondary" data-screen="readonly">只读连接</button><button class="action secondary" data-screen="takeover">接管…</button><button class="action quiet" data-screen="tmux">取消</button></section></div></div></div><figcaption><strong>06 · 已被使用</strong><br>检测到占用暂停恢复；用户选共享、只读或接管。<br><em>设计提案 · 虚构数据</em></figcaption></figure><figure class="tile"><div class="frame"><div class="mobile " data-state="takeover"><div class="status"><button class="identity" data-screen="sessions">work · demo@lab.example<span class="">已连接</span></button><button class="icon" data-screen="terminal-ime" aria-label="显示键盘">⌨</button><button class="icon" data-screen="more" aria-label="更多终端操作">•••</button></div><div class="terminal"><pre><span class="dim">demo@lab:~/project</span>
+<span class="green">$ </span>npm run check
+
+> app@0.1.0 check
+> tsc --noEmit
+
+✓ 类型检查通过
+
+<span class="green">$ </span>git status --short
+ M src/main.ts
+
+<span class="green">$ </span>printf "你好，终端\n"
+你好，终端
+
+<span class="green">$ </span>tmux display -p "#S"
+work
+
+<span class="green">$ </span>ls
+README.md  src  test
+
+<span class="green">$ </span><span class="cursor"> </span></pre></div><div class="scrim"><section class="sheet"><div class="handle"></div><h2>接管 logs？</h2><p>此操作会让该 tmux 会话的其他客户端断开。会话内的远端进程仍运行。</p><div class="card">demo@lab.example · logs<br><span class="small">已核对账号、socket 与会话身份</span></div><button class="action danger" data-screen="terminal">确认接管</button><button class="action secondary" data-screen="occupied">保留其他客户端，取消</button></section></div></div></div><figcaption><strong>07 · 显式接管</strong><br>接管影响其他客户端，单独二次确认。<br><em>设计提案 · 虚构数据</em></figcaption></figure></div></section><section class="page" id="fold"><div class="kicker">TABBY ANDROID / DESIGN REVIEW / 2026.10.08</div><h2>展开后：字号保持，空间增加</h2><div class="gallery"><div><div class="wideframe"><div class="mobile wide" data-state="fold"><section class="nav-root" data-nav-index="1" data-nav-wide="1" data-nav-ime="0" data-nav-locked="0"><div class="status"><button class="home" data-screen="navigation-home" aria-label="回到连接与会话">⌂</button><div class="wide-context">demo@lab.example<span data-current-summary>work · 已连接</span></div><div class="nav-tabs" role="tablist" aria-label="终端会话"><button role="tab" data-nav-session="0" aria-selected="false" aria-label="logs，demo@lab.example，只读，第1项，共3项">logs<span>只读</span></button><button role="tab" data-nav-session="1" aria-selected="true" aria-label="work，demo@lab.example，已连接，第2项，共3项">work<span>已连接</span></button><button role="tab" data-nav-session="2" aria-selected="false" aria-label="jobs，demo@lab.example，已断线，第3项，共3项">jobs<span>已断线</span></button></div><button data-screen="navigation-sessions" aria-label="全部会话，3项">3 ▾</button><button data-screen="navigation-ime" aria-label="显示键盘">⌨</button><button data-screen="more" aria-label="更多终端操作">•••</button></div><div class="terminal nav-terminal"><pre><span class="dim">demo@lab:~/project</span>
+<span class="green">$ </span>git status --short
+ M src/main.ts
+
+<span class="green">$ </span>printf "你好，终端\n"
+你好，终端
+
+<span class="green">$ </span>tmux display -p "#S"
+work
+
+<span class="green">$ </span><span class="cursor"> </span></pre><div class="nav-feedback" role="status" hidden></div></div></section></div></div><p>840×900假设窗口；默认不强加侧栏。</p></div><div style="max-width:235px"><h3>窗口驱动布局</h3><p>用实际安全窗口和铰链区域，不用设备名称或面板像素猜密度。</p><p>展开、旋转不创建第二个会话，不重发命令。每次重新量字体、fit与发送PTY尺寸。</p><p>会话面板只在用户展开时占240dp；折回自动收起面板。</p><p>UI大字、CJK/emoji、IME焦点、选择快照与光标位置须独立验收。</p><a href="prototype.html?screen=fold-panel">点击稿：展开会话面板</a></div></div></section><section class="page" id="fold-ime"><div class="kicker">TABBY ANDROID / DESIGN REVIEW / 2026.10.08</div><h2>展开与横屏：不要强塞80列</h2><div class="gallery"><div><div class="wideframe"><div class="mobile wide" data-state="fold-ime"><section class="nav-root" data-nav-index="1" data-nav-wide="1" data-nav-ime="1" data-nav-locked="0"><div class="status"><button class="home" data-screen="navigation-home" aria-label="回到连接与会话">⌂</button><div class="wide-context">demo@lab.example<span data-current-summary>work · 已连接</span></div><div class="nav-tabs" role="tablist" aria-label="终端会话"><button role="tab" data-nav-session="0" aria-selected="false" aria-label="logs，demo@lab.example，只读，第1项，共3项">logs<span>只读</span></button><button role="tab" data-nav-session="1" aria-selected="true" aria-label="work，demo@lab.example，已连接，第2项，共3项">work<span>已连接</span></button><button role="tab" data-nav-session="2" aria-selected="false" aria-label="jobs，demo@lab.example，已断线，第3项，共3项">jobs<span>已断线</span></button></div><button data-screen="navigation-sessions" aria-label="全部会话，3项">3 ▾</button><button data-screen="navigation-ime" aria-label="显示键盘">⌨</button><button data-screen="more" aria-label="更多终端操作">•••</button></div><div class="terminal nav-terminal"><pre><span class="dim">demo@lab:~/project</span>
+<span class="green">$ </span>git status --short
+ M src/main.ts
+
+<span class="green">$ </span>printf "你好，终端\n"
+你好，终端
+
+<span class="green">$ </span>tmux display -p "#S"
+work
+
+<span class="green">$ </span><span class="cursor"> </span></pre><div class="nav-feedback" role="status" hidden></div></div><div class="quickkeys" role="toolbar" aria-label="Tabby终端快捷键栏"><div class="key-viewport"><button data-nav-key="Esc" class="" aria-label="终端Esc键">Esc</button><button data-nav-key="Tab" class="" aria-label="终端Tab键">Tab</button><button data-nav-key="Ctrl" class="" aria-label="终端Ctrl键">Ctrl</button><button data-nav-key="Alt" class="group-end" aria-label="终端Alt键">Alt</button><button data-nav-key="←" class="" aria-label="终端←键">←</button><button data-nav-key="↑" class="" aria-label="终端↑键">↑</button><button data-nav-key="↓" class="" aria-label="终端↓键">↓</button><button data-nav-key="→" class="group-end" aria-label="终端→键">→</button><button data-nav-key="Home" class="" aria-label="终端Home键">Home</button><button data-nav-key="End" class="" aria-label="终端End键">End</button><button data-nav-key="PgUp" class="" aria-label="终端PgUp键">PgUp</button><button data-nav-key="PgDn" class="" aria-label="终端PgDn键">PgDn</button><button data-nav-key="Del" class="" aria-label="终端Del键">Del</button><button data-nav-key="Ins" class="" aria-label="终端Ins键">Ins</button></div><span class="key-fade" aria-hidden="true">›</span><button class="all-keys" data-screen="navigation-all-keys">全部键</button></div><div class="ime" aria-label="系统输入法区域，仅示意，不是Tabby提供"><div class="suggest"><span>demo</span><span>工作</span><span>输入法</span></div><div class="keyrow"><span>q</span><span>w</span><span>e</span><span>r</span><span>t</span><span>y</span><span>u</span><span>i</span><span>o</span><span>p</span></div><div class="keyrow"><span>a</span><span>s</span><span>d</span><span>f</span><span>g</span><span>h</span><span>j</span><span>k</span><span>l</span></div><div class="keyrow"><span>⇧</span><span>z</span><span>x</span><span>c</span><span>v</span><span>b</span><span>n</span><span>m</span><span>⌫</span></div><div class="keyrow"><span>123</span><span>中/英</span><span class="space">空格</span><span class="enter">↵</span></div><div class="ime-note">系统输入法区域 · 候选与皮肤由用户IME提供</div></div></section></div></div><p>展开IME320：终端484dp，约85×22。</p></div><div style="max-width:240px"><h3>短窗口有另一套预算</h3><p>横屏800×360、IME180：默认收起快捷条；终端132dp，约81×5。</p><p>通过旋转、展开或主动调字号增加列数；不自动缩到无法阅读。</p><p>UI使用sp；Android14+非线性转换交给原生TypedValue。控制目标保持≥48dp。</p><p>安全的真实textarea与中文composition优先。若局部输入器未通过测试，暂留48dp输入条，手机终端降到356dp、35×16。</p></div></div></section><section class="page" id="touch"><div class="kicker">TABBY ANDROID / DESIGN REVIEW / 2026.10.08</div><h2>触控：选择与粘贴都有明确边界</h2><div class="gallery"><figure class="tile"><div class="frame"><div class="mobile " data-state="selection"><div class="status"><button class="identity" data-screen="sessions">work · demo@lab.example<span class="">已连接</span></button><button class="icon" data-screen="terminal-ime" aria-label="显示键盘">⌨</button><button class="icon" data-screen="more" aria-label="更多终端操作">•••</button></div><div class="terminal"><div class="selection-toolbar"><button class="" data-screen="history">复制</button><button class="" data-screen="selection">全选</button><button class="" data-screen="terminal">完成</button></div><pre><span class="dim">已冻结的解析文本 · 系统选择柄示意</span>
+
+<span class="selected"> M src/main.ts
+
+$ printf "你好，终端\n"
+你好，终端</span>
+<span class="selection-handle">●                     ●</span></pre></div></div></div><figcaption><strong>18 · 文本选择</strong><br>冻结解析文本与系统选择柄；不从canvas像素猜字符。<br><em>设计提案 · 虚构数据</em></figcaption></figure><figure class="tile"><div class="frame"><div class="mobile " data-state="paste"><div class="status"><button class="identity" data-screen="sessions">work · demo@lab.example<span class="">已连接</span></button><button class="icon" data-screen="terminal-ime" aria-label="显示键盘">⌨</button><button class="icon" data-screen="more" aria-label="更多终端操作">•••</button></div><div class="terminal"><pre><span class="dim">demo@lab:~/project</span>
+<span class="green">$ </span>npm run check
+
+> app@0.1.0 check
+> tsc --noEmit
+
+✓ 类型检查通过
+
+<span class="green">$ </span>git status --short
+ M src/main.ts
+
+<span class="green">$ </span>printf "你好，终端\n"
+你好，终端
+
+<span class="green">$ </span>tmux display -p "#S"
+work
+
+<span class="green">$ </span>ls
+README.md  src  test
+
+<span class="green">$ </span><span class="cursor"> </span></pre></div><div class="scrim"><section class="sheet"><div class="handle"></div><h2>发送 3 行文本？</h2><p>换行可能执行命令。先检查内容，确认发送到 work · demo@lab.example。</p><div class="fingerprint">git status --short<br>printf "example\n"<br>pwd</div><p>剪贴板仅在你点击粘贴时读取。保留控制符检查、bracketed paste 与大小上限。</p><button class="action" data-screen="terminal">确认粘贴</button><button class="action secondary" data-screen="terminal">取消</button></section></div></div></div><figcaption><strong>20 · 多行粘贴确认</strong><br>多行先确认目标与文本；粘贴只由用户点击触发。<br><em>设计提案 · 虚构数据</em></figcaption></figure><figure class="tile"><div class="frame"><div class="mobile " data-state="mouse"><div class="status"><button class="identity" data-screen="sessions">work · demo@lab.example<span class="">已连接</span></button><button class="icon" data-screen="terminal-ime" aria-label="显示键盘">⌨</button><button class="icon" data-screen="more" aria-label="更多终端操作">•••</button></div><div class="terminal"><pre><span class="dim">demo@lab:~/project</span>
+<span class="green">$ </span>npm run check
+
+> app@0.1.0 check
+> tsc --noEmit
+
+✓ 类型检查通过
+
+<span class="green">$ </span>git status --short
+ M src/main.ts
+
+<span class="green">$ </span>printf "你好，终端\n"
+你好，终端
+
+<span class="green">$ </span>tmux display -p "#S"
+work
+
+<span class="green">$ </span>ls
+README.md  src  test
+
+<span class="green">$ </span><span class="cursor"> </span></pre></div><div class="scrim"><section class="sheet"><div class="handle"></div><h2>启用鼠标模式？</h2><p>仅用于支持鼠标的远端程序。启用后，触控可能发送点击或滚轮事件；顶部持续显示「鼠标」。</p><p>关闭后才恢复默认本地历史滚动与文本选择。模式切换取消在途手势。</p><button class="action" data-screen="mouse-active">启用鼠标模式</button><button class="action secondary" data-screen="terminal">取消</button></section></div></div></div><figcaption><strong>22 · 显式鼠标模式</strong><br>显式鼠标模式，持续标记；默认本地历史滚动。<br><em>设计提案 · 虚构数据</em></figcaption></figure></div></section><section class="page" id="recovery"><div class="kicker">TABBY ANDROID / DESIGN REVIEW / 2026.10.08</div><h2>断线保留画面，但停止输入</h2><div class="gallery"><figure class="tile"><div class="frame"><div class="mobile " data-state="offline"><div class="status"><button class="identity" data-screen="sessions">work · demo@lab.example<span class="warning">已断线 · 输入暂停</span></button><button class="icon" data-screen="terminal-ime" aria-label="显示键盘">⌨</button><button class="icon" data-screen="more" aria-label="更多终端操作">•••</button></div><div class="terminal"><pre><span class="dim">demo@lab:~/project</span>
+<span class="green">$ </span>npm run check
+
+> app@0.1.0 check
+> tsc --noEmit
+
+✓ 类型检查通过
+
+<span class="green">$ </span>git status --short
+ M src/main.ts
+
+<span class="green">$ </span>printf "你好，终端\n"
+你好，终端
+
+<span class="green">$ </span>tmux display -p "#S"
+work
+
+<span class="green">$ </span>ls
+README.md  src  test
+
+<span class="green">$ </span><span class="cursor"> </span></pre></div><div class="notice"><strong>等待网络 · 1 / 6</strong><br>本地画面保留。仅核对原 tmux 身份后恢复；普通 SSH 需手动重连。<button class="action secondary" data-screen="offline-details">查看恢复状态</button></div></div></div><figcaption><strong>24 · 等待网络</strong><br>本地画面有明确断线标识，不误当实时状态。<br><em>设计提案 · 虚构数据</em></figcaption></figure><figure class="tile"><div class="frame"><div class="mobile " data-state="missing"><div class="status"><button class="identity" data-screen="sessions">work · demo@lab.example<span class="">已连接</span></button><button class="icon" data-screen="terminal-ime" aria-label="显示键盘">⌨</button><button class="icon" data-screen="more" aria-label="更多终端操作">•••</button></div><div class="terminal"><pre><span class="dim">demo@lab:~/project</span>
+<span class="green">$ </span>npm run check
+
+> app@0.1.0 check
+> tsc --noEmit
+
+✓ 类型检查通过
+
+<span class="green">$ </span>git status --short
+ M src/main.ts
+
+<span class="green">$ </span>printf "你好，终端\n"
+你好，终端
+
+<span class="green">$ </span>tmux display -p "#S"
+work
+
+<span class="green">$ </span>ls
+README.md  src  test
+
+<span class="green">$ </span><span class="cursor"> </span></pre></div><div class="scrim"><section class="sheet"><div class="handle"></div><h2>原会话已不存在</h2><p>work 的身份不再匹配。已停止恢复，不会把同名新会话当成原会话，也不会自动创建。</p><button class="action" data-screen="tmux">返回 tmux 列表</button><button class="action secondary" data-screen="stopped">停止此连接</button></section></div></div></div><figcaption><strong>27 · 恢复目标不存在</strong><br>完整身份不存在或已替换时停止，不自动新建。<br><em>设计提案 · 虚构数据</em></figcaption></figure><figure class="tile"><div class="frame"><div class="mobile " data-state="changed"><div class="status"><button class="identity" data-screen="sessions">work · demo@lab.example<span class="danger">安全校验失败</span></button><button class="icon" data-screen="terminal-ime" aria-label="显示键盘">⌨</button><button class="icon" data-screen="more" aria-label="更多终端操作">•••</button></div><div class="body"></div><div class="scrim"><section class="sheet"><div class="handle"></div><h2>主机身份变化，已停止</h2><p>lab.example 的主机密钥与已记录值不同。没有发送密码，也不会自动重连。</p><div class="fingerprint">原指纹：FICTITIOUS-OLD<br>当前：FICTITIOUS-CHANGED</div><p>请通过可信渠道核实服务器变更。此页不提供「忽略并连接」。</p><button class="action" data-screen="hosts">返回连接工作台</button></section></div></div></div><figcaption><strong>26 · 主机密钥变化</strong><br>密钥变化无忽略入口；尚未发送认证凭据。<br><em>设计提案 · 虚构数据</em></figcaption></figure></div></section><section class="page" id="vault"><div class="kicker">TABBY ANDROID / DESIGN REVIEW / 2026.10.08</div><h2>密码：选择保存，也能更新与删除</h2><div class="gallery"><figure class="tile"><div class="frame"><div class="mobile " data-state="credentials"><div class="status"><button class="identity" data-screen="hosts">密码与存储<span class="">仅此设备</span></button><button class="icon" data-screen="terminal-ime" aria-label="显示键盘">⌨</button><button class="icon" data-screen="more" aria-label="更多终端操作">•••</button></div><div class="body"><h1>你决定保存什么</h1><p>保存主机不会保存密码。默认不保存；本地密码以 Android Keystore 密钥加密，不云同步、不写终端日志。</p><div class="card"><strong>demo@lab.example:22</strong><p>已保存 · 已绑定验证过的主机身份</p><button class="action secondary" data-screen="update-password">更新密码…</button><button class="action secondary" data-screen="delete-password">删除此密码…</button></div><p class="small">密钥失效或密文损坏时要求重新输入；不能保证所有设备都有硬件安全芯片。</p><button class="action secondary" data-screen="key-settings">此设备SSH密钥…</button><button class="action secondary" data-screen="background">后台连接设置</button></div></div></div><figcaption><strong>29 · 本地凭据</strong><br>本地Keystore保护；网页不回填保存密码。<br><em>设计提案 · 虚构数据</em></figcaption></figure><figure class="tile"><div class="frame"><div class="mobile " data-state="update-failed"><div class="status"><button class="identity" data-screen="sessions">work · demo@lab.example<span class="">已连接</span></button><button class="icon" data-screen="terminal-ime" aria-label="显示键盘">⌨</button><button class="icon" data-screen="more" aria-label="更多终端操作">•••</button></div><div class="terminal"><pre><span class="dim">demo@lab:~/project</span>
+<span class="green">$ </span>npm run check
+
+> app@0.1.0 check
+> tsc --noEmit
+
+✓ 类型检查通过
+
+<span class="green">$ </span>git status --short
+ M src/main.ts
+
+<span class="green">$ </span>printf "你好，终端\n"
+你好，终端
+
+<span class="green">$ </span>tmux display -p "#S"
+work
+
+<span class="green">$ </span>ls
+README.md  src  test
+
+<span class="green">$ </span><span class="cursor"> </span></pre></div><div class="scrim"><section class="sheet"><div class="handle"></div><h2>认证失败，未更新</h2><p>新密码未通过认证。旧保存条目保持不变；没有记录密码或上传崩溃报告。</p><button class="action" data-screen="update-password">重新输入</button><button class="action secondary" data-screen="credentials">返回本地凭据</button></section></div></div></div><figcaption><strong>31 · 更新认证失败</strong><br>新密码认证或写入失败，旧条目原子保留。<br><em>设计提案 · 虚构数据</em></figcaption></figure><figure class="tile"><div class="frame"><div class="mobile " data-state="delete-password"><div class="status"><button class="identity" data-screen="sessions">work · demo@lab.example<span class="">已连接</span></button><button class="icon" data-screen="terminal-ime" aria-label="显示键盘">⌨</button><button class="icon" data-screen="more" aria-label="更多终端操作">•••</button></div><div class="terminal"><pre><span class="dim">demo@lab:~/project</span>
+<span class="green">$ </span>npm run check
+
+> app@0.1.0 check
+> tsc --noEmit
+
+✓ 类型检查通过
+
+<span class="green">$ </span>git status --short
+ M src/main.ts
+
+<span class="green">$ </span>printf "你好，终端\n"
+你好，终端
+
+<span class="green">$ </span>tmux display -p "#S"
+work
+
+<span class="green">$ </span>ls
+README.md  src  test
+
+<span class="green">$ </span><span class="cursor"> </span></pre></div><div class="scrim"><section class="sheet"><div class="handle"></div><h2>删除本地密码？</h2><p>移除此目标的加密条目与内存重连密码，并取消待认证和自动重连。当前已认证的SSH连接可继续。</p><p>以后恢复需要重新输入。此操作不删除主机配置或已验证主机密钥。</p><button class="action danger" data-screen="deleted">删除此密码</button><button class="action secondary" data-screen="credentials">取消</button></section></div></div></div><figcaption><strong>32 · 删除密码确认</strong><br>删除取消同目标的待认证与自动恢复；当前连接可继续。<br><em>设计提案 · 虚构数据</em></figcaption></figure></div></section><section class="page" id="background"><div class="kicker">TABBY ANDROID / DESIGN REVIEW / 2026.10.08</div><h2>后台：可见、可停止、有限恢复</h2><div class="gallery"><figure class="tile"><div class="frame"><div class="mobile " data-state="background"><div class="status"><button class="identity" data-screen="sessions">work · demo@lab.example<span class="">已连接</span></button><button class="icon" data-screen="terminal-ime" aria-label="显示键盘">⌨</button><button class="icon" data-screen="more" aria-label="更多终端操作">•••</button></div><div class="terminal"><pre><span class="dim">demo@lab:~/project</span>
+<span class="green">$ </span>npm run check
+
+> app@0.1.0 check
+> tsc --noEmit
+
+✓ 类型检查通过
+
+<span class="green">$ </span>git status --short
+ M src/main.ts
+
+<span class="green">$ </span>printf "你好，终端\n"
+你好，终端
+
+<span class="green">$ </span>tmux display -p "#S"
+work
+
+<span class="green">$ </span>ls
+README.md  src  test
+
+<span class="green">$ </span><span class="cursor"> </span></pre></div><div class="scrim"><section class="sheet"><div class="handle"></div><h2>后台保持连接</h2><p>关闭（默认）。开启后使用可见连接通知，尽量维持已建立的连接。安卓或厂商仍可能结束进程。</p><p>不会更改省电设置；不会开机自动启动。tmux 可保留远端进程，返回后仍需核对身份。</p><div class="card"><strong>通知由你控制</strong><p>提供「返回」与「停止全部连接」。锁屏不显示主机、账号或终端内容。</p></div><button class="action" data-screen="permission">了解，选择通知权限</button><button class="action secondary" data-screen="terminal">暂不开启</button></section></div></div></div><figcaption><strong>34 · 后台连接说明</strong><br>默认关闭，前台主动启用。不修改省电或手机安全设置。<br><em>设计提案 · 虚构数据</em></figcaption></figure><figure class="tile"><div class="frame"><div class="mobile " data-state="notification"><div class="status"><button class="identity" data-screen="terminal">系统通知示意<span class="">非实际 Android 通知</span></button><button class="icon" data-screen="terminal-ime" aria-label="显示键盘">⌨</button><button class="icon" data-screen="more" aria-label="更多终端操作">•••</button></div><div class="body"><div class="eyebrow">锁屏隐藏敏感信息</div><h1>后台连接已启用</h1><div class="card"><strong>Tabby · 连接保持中</strong><p>2 个活动连接。系统仍可能停止应用。</p><button class="action secondary" data-screen="terminal">返回终端</button><button class="action secondary" data-screen="stopped">停止全部连接</button></div><p>通知只显示通用计数与操作，不显示主机、账号、密码或终端内容。</p><p>点停止将清除重连意图、关闭连接并停止服务，不终止远端 tmux 会话。</p></div></div></div><figcaption><strong>37 · 连接通知示意</strong><br>通用通知提供返回和停止；锁屏不泄露目标。<br><em>设计提案 · 虚构数据</em></figcaption></figure><figure class="tile"><div class="frame"><div class="mobile " data-state="stopped"><div class="status"><button class="identity" data-screen="hosts">连接<span class="">用户已停止</span></button><button class="icon" data-screen="terminal-ime" aria-label="显示键盘">⌨</button><button class="icon" data-screen="more" aria-label="更多终端操作">•••</button></div><div class="body"><h1>连接已停止</h1><p>没有待执行的自动重连。后台服务与连接通知已结束；远端 tmux 进程未被终止。</p><button class="host" data-screen="tmux"><strong>work</strong><span>已停止 · 需手动恢复</span></button><button class="action" data-screen="connect">手动连接 / 恢复</button><button class="action secondary" data-screen="hosts">返回工作台</button></div></div></div><figcaption><strong>39 · 用户停止</strong><br>用户停止清除重连意图；不自动复活，也不杀远端tmux。<br><em>设计提案 · 虚构数据</em></figcaption></figure></div></section><section class="page" id="stages"><div class="kicker">TABBY ANDROID / DESIGN REVIEW / 2026.10.08</div><h2>从评审到可验证功能候选</h2><table><tr><th>阶段</th><th>交付</th><th>退出条件</th></tr><tr><td>D · 本次</td><td>来源、流程、骨架、高保真、点击稿、面积预算、安全与验收矩阵</td><td>关键设计可审阅；所有图明确标注提案；不把浏览器稿当产品截图</td></tr><tr><td>A · 原生基础</td><td>服务拥有SSH连接；通知停止、epoch取消、网络恢复；Keystore存储</td><td>模拟凭据 / 本地隔离fixture验证前后台、队列边界、更新删除与安全失败</td></tr><tr><td>B · 第一批交互</td><td>工作台 / 专注状态行、按需面板、字号、触控与输入器安全降级</td><td>保留已有SSH/tmux语义、主机校验、IME输入租约及所有错误路径</td></tr><tr><td>C · 交付验收</td><td>精确SHA CI、API31–37手机/平板矩阵、ARM64 APK、真实Android截图</td><td>不引用旧207项作为新功能证据；ARM64真机交互由用户另验，不自动安装</td></tr></table><div class="callout">后台服务候选类型 specialUse 是工程推断，须按官方规范说明用途；不能承诺通过应用商店审核。系统杀进程不会持续SSH；远端tmux保留进程也不保证补全失联期间全部输出。</div><p>本次提交仅设计文档与检查，不构建改进版APK。旧已验证PR2与Linux PR3保留；候选不合并、不发布。</p></section><article class="details"><h1>Tabby Android 移动交互设计评审 · 2026-10-08</h1><p><strong>状态：设计方案，等待关键流程与视觉评审；不是产品截图，也不是功能验收。</strong></p><p>先打开 <a href="review.html">review.html</a> 看完整设计包，或下载后打开 <a href="prototype.html">prototype.html</a> 试走流程。两者离线运行；不连接 SSH、不请求系统权限、 不保存输入。所有主机、用户名、终端内容均为虚构示例。</p><p>直接查看：<a href="preview/Tabby-Android-Design-Review.pdf">设计评审 PDF</a>、 <a href="preview/Tabby-Android-Terminal-Design.png">终端与键盘图</a>、 <a href="preview/Tabby-Android-Foldable-Design.png">折叠展开图</a>。 这些是浏览器渲染的原创提案；系统键盘、通知、字号和网格均为示意，不是 Android 截图。 点击稿主要验证流程与面板；字号按钮、输入字段和系统选择柄是状态示意，尚不具备产品行为。</p><p>本阶段只改 <code>docs/design/android-mobile-ux/</code> 与独立设计检查工作流。 应用、原有 Android 工作流及 Linux 配色不变。后续功能候选仍须另行完成编译、 API31–37 模拟器矩阵、精确 SHA CI、ARM64 APK 与真实 Android 截图。</p><h2>基线和证据</h2><p>当前 SHA：<code>ded417ba852295f3ad76bcca4e6e557d1288ca12</code>。 这不代表折叠、中文 IME、触控、后台、安全存储或全部交互已经验收。 本设计不会将该旧证据归到新候选，也不会以浏览器渲染冒充 Android 执行。 Linux draft PR3 的 <code>feature/linux-portable-rocky8-fonts</code> 不在本候选修改范围。 已读 <code>HACKING.md</code>、PR 模板、<code>mobile/README.md</code>、<code>mobile/web/README.md</code>、 原有测试与构建/交付约束。云端执行，不转用户 Mac，不操作真实手机或真实 SSH。</p><ul><li>远端 <code>prototype/android-direct-ssh</code> 与 draft <a href="https://github.com/Mafei/tabby/pull/2">PR2</a></li><li>用户报告该 SHA 在 OPPO Find N6 / Android16 / API36 / ARM64 基本运行。</li><li>PR2 的旧 CI 报告是九个 API31–37 手机/平板配置、207 项运行时用例通过。</li><li>独立候选：<code>candidate/android-mobile-ux-20261008</code>，从上述精确 SHA 建立独立 worktree。</li><li>工作区 <code>.agents</code>、<code>.codex</code> 为空；基线树无 <code>AGENTS.md</code> / <code>.agents/skills</code>。</li></ul><h2>现状中需要解决的具体问题</h2><p>连接表单其实已在登录后隐藏；问题不是把仍存在的表单再藏一次。 现有 <code>app.component.ts</code> 的会话栏、<code>session-pane.component.ts</code> 的顶栏、 辅助键、操作栏、输入条会叠加。顶栏同时放新增、复制、断开，既抢面积也易误触。 <code>styles.css</code> 常用目标为 44 CSS px；还不能据此声明 Android 48dp 合格。 终端固定 <code>14px monospace</code>，UI 根为 <code>15px</code>，没有显式终端字号设置、系统 sp 转换或双指缩放。 <code>MainActivity</code> 已有单一 insets 所有权与 viewport resize，应保留。</p><p>现有触控的可保留基础：点按聚焦；默认本地历史滚动；长按切换冻结的解析文本快照； 系统选择柄；显式鼠标模式；多行粘贴确认；独立、按代际替换的真实 textarea； IME preedit 本地保留到提交。不要为了减少空间破坏这些输入与隔离保护。</p><p>后台不是 CSS 工作：原生 <code>handleOnPause()</code>、Web lifecycle 与 visibility 路径都会关闭连接； 后台停止输出 ACK 也会触发现有 1MiB 背压边界。仅删除关闭调用、给 WebView 加定时器或 加通知均不能交付可靠生命周期。连接所有权、输出订阅和 tmux 恢复需分阶段迁到原生服务。</p><h2>来源与具体取舍</h2><p>研究核实日期：2026-10-08。公开源码的 main/master 不是已发布 APK 验收； 公开截图只用于观察空间关系，不复制商标、代码或私有资产。来源索引与版本见 <a href="sources.json">sources.json</a>。Termux Wiki 访问被拒，已改用第一方公开源码。</p><table><thead><tr><th>样本</th><th>可核实的优秀点</th><th>限制</th><th>我们的取舍</th></tr></thead><tbody><tr><td>Termux 终端与 ViewClient</td><td>点按显示 IME、双指阶梯调字号；选择时抑制冲突；以字体指标计算网格</td><td>本地 Linux 环境不等同 SSH/tmux；其鼠标追踪/alternate-screen 滚动可以发远端键</td><td>采用可读字号、局部手势所有权；默认滚动只回看本地历史，不用长按发远端键</td></tr><tr><td>ConnectBot 公开新版 HostList / Console</td><td>主机与终端分离；主机状态有文字/图标；会话选择器、可收起工具、明确重连与断开</td><td>当前 main 为演进源码；自动隐藏顶栏和全屏截图可能隐藏目标身份</td><td>采用按需工具与单一会话入口；保留最小身份/状态条；不照搬全隐藏或默认音量键绑定</td></tr><tr><td>Termius 官方 Mobile terminal / Workspaces</td><td>终端专注模式、扩展键按需面板；可调字号；标准选择复制；按会话展示状态</td><td>Mobile terminal 文档明确面向 iOS/iPadOS；长按方向、双击 Tab 与选择冲突；云同步/日志超出本任务</td><td>借鉴信息密度，不宣称 Android 已有同样行为；不采用隐形发送手势、AI栏、云凭据或会话日志</td></tr><tr><td>Android 官方 adaptive / accessibility / input / FGS / Keystore</td><td>窗口而非面板像素驱动；sp 与 48dp；IME/insets；用户控制通知和后台；不可导出密钥</td><td>文档不保证 OEM 杀进程、硬件安全等级、Play 审核或中文 IME 可用</td><td>保留现有安全边界，增加可测的平台接线与真实设备验收；不静默更改系统设置</td></tr></tbody></table><p>具体链接：<a href="https://github.com/termux/termux-app/blob/master/terminal-view/src/main/java/com/termux/view/TerminalView.java">Termux TerminalView</a>、 <a href="https://github.com/termux/termux-app/blob/master/app/src/main/java/com/termux/app/terminal/TermuxTerminalViewClient.java">Termux ViewClient</a>、 <a href="https://github.com/connectbot/connectbot/blob/c961b2c36b17bafea5984397c821651b333e612c/app/src/main/java/org/connectbot/ui/screens/console/ConsoleScreen.kt">ConnectBot Console</a>、 <a href="https://github.com/connectbot/connectbot/blob/c961b2c36b17bafea5984397c821651b333e612c/app/src/main/java/org/connectbot/ui/screens/hostlist/HostListScreen.kt">ConnectBot HostList</a>、 <a href="https://docs.termius.com/terminal/mobile-terminal">Termius Mobile terminal</a>、 <a href="https://docs.termius.com/terminal/workspaces">Termius Workspaces</a>。</p><h2>自己的信息架构与视觉语言</h2><p>入口是「连接」工作台：已有主机、活动会话、待恢复会话；新用户直接看到「添加主机 / 快速连接」。 主机代表连接配置；凭据、已验证主机密钥、tmux 会话身份是三个独立对象。 保存主机不会自动保存密码。相同主机的不同账号有不同密码条目。 第一批支持简单本地列表；分组、跨端同步、SFTP、广播输入与多终端分屏暂不加入。</p><p>登录成功进入一个专注终端。单一 48dp 会话状态条显示 <code>会话名 · user@host</code>、连接/只读/鼠标等 必要状态，并提供独立Home、键盘与更多入口；完整身份、端口、指纹在详情中可读。 窄屏标题显示会话位置/总数，点击选择器、左右拖动切相邻会话；宽屏同一顶栏提供可横滚Tab。 保留最多四个独立连接和完整 tmux 身份去重。 系统返回先关闭临时面板/选择，再收起 IME，再返回工作台，不发送 Esc，也不默认停止连接。 连接仍在后台时，工作台和通知均可停止。预测返回接线使用 Android 支持的回调。</p><p>视觉采用沉静的深灰蓝表面、浅色文字、少量薄荷绿操作提示。身份用单行高权重文字； 终端以内容为主，不重复大品牌标题。普通错误用琥珀色，主机校验失败用红色并带明确文字。 接管是危险动作，独立确认；成功、只读、未连接均有文字，不靠颜色。无竞品标志或装饰图片。</p><h2>关键流程</h2><p>连接 → 首次指纹核对 → 认证 → 直接终端或 tmux 列表。拒绝信任/取消不得保存密码。 勾选「更新保存密码」后，只有该目标通过主机校验并认证成功才原子替换。 删除后当前已认证 SSH 可以继续，但同目标内存重连密码清除、待认证/自动重连取消。 恢复核对 host/key/account/UID/socket/server/session 完整身份；不存在/替换即停止。 有客户端时自动恢复暂停；共享、只读、接管为可选项，接管再确认，不自动选择。 激活目标输入租约 → 若用户原来打开键盘则恢复该目标键盘；不复制凭据或 attachment。 用户明确启动服务 → Home/锁屏/展开保留连接能力 → 通知返回或停止全部连接。 等待网络/认证/主机校验/占用/身份失败有各自状态 → 返回 app 处理；普通 SSH 需手动重连新 shell。</p><ul><li>首次连接：新增/快速连接 → host/port/account/auth → 可选保存主机、默认关闭保存密码 →</li><li>密码使用：已保存条目显示「使用此设备保存的密码」，不回填 DOM；「本次改用其他密码」不覆盖旧条目。</li><li>tmux：按所选 socket 列表 → 共享/只读明确选择 → 新建命名仍原子拒绝重名 → 登录终端。</li><li>会话切换：打开选择器 → 点击目标 → 清除旧 composition/修饰键/鼠标手势与未确认粘贴 →</li><li>后台：用户在前台开启「后台保持连接」 → 说明通知用途 → Android13+ 由用户决定通知权限 →</li><li>网络失联：即时禁止输入、保留本地画面且标「已断线」 → 有完整 tmux 身份/可用认证时有限重连 →</li></ul><h2>字号、网格、屏幕和面积预算</h2><p>几何用 dp；UI 文字初值 body16sp、label14sp、title20sp，随系统设置缩放。 终端单独初值16sp，用户范围12–26sp，1sp步进、恢复默认、显示实时列×行；不按窗口宽度自动缩小。 12sp只供用户主动选择，默认仍16sp。双指缩放更改字体与 PTY 网格，不对整屏做 CSS transform。 Android14+ 非线性 sp 转换用 <code>TypedValue.applyDimension</code>，不简单乘 <code>fontScale</code>；WebView CSS px 与 dp 按实际 viewport/density 校准，文字 px 从原生转换后再除 density。控制尺寸不随 sp 缩小。</p><p>Find N6 官方内屏2480×2248、外屏2616×1140是面板像素；不能由 PPI 推导 ColorOS 实际逻辑密度或 app窗口。 下面是假设的<strong>设计窗口</strong>，已排除系统栏/切口，IME高度另列；不声称是 Find N6 实测。 正式验收记录 density、fontScale、原生window/WebView/visualViewport与可见IME/insets，仅数值、不含终端文本。</p><p>计算：<code>cols=floor((W−水平padding−已固定面板)/实测cellW)</code>， <code>rows=floor((H−IME−状态条−常驻快捷键−垂直padding)/实测cellH)</code>。 这里只用16sp、单元9.6×20.8dp、padding每边8dp作估算；xterm真实指标和 <code>stty size</code> 才是验收值。</p><table><thead><tr><th>设计窗口</th><th>IME / 快捷条</th><th>终端矩形高度</th><th>占扣IME后app高度</th><th>占完整安全窗口</th><th>估算列×行</th></tr></thead><tbody><tr><td>窄屏360×800，键盘关</td><td>0 / 0</td><td>752</td><td>94.0%</td><td>94.0%</td><td>35×35</td></tr><tr><td>窄屏360×800，键盘开</td><td>300 / 48</td><td>404</td><td>80.8%</td><td>50.5%</td><td>35×18</td></tr><tr><td>同窗口，隐藏快捷条</td><td>300 / 0</td><td>452</td><td>90.4%</td><td>56.5%</td><td>35×20</td></tr><tr><td>同窗口，暂保留输入条</td><td>300 / 48，加48输入</td><td>356</td><td>71.2%</td><td>44.5%</td><td>35×16</td></tr><tr><td>展开840×900，键盘关</td><td>0 / 0</td><td>852</td><td>94.7%</td><td>94.7%</td><td>85×40</td></tr><tr><td>展开840×900，键盘开</td><td>320 / 48</td><td>484</td><td>83.4%</td><td>53.8%</td><td>85×22</td></tr><tr><td>横屏800×360，键盘开</td><td>180 / 0</td><td>132</td><td>73.3%</td><td>36.7%</td><td>81×5</td></tr></tbody></table><p>不要强塞80列。窄屏按真实网格向PTY报告35列，用户可旋转、展开或主动调字号。 终端UI不重排远端TUI；普通文本由终端/远端按终端宽度处理。默认不增加水平虚拟80列。 UI字号放大到200%时状态条允许增高、面板滚动；不裁掉主机或危险状态以维持表中比例。 此时重新测量，表中48dp高度只适用于默认字号。</p><p>键盘开时默认一行可横滚快捷键（Esc/Tab/Ctrl/Alt、方向、Home/End等），各≥48dp。 固定「全部键」打开分组面板；修饰键状态固定可见，不能为塞满而缩小按钮。 短窗口不足240dp时默认收起快捷条，从状态更多访问；没有键盘时不常驻快捷条。 普通SSH输入默认保留真实textarea；期望将常驻输入条变为光标附近的局部composition编辑器， 但必须先通过实际可见编辑节点、原生焦点/租约与中文IME测试。失败时暂留48dp输入条并报告面积差距， 不得放宽原有输入安全门。高保真图展示期望方案，未宣称该输入改造已通过。</p><p>字体fallback以等宽Latin为主、CJK/emoji为系统fallback。字体加载完成后量cellW/cellH再fit。 CJK宽字符、组合音标、emoji/ZWJ/variation selector由xterm的Unicode宽度提供者处理； 需与远端wcwidth/locale核对，不能用JS字符串长度定位光标。cursorX/Y来自终端buffer， 选择快照使用解析文本，重连/换字体/折叠后重新测量。首批不引入未经验证的自定义字体。</p><h2>触控规则和误触防护</h2><p>优先级：系统返回/IME与系统选择柄 → 安全模态 → 本地选择 → 双指缩放 → 显式鼠标模式 → 本地滚动 → 点击聚焦。 手势所有者一旦确定，其他路径不接收同一串事件；pointercancel、tab变更、背景、重连均释放。 跨到第二根手指时取消长按和远端mouse gesture；在远端鼠标模式中，首批禁用双指缩放并提供字号按钮， 避免第一根手指已发送点击后误称整个双指手势无远端输入。</p><table><thead><tr><th>状态/动作</th><th>行为与可发现入口</th><th>不允许的副作用</th></tr></thead><tbody><tr><td>点按终端</td><td>已连接且可写时聚焦当前真实editor；显示IME。只读可选择输出</td><td>不发送Tab/Enter/鼠标点击；不在断线时缓存按键</td></tr><tr><td>单指纵滑</td><td>默认本地历史；回看出现「回到实时输出」≥48dp浮动入口</td><td>不把滑动变成箭头，不随新输出强拉回底部</td></tr><tr><td>长按</td><td>约500ms且移动不超过系统touch slop后打开冻结文本快照；再用系统选择柄</td><td>不发送远端键；首批仍需两次长按完成系统选词，不冒充直接canvas选择</td></tr><tr><td>快照选择/拖柄</td><td>标「选择快照 · 实时输出继续接收」；系统菜单复制；退出回实时</td><td>不因实时输出移动已选文字；不直接交互TUI；不复制未选择的整屏</td></tr><tr><td>粘贴</td><td>用户触发才读取剪贴板；目标身份+行数确认；多行/CR/控制内容显式确认，取消零字节</td><td>不自动读/执行；保持bracketed paste、ESC清理、128KiB上限、32KiB字节分块与代际校验</td></tr><tr><td>Ctrl/Esc/Tab/方向</td><td>Ctrl单次、可见状态；方向沿用application cursor mode；composition时先完成/取消</td><td>不在切Tab后沿用Ctrl；Tab辅助键是远端补全键，不切会话</td></tr><tr><td>切换应用会话</td><td>窄屏标题滑动/点击列表、宽屏同一顶栏Tab；外接Ctrl+Shift+Tab与Ctrl+Shift+PageUp/Down可配置</td><td>不占用普通Tab/Ctrl+Tab；终端内容区不承担会话切换，避免选择/TUI/系统边缘冲突</td></tr><tr><td>鼠标模式</td><td>用户显式开启且远端报告支持时，「鼠标」状态常可见；切回本地滚动/选择先取消mouse所有权</td><td>只读/断线/模态禁发；本地选择不得向PTY发mouse序列</td></tr><tr><td>大小/折叠/IME变化</td><td>重新量布局、fit、唯一resize；保持服务连接和session身份，取消未提交composition</td><td>不把旧光标坐标用于新网格；不重复扣IME；不在隐藏pane fit成2×1</td></tr></tbody></table><p>双指缩放还提供可访问的A−/A+按钮；滑动、长按均有可点按替代入口。 按钮、选择器行、checkbox整行、关闭面板均至少48dp，危险动作和常用键不相邻。 TalkBack可读主机、会话、只读、失败状态和修饰键；输出阅读用冻结文本模式， 不让持续输出反复抢播。焦点按面板内顺序移动，关闭返回触发入口；外接键盘Tab导航与终端Tab 由当前焦点区域区分。小字文字目标对比≥4.5:1，装饰图标不重复朗读。</p><h2>本轮设计更新 · 会话、Home、快捷键与IME边界</h2><p>用户已要求按讨论优化设计稿；授权范围是设计稿，不是应用UI实现、实际凭据保存或手机安装。 新增 <a href="preview/Tabby-Android-Navigation-Design.png">导航与快捷键图</a>。 原来的09屏编号保留：<code>demo / 工作 / 输入法</code>属于<strong>系统输入法候选词示意</strong>； 其上方的终端快捷键栏才是Tabby自有区域。实际候选内容和皮肤由用户选择的输入法决定， Tabby不控制候选栏。终端光标附近的中文preedit则是当前输入编辑器的本地预编辑状态， 不是系统候选栏，更不能在提交前发送给远端。</p><table><thead><tr><th>会话导航方案</th><th>收益</th><th>代价与取舍</th></tr></thead><tbody><tr><td>推荐窄屏：<code>‹ work 2/3 › ▾</code>，左右滑切相邻会话，点击列表</td><td>单手快速操作，不加高度；第二行保留账号/主机/状态</td><td>需要可发现提示与取消门槛；只让标题中央参与，Home/键盘/更多独立</td></tr><tr><td>推荐宽屏：同一顶栏可横滚Tab，点击选中</td><td>可比较多个名称及只读/断线状态</td><td>拖动仅滚动列表；同一行固定当前账号/主机摘要，避免活动Tab滚出后身份消失</td></tr><tr><td>备选：所有窗口都显示Tab</td><td>规则一致、较可发现</td><td>窄屏扣去动作后拥挤，只能露出少量Tab；可作为偏好，不能缩小文字/目标</td></tr><tr><td>备选：只点击标题打开列表</td><td>无滑动误切，读屏规则简单</td><td>两次点按；提供关闭标题滑动的等价入口，保留会话列表</td></tr></tbody></table><p>保持一条48dp顶栏 + IME上方最多一条48dp快捷栏，默认面积预算不增加一行。 系统大字下允许增高并重算预算；短窗口放不下Tab时回退标题选择器，不缩字。 多会话显示当前位置/总数、下拉与方向提示，首次可撤销地提示「左右滑标题切换，点击查看全部」。 只有一个会话时隐藏方向暗示。左拖下一项、右拖上一项，每次最多一项，首尾不循环； 末端轻回弹并提示已到边界，不切到列表另一端。</p><p>原生实现先用<code>ViewConfiguration.scaledTouchSlop</code>判定移出点击容差，再转换到CSS坐标。 讨论中的初值：横移超过容差，且<code>abs(dx) &gt;= 1.5*abs(dy)</code>才锁定标题横拖； 释放时<code>abs(dx) &gt;= max(48dp,有效标题宽度20%)</code>才切换，不只靠高速短甩。 不足门槛/拖回起点则回弹；一旦超过点击容差，本次不能顺便打开列表。 第二指、pointercancel、失去所有权、Home/返回、模态出现、折叠或输入代际变化都取消。 系统边缘返回区域优先；不修改系统手势排除设置。长按标题不重排、不关闭。 离线点击稿仅以8 CSS px容差模拟，不是Android实际dp/touch slop验收。 官方依据仅是容差和取消语义： <a href="https://developer.android.com/reference/android/view/ViewConfiguration#getScaledTouchSlop(">ViewConfiguration</a>)、 <a href="https://developer.android.com/develop/ui/views/touch-and-input/gestures/viewgroup">事件拦截与ACTION_CANCEL</a>； 48dp/20%/1.5是本方案候选值，待真机调校，不称为Android标准。</p><p>宽屏Tab拖动超过容差只滚动，不选中；默认没有挨着标题的小关闭叉。 关闭/重排放进「管理会话」：独立≥48dp移动前/后和「断开并关闭」确认。 状态变化、收到输出不会重排或抢焦点；断线项留原位置且标「已断线」。 切到断线项只看旧画面及恢复入口，不自动重连/认证。关闭连接取消恢复意图，不杀远端tmux。</p><p>每个会话保留独立buffer、回看锚点/跟随模式、字号、键栏位置与完整身份。 切换不重新连接、重发输入或fit隐藏pane；先取消旧composition、Ctrl/Alt、鼠标手势与待确认粘贴， 再换活动输入租约。已发送输入仍属于原会话；未提交中文预编辑本地取消，不提交到任一目标。 如果以后提供已提交未发送草稿，只在所属连接前台内存保留，切回后明确确认才能发送； 本轮不新增草稿/待发命令队列，更不存磁盘。 可写→可写尽量保持IME打开，租约有效后才聚焦；只读/断线取消聚焦并收起IME， 记录用户键盘意图，回到可写会话后走安全焦点路径恢复。折叠保持连接与意图，只重算布局。</p><p>Home位于顶栏左侧，独立≥48dp目标与「回到连接与会话」标签，不参加标题滑动。 点击取消在途手势/预编辑/修饰键、收起IME再回主页，不关闭SSH、不重置视口， 也不自动开启后台服务。主页显示活跃/待恢复/已停止，可新建连接或返回原终端。 Home直接导航；系统Back先关闭模态/选择/IME，再回主页；二者都不等于断开/通知停止。 信任、接管、粘贴确认中必须先取消操作再Home，不能绕过安全确认。 未保存表单需要留存/放弃提示；原稿面板返回入口保留，独立Home是本轮新增提案。</p><p>快捷键分组：<code>Esc / Tab / Ctrl / Alt</code> → <code>← ↑ ↓ →</code> → <code>Home / End / PgUp / PgDn / Del / Ins</code>；F键从「全部键」进入，常用优先。 这里的Home终端键是远端光标移动，与应用Home入口位置/辅助标签不同。 横拖只找键，点击才触发，pointerdown不发送。超过容差后取消点击，即使拖回原点也不发键； 离开原键、cancel、第二指、切会话/后台/断线也取消。到首尾停住，不循环或切会话。 每键≥48dp，示意常用键56dp，不压窄塞满；边缘渐变/箭头及部分下一键提示可滚动， 部分露出的键先滚到完整可见再点。固定「全部键」≥48dp入口提供可点按分组面板。</p><p>Ctrl/Alt默认单次：点选，下个明确用户终端按键消费后解除；再次点解除。 锁定从「全部键→修饰键→锁定Ctrl/Alt」开启，不用隐藏双击/长按区分滚动。 单次/锁定用文字和颜色共同反馈，并在键栏固定区域显示可点击解除的状态，不能滚出后暗中生效。 锁定只属当前会话，切换、Home、断线、只读、后台时清除。协议应答不消费单次状态； composition时先完成/取消本地预编辑，不把IME内容转成Ctrl/Alt序列。 只读/断线时可回看/滚动键栏，发送/锁定禁用，不排队到重连。 IME收起键栏消失；横屏短窗口默认折叠，从更多访问；展开只增加同一行可见键数，不加第二行。</p><p>TalkBack提供会话列表、上一/下一会话动作、全部键分组和修饰锁定开关，不抢读屏左右滑。 Tab有「名称、主机、只读/断线、第几项、选中」标签；UI里的外接Tab导航， 终端焦点里的Tab仍发补全。关闭面板恢复入口焦点；大字允许重排/滚动。 新增设计检查：标题短拖/回拖/纵拖取消、首尾不循环、每次一项、Home独立； 键栏拖动/cancel零模拟按键，完整按键点击才一次；锁定可见且切会话清除； Tab拖动不选中、点击选中；只读/失联拒绝输入；Home往返保留视口。 原生IME、系统Back/TalkBack、Android触控与PTY零额外输入仍需后续实际验收。</p><h2>SSH密钥现状与可选“设置密钥登录”提案</h2><p>基线<code>ded417ba</code>已经支持密码、私钥文件与交互认证： <a href="https://github.com/Mafei/tabby/blob/ded417ba852295f3ad76bcca4e6e557d1288ca12/mobile/web/src/session-pane.component.ts#L34">表单与口令</a>、 <a href="https://github.com/Mafei/tabby/blob/ded417ba852295f3ad76bcca4e6e557d1288ca12/mobile/android/app/src/main/java/org/tabby/android/prototype/TabbySSHPlugin.kt#L197">原生导入/一次性keyId</a>、 <a href="https://github.com/Mafei/tabby/blob/ded417ba852295f3ad76bcca4e6e557d1288ca12/mobile/android-ssh/src/engine.rs#L1138">私钥认证</a>。 普通/加密OpenSSH文件从系统文档选择器临时读取，不取持久URI授权；私钥限64KiB、 内存最多4份、消费后清零字节，不能宣称JVM/Rust所有复制都安全擦除。 私钥口令临时参与解密；加密KDF有成本限制，不保证接受任何加密文件。 现有fixture覆盖生成的普通/加密Ed25519；RSA代码限制≤8192bit且必须有SHA-2、不退回SHA-1。 其他算法的库代码能力不当成Android已测试支持列表。没有mobile agent或Keystore持久密钥库； 私钥/交互认证恢复需显式重新导入/提供凭据。这些不同于本设计待实施的密码保存。 本次查找未见<code>ssh-copy-id</code>/写<code>authorized_keys</code>的产品路径，不能把密码登录说成自动安装密钥。</p><p>可以设计单独的「设置密钥登录」，但用户此次询问不是服务器写入授权： 密码登录成功并核对主机 → 用户主动选择此操作 → 导入已有私钥并只提取公钥， 或后续另行设计本地生成 → 展示目标host:port、实际账号、已验证主机指纹、公钥算法/指纹 → 明确确认「把此公钥加入该账号」 → 隔离控制通道去重添加 → 新独立连接仅公钥认证验证 → 显示已验证/仅添加待验证/失败，原密码连接保持可用。不发送私钥或口令到服务器。 不同主机/账号逐个确认，不广播。Keystore AES包裹文件与非导出硬件签名密钥是两种架构， 不能将加密存储私钥文件冒称硬件签名；agent转发、密钥持久保存和生成另列后续范围。</p><p>受限账号、只读主目录、定制AuthorizedKeysFile/集中目录或策略不允许写入时停止，交管理员处理； 不sudo、不改sshd设置、不放宽已有目录/文件权限。必要的新用户目录/文件只在普通安全路径核实后 以700/600创建；无法核实所有者、ACL或路径策略时停止，不自动“修复”已有权限。 安装器若未来实现，必须避免符号链接和并发覆盖， 按算法+公钥blob去重，保留已有行及from/command等限制，不能因同key带限制就加一条无限制重复key。 仅在有权限且状态可核实的常规用户目录追加必要内容，不能替换整个文件。 验证失败不是安装未发生；超时可能结果不确定。回滚只能在重新核对文件版本与精确新增条目后， 由用户确认删除本次新增行，绝不删已有key；无法证明所有权/并发状态时保持并报告，不盲目回滚。 提供“复制公钥供管理员安装”备选。新连接必须再次校验原主机身份，仅认证验证不等于允许PTY： 受forced-command或MFA限制时分别显示公钥已接受/仍需认证/终端受限，不能用通用成功掩盖限制。 尚需决定支持的算法实测范围、生成/持久保存架构与服务器策略。 这次只有设计流程和虚构指纹，没有生成真实密钥、输入真实凭据或操作任何SSH服务器。</p><p>用户已新增“允许时自动生成SSH key并完成公钥安装”的产品设计需求。推荐入口为 「密码登录成功 → 设置密钥登录」，默认不生成；确认生成与确认服务器安装分开。 界面可串联执行生成/安全保存/添加/验证，但每个目标均需明确确认，不因用户允许生成就允许所有服务器写入。 生成失败、Keystore不可用或存储写失败不降级明文，也不上传临时私钥； 安装失败仍保留已有本地密钥和密码登录，显示“仅在此设备生成，未确认服务器安装”。</p><p>默认每个已验证host:port/account使用独立设备密钥，名称如“此设备 · 实验环境 · demo”； Keystore alias使用随机内部ID，不带主机/账号。多主机共用同一key作为显式选项， 逐个确认目标、分别记录添加与公钥认证验证结果，删除/轮换前展示关联目标，禁止静默广播安装。 设备管理区列出公钥指纹、创建时间、关联目标与验证状态；不会把公钥备注当成身份校验。</p><p>首批候选是经过测试的SSH库本地软件生成Ed25519，再以Keystore AES-GCM密钥包裹OpenSSH私钥， 密文进入noBackupFilesDir并排除云备份/设备迁移；只有原生认证路径临时解密，网页仅持keyId与公钥信息。 这不等于Ed25519私钥始终不可导出或硬件签名，不能声称所有设备支持此算法的Keystore/StrongBox签名。 若未来选择原生非导出RSA/EC签名路径，需另外实现SSH公钥序列化与签名适配、验证具体设备及算法； OpenSSH私钥文件不能直接冒充Keystore签名句柄。 服务器/FIPS策略不接受候选算法时明确报错，用户选择经测试的替代算法或管理员指定密钥，不自动降级。 依据：<a href="https://developer.android.com/reference/android/security/keystore/KeyProperties">Android KeyProperties</a>、 <a href="https://developer.android.com/privacy-and-security/keystore">Keystore</a>、 <a href="https://man.openbsd.org/ssh-keygen.1">OpenSSH ssh-keygen</a>。</p><p>无自动云同步、默认不导出私钥。只导出公钥是低风险安装入口； 私钥手动导出另经明确确认，候选格式为用户口令保护的OpenSSH文件，提示复制文件会扩大凭据暴露面， 不能把仅此设备能解密的Keystore密文当作可迁移备份。重装/密钥丢失会使加密私钥不可用， 需保留密码或管理员备用登录方式；本任务不接收任何实际备份、口令或密钥。 删除本地key清除同目标内存认证与重连意图，不自动删除远端authorized_keys； 远端仍有公钥需另行逐目标确认撤销。当前已认证SSH是否断开由用户另选。 轮换为先生成/安装/新连接验证，再明确移除旧授权，失败保持旧访问。取消首次安装不会清空已有密钥。 待最终决策：默认独立key策略、算法兼容实测范围、是否首批提供私钥导出、交互式解锁与后台重连的取舍。</p><h2>后台、安全和状态文案</h2><p>第一批后台目标是「本次用户启动的SSH会话尽量保持」。建议独立原生service拥有transport/generation/worker， Activity/plugin只订阅、发送带owner+generation的用户动作。后台不依赖WebView timer。 已验证连接可在后台继续；首次信任、密码提示、键盘交互、接管都暂停到前台。 启动时核实app可见并及时进入foreground，失败清理资源且UI显示「后台保持未开启，连接仅在前台使用」。</p><p>前台服务类型选择 <code>specialUse</code> 并写明用户发起的交互式SSH持续会话；这是对官方类型定义的工程判断， 尚不是Play批准。SSH不冒充聊天、媒体或三分钟任务；不以新增CHANGE_NETWORK_STATE权限凑类型。 Android15+ dataSync有六小时后台上限，不用于伪装无限终端。 通知默认隐去锁屏主机/账户细节，显示「Tabby · 2个连接」「返回」「停止全部连接」。 本产品选择可见通知作为后台开关的前提；Android13拒绝通知并非系统禁止FGS，文案必须区分这个产品选择。 权限仅在用户开启时请求，拒绝后提供前台模式；不改省电、安全、ADB授权或持久文件权限。</p><p>服务 <code>START_NOT_STICKY</code>，无boot receiver/自动重启/周期任务。通知停止立即增加epoch、取消重连、 关闭所有transport、清除内存凭据/输出并stopSelf；tmux服务器上的会话不被kill。 系统Active apps停止整个进程可能无回调；重新打开只显示可恢复入口，不自动连接。 划掉任务与配置重建分别测试；后台开关开时任务划除可保留服务，关闭时清理。 锁屏/Doze/OEM可能暂停网络或终止进程，没有永久wake lock或不断线承诺。</p><p>原生输出只保留有界内存序列队列，延续1MiB背压；前台按parse→ACK确认。 后台高输出填满队列时明确关闭并标「输出积压，等待返回后恢复」，不丢原始VT字节、不写日志文件； tmux可在返回后新PTY显示远端当前画面，但缺失的本地历史不能假装完整。 自动恢复有限退避（1/2/4/8/16/30秒，最多6次约1分钟，网络离线时等待并设总期限），用户可随时停止。 初始建议整个恢复窗口不超过120秒，离线等待也计入；后续实现需单调时钟和可控时钟测试证明期限。 网络回调只是信号，不当作SSH成功；恢复再核对完整身份，不重放命令、create或takeover。 后台若需安全确认/认证立即暂停，通知「需要返回应用处理」。普通SSH断线仅手动重连，提示新shell。</p><p>密码默认不保存，仅支持此设备。原生Keystore AES-256-GCM、随机nonce、版本化封装， AAD绑定规范host+port+case-sensitive account+已验证主机公钥摘要；密文存 <code>noBackupFilesDir</code>， 结合已有allowBackup=false和明确cloud/device-transfer排除规则。 Keystore不可用、密钥丢失、篡改、写失败均禁止明文降级，原子更新失败保留旧密文。 alias不含用户名；秘密不进入localStorage、saved tmux身份、Intent extras、日志、崩溃报告、Git或artifact。 保存条目在native内解密并响应认证，不把已有密码回传DOM；真正保存发生在对应host校验和认证成功之后。 当前输入不可避免暂经Web表单/JVM/Rust内存，清零仅best effort，不宣称无复制或flash安全擦除。 第一批不要求生物认证密钥以免自动恢复不可用；不声称所有设备为StrongBox。</p><table><thead><tr><th>状态</th><th>最小常可见文案</th><th>下一步</th></tr></thead><tbody><tr><td>已连接</td><td><code>work · demo@lab.example · 已连接</code></td><td>点击身份详情/会话切换</td></tr><tr><td>只读</td><td><code>work · 只读</code> + host身份</td><td>输入/粘贴/鼠标禁用，仍可复制</td></tr><tr><td>回看/选择</td><td><code>回看历史</code> / <code>选择快照</code></td><td>回到实时输出/结束选择</td></tr><tr><td>失联重试</td><td><code>已断线 · 8秒后重连</code>，旧输出保留</td><td>停止重连/详情；输入禁用</td></tr><tr><td>无网</td><td><code>等待网络 · 已断线</code></td><td>有限等待或停止，不排队输入</td></tr><tr><td>主机密钥变化</td><td><code>主机密钥已变化 · 已拒绝</code></td><td>核实身份；不能点一次忽略</td></tr><tr><td>认证失败</td><td><code>登录失败 · 更新密码后重试</code></td><td>不无休止尝试旧密码；存储不自动覆盖</td></tr><tr><td>会话不存在/替换</td><td><code>原会话不存在 · 恢复已停止</code></td><td>改选会话或明确新建，不隐式创建</td></tr><tr><td>被占用</td><td><code>已有客户端 · 自动恢复暂停</code></td><td>共享/只读/经二次确认接管</td></tr><tr><td>用户停止</td><td><code>已停止连接</code></td><td>手动连接；旧重试不得复活</td></tr><tr><td>存储失败</td><td><code>未保存密码 · 本次连接可继续</code></td><td>重试保存/删除条目；无明文降级</td></tr></tbody></table><p>异常不只吐瞬时toast。状态条承载最小摘要，详细原因/操作面板保留到用户处理； 主机校验失败、接管和多行粘贴为阻断模态。窄屏模态可滚动，取消与确认始终可达。</p><h2>实际验收矩阵与分阶段方案</h2><table><thead><tr><th>层</th><th>窗口/平台</th><th>必测流程</th><th>证据/限制</th></tr></thead><tbody><tr><td>设计浏览器</td><td>360×800、420×900、840×900、800×360；触摸与键盘</td><td>全部方案屏、面板、字号预算、无外部资源/存储、48px设计目标与对比</td><td>HTML渲染/点击记录，不等于Android dp/IME/SSH</td></tr><tr><td>Web回归</td><td>原56案例 + 新状态/字号/手势；1.0/1.3/2.0文字设置</td><td>原preedit与ACK安全、重复/缺失tmux、代际、暂停恢复、组合输入与mouse仲裁</td><td>production AOT +测试桥，保存synthetic标记</td></tr><tr><td>Kotlin/Rust/真实loopback</td><td>测试账户、生成密钥、真实tmux</td><td>背景所有权、cancel/stop race、未知/改变host失败、vault更新/删除/篡改/不可用</td><td>不用真实用户账号；不上传fixture密钥/元数据</td></tr><tr><td>Android矩阵</td><td>API31 phone、32 tablet、33 phone、34 tablet、35 phone、36 phone/tablet、37 phone/tablet</td><td>保留旧207必测；Home/恢复/停止、网络失联、permission grant/deny/revoke、Keystore与output上限、IME/insets/rotate、截图</td><td>x86_64执行；ARM64库与公共payload绑定，不能声称ARM64设备交互验收</td></tr><tr><td>可访问性</td><td>API34+默认与200%；TalkBack/外接键盘</td><td>触摸范围dp、读屏焦点、文本不裁、只读/危险状态、A+/A−替代缩放</td><td>在一次性模拟器配置；不改真实设备设置</td></tr><tr><td>Find N6后续人工</td><td>外屏/内屏、展开中、横竖屏、系统IME/指定中文IME、display/font配置</td><td>输入和选柄、键盘、density度量、网络切换、锁屏/后台、服务停止、APK升级签名</td><td>用户自行安装测试；明确目前仅基本运行已报告</td></tr></tbody></table><p>网络切换先用loopback故障注入验证旧socket失效、有限重连和新socket身份；这不能冒充实际Wi-Fi→蜂窝。 一次性模拟器可测试app离线/系统模拟网络；Find N6真实网络切换留用户操作验收。 取消粘贴/信任/接管、只读、mouse本地选择和停止后重试要求PTY观察到零额外输入。 密码新增/更新/删除后重启app验证；认证失败不能覆盖旧密码；hostkey变化必须在密码发送前拒绝。</p><p>阶段D（本次）：源码和第一方研究、关键流程/线框/高保真/可点按方案/面积与状态预算、独立draft设计PR。 提交用户评审；不把图当成功能完成。</p><p>阶段S：在独立候选上实现Keystore存储与原生service基础，最小开关/通知权限说明。 先原生/JVM/loopback+Android新用例；保持旧UI行为直到安全接线通过。</p><p>阶段U1（评审后）：连接工作台、tmux列表和专注终端单一状态条；会话/方向/更多面板、字号设置； 先保留textarea安全门。先360dp+IME验证，再展开/横屏；失败保留明确降级输入条。</p><p>阶段U2：中文IME局部composition编辑器、双指缩放、历史锚点、鼠标仲裁与系统选柄深入验收； 可选固定侧栏与更多键布局在可读网格预算下启用，不默认分屏。</p><p>阶段V：精确提交SHA重跑旧九行与新测试；审计APK权限/ABI/签名/源码绑定； 提供ARM64 APK、checksum、真实模拟器截图和报告，用户自行安装验收。 禁止merge/release/store/自动安装真实手机。旧ded417ba候选一直保留。</p><p>评审重点：专注终端的单条身份布局；16sp初值与窄屏35列取舍；快捷条是否默认随IME显示； 第一批保留冻结快照的两次长按；后台默认关闭/通知前提；保存密码仅成功认证后提交。</p><h2>复现设计包</h2><p>``<code>sh python3 docs/design/android-mobile-ux/build.py python3 docs/design/android-mobile-ux/validate.py </code>``</p><p><code>build.py</code> 只生成设计HTML；<code>validate.py</code> 验证计划来源、预算、对比、设计文件边界。 <code>render.py</code> 用已安装的Playwright与Chromium渲染/点按方案，导出PDF、PNG和设计执行报告到 <code>evidence/</code>（Git忽略）。不下载浏览器、不操作Android设备，不执行真实认证。</p></article></main></body></html>

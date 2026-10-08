@@ -1,0 +1,234 @@
+{
+  "hosts": {
+    "label": "01 · 连接工作台",
+    "note": "工作台保留连接入口；登录后不常驻主机表单。"
+  },
+  "connect": {
+    "label": "02 · 首次连接",
+    "note": ""
+  },
+  "trust": {
+    "label": "03 · 首次主机校验",
+    "note": ""
+  },
+  "tmux": {
+    "label": "04 · tmux 列表",
+    "note": ""
+  },
+  "new-session": {
+    "label": "05 · 新建会话",
+    "note": ""
+  },
+  "occupied": {
+    "label": "06 · 已被使用",
+    "note": ""
+  },
+  "takeover": {
+    "label": "07 · 显式接管",
+    "note": ""
+  },
+  "terminal": {
+    "label": "08 · 专注终端 · 键盘关",
+    "note": "本轮提案：Home独立；标题1/3位置与点击列表；滑标题才切会话。"
+  },
+  "terminal-ime": {
+    "label": "09 · 专注终端 · 键盘开",
+    "note": "09保留：薄荷边界上方是Tabby快捷键；demo/工作/输入法属于系统IME候选示意。"
+  },
+  "sessions": {
+    "label": "10 · 切换会话",
+    "note": ""
+  },
+  "directions": {
+    "label": "11 · 方向键面板",
+    "note": ""
+  },
+  "more": {
+    "label": "12 · 按需操作",
+    "note": ""
+  },
+  "font": {
+    "label": "13 · 终端字号",
+    "note": ""
+  },
+  "fold": {
+    "label": "14 · 展开 · 专注终端",
+    "note": "同一48dp顶栏显示Tab；Tab拖动只滚动，点击选中；当前身份摘要固定可见。"
+  },
+  "fold-ime": {
+    "label": "15 · 展开 · 键盘开",
+    "note": "同一行显示更多快捷键，不加第二行。系统IME独立于Tabby。"
+  },
+  "fold-panel": {
+    "label": "16 · 展开 · 可选会话面板",
+    "note": "Home与同栏Tab保留；用户主动面板占240dp，不靠缩字号补列数。"
+  },
+  "landscape": {
+    "label": "17 · 横屏短窗口",
+    "note": "短窗口使用标题选择器与Home；默认折叠快捷条。800×360、IME180是假设，终端132dp预算。"
+  },
+  "selection": {
+    "label": "18 · 文本选择",
+    "note": "第一批保留冻结解析文本与系统选择柄的两阶段行为，待真机验证后再简化。"
+  },
+  "history": {
+    "label": "19 · 回看历史",
+    "note": ""
+  },
+  "paste": {
+    "label": "20 · 多行粘贴确认",
+    "note": ""
+  },
+  "readonly": {
+    "label": "21 · 只读会话",
+    "note": "允许回看、选择和复制；键盘、粘贴、快捷键和鼠标均不得发送远端输入。"
+  },
+  "mouse": {
+    "label": "22 · 显式鼠标模式",
+    "note": ""
+  },
+  "mouse-active": {
+    "label": "23 · 鼠标模式活动",
+    "note": "初批在鼠标模式关闭双指缩放，避免第一指提前发送远端输入。"
+  },
+  "offline": {
+    "label": "24 · 等待网络",
+    "note": ""
+  },
+  "offline-details": {
+    "label": "25 · 恢复详情",
+    "note": ""
+  },
+  "changed": {
+    "label": "26 · 主机密钥变化",
+    "note": ""
+  },
+  "missing": {
+    "label": "27 · 恢复目标不存在",
+    "note": ""
+  },
+  "collision": {
+    "label": "28 · 新建重名失败",
+    "note": ""
+  },
+  "credentials": {
+    "label": "29 · 本地凭据",
+    "note": ""
+  },
+  "update-password": {
+    "label": "30 · 更新密码",
+    "note": ""
+  },
+  "update-failed": {
+    "label": "31 · 更新认证失败",
+    "note": ""
+  },
+  "delete-password": {
+    "label": "32 · 删除密码确认",
+    "note": ""
+  },
+  "deleted": {
+    "label": "33 · 密码已删除",
+    "note": ""
+  },
+  "background": {
+    "label": "34 · 后台连接说明",
+    "note": ""
+  },
+  "permission": {
+    "label": "35 · 通知权限解释",
+    "note": ""
+  },
+  "permission-denied": {
+    "label": "36 · 通知权限拒绝",
+    "note": ""
+  },
+  "notification": {
+    "label": "37 · 连接通知示意",
+    "note": ""
+  },
+  "disconnect": {
+    "label": "38 · 断开当前连接",
+    "note": ""
+  },
+  "stopped": {
+    "label": "39 · 用户停止",
+    "note": ""
+  },
+  "navigation-phone": {
+    "label": "40 · 窄屏会话导航",
+    "note": "浏览器手势模拟：没有远端输入；门槛为设计候选，原生验收未完成。"
+  },
+  "navigation-ime": {
+    "label": "41 · 标题与键栏各自横滑",
+    "note": "浏览器手势模拟：没有远端输入；门槛为设计候选，原生验收未完成。"
+  },
+  "navigation-first": {
+    "label": "42 · 首项 · 只读",
+    "note": "浏览器手势模拟：没有远端输入；门槛为设计候选，原生验收未完成。"
+  },
+  "navigation-last": {
+    "label": "43 · 末项 · 已断线",
+    "note": "浏览器手势模拟：没有远端输入；门槛为设计候选，原生验收未完成。"
+  },
+  "navigation-locked": {
+    "label": "44 · Ctrl锁定可见",
+    "note": "浏览器手势模拟：没有远端输入；门槛为设计候选，原生验收未完成。"
+  },
+  "navigation-wide": {
+    "label": "45 · 宽屏同栏Tab",
+    "note": ""
+  },
+  "navigation-sessions": {
+    "label": "46 · 全部会话",
+    "note": ""
+  },
+  "navigation-home": {
+    "label": "47 · Home回连接与会话",
+    "note": ""
+  },
+  "navigation-manage": {
+    "label": "48 · 独立管理入口",
+    "note": ""
+  },
+  "navigation-all-keys": {
+    "label": "49 · 全部键与修饰键",
+    "note": ""
+  },
+  "key-generate": {
+    "label": "50 · 用户允许生成密钥",
+    "note": ""
+  },
+  "key-install": {
+    "label": "51 · 确认安装公钥",
+    "note": ""
+  },
+  "key-verified": {
+    "label": "52 · 新连接验证结果",
+    "note": ""
+  },
+  "key-import": {
+    "label": "53 · 现有私钥导入能力",
+    "note": ""
+  },
+  "key-settings": {
+    "label": "54 · 本地SSH密钥管理",
+    "note": ""
+  },
+  "key-delete": {
+    "label": "55 · 删除本地密钥",
+    "note": ""
+  },
+  "key-export": {
+    "label": "56 · 私钥导出风险",
+    "note": ""
+  },
+  "key-restricted": {
+    "label": "57 · 安装受限或无法验证",
+    "note": ""
+  },
+  "key-generation-failed": {
+    "label": "58 · 安全保存失败",
+    "note": ""
+  }
+}
