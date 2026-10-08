@@ -137,6 +137,14 @@ export class TestBridge implements SSHBridge {
     async setActiveTab(options: { ownerId: string, epoch: number }): Promise<void> { this.activeLeases.push(options) }
     async showKeyboard(options: { connectionId: string, generation: number }): Promise<void> { this.keyboardRequests.push(options) }
     async hideKeyboard(): Promise<void> {}
+    backgroundEnabled = false
+    savedPassword = false
+    deletedPasswords: unknown[] = []
+    async leaveApp(): Promise<void> {}
+    async backgroundState() { return { enabled: this.backgroundEnabled, notificationsAllowed: true } }
+    async setBackground(options: { enabled: boolean }) { this.backgroundEnabled = options.enabled; return { enabled: options.enabled } }
+    async credentialStatus() { return { saved: this.savedPassword } }
+    async deletePassword(options: unknown) { this.deletedPasswords.push(options); this.savedPassword = false }
     async getViewport() { return { visible: false, height: 0, viewportWidth: innerWidth, viewportHeight: innerHeight } }
 }
 
@@ -146,7 +154,7 @@ window.attackMarker = []
 const nativeListeners = new Map<string, { remove: () => Promise<void> }>()
 let callbackSequence = 0
 const methods = ['start', 'command', 'close', 'writeClipboard', 'readClipboard', 'selectPrivateKey',
-    'discardPrivateKey', 'cancelPrivateKeySelection', 'setActiveTab', 'showKeyboard', 'hideKeyboard', 'getViewport', 'removeListener']
+    'discardPrivateKey', 'cancelPrivateKeySelection', 'setActiveTab', 'showKeyboard', 'hideKeyboard', 'getViewport', 'backgroundState', 'backAction', 'leaveApp', 'setBackground', 'credentialStatus', 'deletePassword', 'removeListener']
 ;(window as unknown as { Capacitor: unknown }).Capacitor = {
     PluginHeaders: [{ name: 'TabbySSH', methods: [
         ...methods.map(name => ({ name, rtype: 'promise' })), { name: 'addListener', rtype: 'callback' },

@@ -1,5 +1,10 @@
 package org.tabby.android.prototype
 
+import android.Manifest
+import android.os.Build
+import com.getcapacitor.PermissionState
+import com.getcapacitor.annotation.Permission
+import com.getcapacitor.annotation.PermissionCallback
 import android.app.Activity
 import android.content.ClipData
 import android.content.ClipboardManager
@@ -29,23 +34,8 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
 
-@CapacitorPlugin(name = "TabbySSH")
+@CapacitorPlugin(name = "TabbySSH", permissions = [Permission(alias = "notifications", strings = [Manifest.permission.POST_NOTIFICATIONS])])
 class TabbySSHPlugin : Plugin() {
-    private data class Session(
-        val id: Long,
-        val endpoint: String,
-        val host: String,
-        val port: Int,
-        val username: String,
-        val ownerId: String?,
-        val gate: ConnectionGate,
-        val operations: SessionOperations,
-        val hostKeys: MutableMap<String, String> = ConcurrentHashMap(),
-        val batchPending: AtomicBoolean = AtomicBoolean(false),
-        val outputWindow: OutputWindow = OutputWindow(),
-        @Volatile var verifiedHostKey: String? = null,
-    )
-
     private class Selection(val call: PluginCall, val scope: PickerScope) {
         val cancelled = AtomicBoolean(false)
         val settled = AtomicBoolean(false)
@@ -53,13 +43,14 @@ class TabbySSHPlugin : Plugin() {
     }
     private data class SelectedDocument(val selection: Selection, val uri: Uri)
 
-    private val sessions = ConcurrentHashMap<Long, Session>()
-    private val sessionLock = Any()
+    private lateinit var runtime: SSHRuntime
+    private val sessions get() = runtime.sessions
+    private val sessionLock get() = runtime.sessionLock
     private val keyboardLease = KeyboardLease()
-    private val privateKeys = PrivateKeyVault()
-    private val worker = Executors.newSingleThreadScheduledExecutor()
+    private val privateKeys get() = runtime.privateKeys
     @Volatile private var foreground = true
     @Volatile private var destroyed = false
+    @Volatile private var notificationPermissionPending = false
     private val pickerPending = AtomicBoolean(false)
     private val selectionLock = Any()
     private val selection = AtomicReference<Selection?>()
@@ -89,29 +80,18 @@ class TabbySSHPlugin : Plugin() {
         )
     }
     private var lastViewport = ""
-    private lateinit var hostKeyStore: HostKeyStore
-    private lateinit var hostKeyPolicy: HostKeyPolicy
-
     override fun load() {
-        val prefs = context.getSharedPreferences("ssh_public_host_keys_v1", Context.MODE_PRIVATE)
-        hostKeyStore = DurableHostKeyStore(object : PublicKeyPreferences {
-            private fun key(endpoint: String) = MessageDigest.getInstance("SHA-256")
-                .digest(endpoint.toByteArray(Charsets.UTF_8)).joinToString("") { "%02x".format(it) }
-            override fun get(endpoint: String): String? = prefs.getString(key(endpoint), null)
-            override fun putAndCommit(endpoint: String, key: String): Boolean =
-                prefs.edit().putString(this.key(endpoint), key).commit()
-            override fun removeAndCommit(endpoint: String) {
-                prefs.edit().remove(key(endpoint)).commit()
-            }
-        })
-        hostKeyPolicy = HostKeyPolicy(hostKeyStore)
-        worker.scheduleWithFixedDelay({ pollEvents() }, 0, 16, TimeUnit.MILLISECONDS)
+        runtime = SSHRuntime.get(context)
+        // A recreated WebView has no matching parser buffer. Retain the remote tmux,
+        // but do not silently attach old byte streams to new DOM generations.
+        if (runtime.sessions.isNotEmpty()) runtime.closeAll("view_recreated")
+        runtime.attach { event -> notifyListeners("sshEvent", JSObject.fromJSONObject(event)) }
     }
 
     @PluginMethod
     fun start(call: PluginCall) {
         var allocatedId: Long? = null
-        var allocatedSession: Session? = null
+        var allocatedSession: SSHRuntime.Session? = null
         try {
             require(foreground && !destroyed) { "background" }
             val host = call.getString("host")?.trim() ?: error("host")
@@ -141,12 +121,12 @@ class TabbySSHPlugin : Plugin() {
                 .put("generation", generation).put("authMode", authMode)
                 .put("cols", cols).put("rows", rows).put("term", "xterm-256color")
                 .put("deferTerminal", deferTerminal)
-            hostKeyStore.read(endpoint)?.let { options.put("expectedHostKey", it) }
+            runtime.knownHost(endpoint)?.let { options.put("expectedHostKey", it) }
             val session = synchronized(sessionLock) {
                 require(foreground && !destroyed && sessions.size < 4)
                 val id = NativeSSH.start(options.toString())
                 allocatedId = id
-                Session(id, endpoint, host, port, username, ownerId, ConnectionGate(generation), SessionOperations(deferTerminal)).also {
+                SSHRuntime.Session(id, endpoint, host, port, username, ownerId, ConnectionGate(generation), SessionOperations(deferTerminal)).also {
                     allocatedSession = it
                     sessions[id] = it
                 }
@@ -156,6 +136,8 @@ class TabbySSHPlugin : Plugin() {
                 call.reject("The app is in the background", "BACKGROUND")
                 return
             }
+            runtime.connectionAdded()
+            ConnectionService.connectionsChanged(context, sessions.size)
             call.resolve(JSObject().put("connectionId", session.id.toString()))
         } catch (_: Throwable) {
             val session = allocatedSession
@@ -173,11 +155,11 @@ class TabbySSHPlugin : Plugin() {
     @PluginMethod
     fun command(call: PluginCall) {
         val command = call.getObject("command")
-        var reserved: Pair<Session, Long>? = null
+        var reserved: Pair<SSHRuntime.Session, Long>? = null
         try {
             val id = call.getString("connectionId")?.toLongOrNull() ?: error("id")
             val session = sessions[id] ?: error("closed")
-            require(session.gate.isActive() && foreground && !destroyed)
+            require(session.gate.isActive() && !destroyed && (foreground || command?.optString("type") == "outputAck"))
             val input = command ?: error("command")
             val type = input.optString("type")
             if (type in setOf("exec", "execCancel", "openTerminal", "outputAck")) require(input.has("generation"))
@@ -189,7 +171,8 @@ class TabbySSHPlugin : Plugin() {
                     val requestId = input.get("requestId").toString()
                     require(session.gate.take(requestId, "hostKey", generation))
                     val key = session.hostKeys.remove(requestId) ?: error("request")
-                    val accepted = input.optBoolean("accept", false) && hostKeyPolicy.approve(session.endpoint, key)
+                    val accepted = input.optBoolean("accept", false) && runtime.approve(session.endpoint, key)
+                    if (accepted) session.approvedHostKey = key
                     output.put("requestId", requestId.toLong()).put("accept", accepted)
                 }
                 "authResponse" -> {
@@ -201,6 +184,17 @@ class TabbySSHPlugin : Plugin() {
                     }
                     if (input.has("keyId")) {
                         privateKeys.consumeText(input.getString("keyId") ?: error("key")) { output.put("privateKey", it) }
+                    }
+                    if (input.optBoolean("useSavedPassword", false)) {
+                        require(!input.has("password"))
+                        val key = session.verifiedHostKey ?: error("unverified")
+                        val bytes = runtime.secrets.get(session.host, session.port, session.username, key) ?: error("missing")
+                        try { output.put("password", String(bytes, Charsets.UTF_8)) } finally { bytes.fill(0) }
+                    }
+                    if (input.optBoolean("savePassword", false)) {
+                        require(output.has("password") && session.verifiedHostKey != null)
+                        session.pendingPassword?.fill(0)
+                        session.pendingPassword = output.getString("password").toByteArray(Charsets.UTF_8)
                     }
                     // Do not accept raw key content from Web code; the SAF picker
                     // owns import and the key remains in this process only.
@@ -253,7 +247,7 @@ class TabbySSHPlugin : Plugin() {
                 }
                 else -> error("unsupported")
             }
-            NativeSSH.command(id, output.toString())
+            try { NativeSSH.command(id, output.toString()) } finally { for (field in listOf("password", "passphrase", "responses", "privateKey")) output.remove(field) }
             // Once native accepts a reservation, a response-delivery failure
             // must not erase it before its eventual completion event arrives.
             reserved = null
@@ -275,164 +269,8 @@ class TabbySSHPlugin : Plugin() {
         call.resolve()
     }
 
-    private fun pollEvents() {
-        for (session in sessions.values) {
-            if (!session.gate.isActive() || !session.outputWindow.canPoll() || !session.batchPending.compareAndSet(false, true)) continue
-            try {
-                val batch = JSONArray(NativeSSH.poll(session.id))
-                activity.runOnUiThread {
-                    try {
-                        for (index in 0 until batch.length()) {
-                            if (!session.gate.isActive()) break
-                            val event = batch.getJSONObject(index)
-                            if (event.optLong("generation", -1) != session.gate.generation) continue
-                            event.put("connectionId", session.id.toString())
-                            session.ownerId?.let { event.put("ownerId", it) }
-                            processEvent(session, event)
-                        }
-                    } catch (_: Throwable) {
-                        if (session.gate.isActive()) {
-                            emitFailure(session, "native_bridge_error")
-                            closeSession(session, "native_bridge_error")
-                        }
-                    } finally {
-                        session.batchPending.set(false)
-                    }
-                }
-            } catch (_: Throwable) {
-                session.batchPending.set(false)
-                if (session.gate.isActive()) {
-                    emitFailure(session, "native_bridge_error")
-                    closeSession(session, "native_bridge_error")
-                }
-            }
-        }
-    }
-
-    private fun processEvent(session: Session, event: JSONObject) {
-        when (event.optString("type")) {
-            "hostKey" -> {
-                val key = event.getString("keyBase64")
-                val decision = hostKeyPolicy.inspect(session.endpoint, key)
-                if (event.optString("status") == "known") {
-                    // Rust emits this only after matching the handshake against
-                    // the native store's expectedHostKey. It needs no response.
-                    require(decision == HostKeyDecision.ACCEPT)
-                    val previous = session.verifiedHostKey
-                    require(previous == null || previous == key)
-                    session.verifiedHostKey = key
-                    emit(session, event)
-                    return
-                }
-                val requestId = event.get("requestId").toString()
-                when (decision) {
-                    HostKeyDecision.ACCEPT -> {
-                        // Deferred authentication waits for Rust's accepted-key
-                        // marker, rather than presenting a saved pin as proof.
-                        if (!session.operations.deferredTerminal) {
-                            event.put("status", "known")
-                            emit(session, event)
-                        }
-                        NativeSSH.command(session.id, JSONObject()
-                            .put("type", "hostKeyResponse").put("requestId", requestId.toLong())
-                            .put("generation", session.gate.generation).put("accept", true).toString())
-                    }
-                    HostKeyDecision.REJECT_CHANGED -> {
-                        emitFailure(session, "host_key_changed")
-                        closeSession(session, "host_key_changed")
-                    }
-                    HostKeyDecision.ASK -> {
-                        require(session.gate.register(requestId, "hostKey"))
-                        session.hostKeys[requestId] = key
-                        event.put("status", "unknown")
-                        emit(session, event)
-                    }
-                }
-            }
-            "auth" -> {
-                require(session.gate.register(event.get("requestId").toString(), "auth"))
-                emit(session, event)
-            }
-            "data", "execData" -> {
-                // Even cancelled/unknown exec output must be delivered and ACKed;
-                // dropping it here could stall this transport's shared queue.
-                event.put("sequence", session.outputWindow.reserve(event.getString("data").length))
-                emit(session, event)
-            }
-            "execExit", "execError" -> {
-                val requestId = BridgeNumbers.integer(event.opt("requestId"), 1, BridgeNumbers.MAX_SAFE_INTEGER)
-                if (event.optString("type") == "execExit") {
-                    require(event.opt("complete") == true)
-                    BridgeNumbers.integer(event.opt("exitStatus"), 0, 4_294_967_295L)
-                } else require(event.opt("complete") == false)
-                session.operations.completeExec(requestId)
-                emit(session, event)
-            }
-            "terminalError" -> {
-                session.operations.terminalFailed(BridgeNumbers.integer(event.opt("requestId"), 1, BridgeNumbers.MAX_SAFE_INTEGER))
-                emit(session, event)
-            }
-            else -> {
-                if (event.optString("type") == "state") {
-                    when (event.optString("state")) {
-                        "authenticated" -> {
-                            val key = session.verifiedHostKey ?: error("unverified")
-                            require(event.opt("deferredTerminal") == true)
-                            session.operations.authenticated()
-                            event.put("verifiedHostKey", key).put("nativeEndpoint", JSONObject()
-                                .put("host", session.host).put("port", session.port).put("username", session.username))
-                        }
-                        "ready" -> {
-                            if (session.operations.deferredTerminal) session.operations.ready(
-                                BridgeNumbers.integer(event.opt("requestId"), 1, BridgeNumbers.MAX_SAFE_INTEGER), event.getString("terminalKind"))
-                            else session.operations.ready()
-                        }
-                    }
-                }
-                emit(session, event)
-                if (event.optString("type") == "state" && event.optString("state") in setOf("closed", "error")) {
-                    closeSession(session, event.optString("code", "closed"), notify = false)
-                }
-            }
-        }
-    }
-
-    private fun emit(session: Session, event: JSONObject) {
-        // Event batches are dispatched on the main thread, in native order.
-        // Final output is delivered before its closed event invalidates the gate.
-        if (session.gate.isActive()) notifyListeners("sshEvent", JSObject.fromJSONObject(event))
-    }
-
-    private fun emitFailure(session: Session, code: String) {
-        val event = JSObject().put("connectionId", session.id.toString()).put("generation", session.gate.generation)
-            .put("type", "state").put("state", "error").put("code", code).put("transportLost", false)
-        session.ownerId?.let { event.put("ownerId", it) }
-        activity.runOnUiThread { notifyListeners("sshEvent", event) }
-    }
-
-    private fun closeSession(session: Session, reason: String, notify: Boolean = true) {
-        if (!synchronized(sessionLock) { sessions.remove(session.id, session) }) return
-        session.gate.close()
-        session.operations.close()
-        session.hostKeys.clear()
-        session.outputWindow.clear()
-        try { NativeSSH.destroy(session.id) } catch (_: Throwable) { /* No secret-bearing exception logging. */ }
-        if (notify) {
-            val event = JSObject().put("connectionId", session.id.toString()).put("generation", session.gate.generation)
-                .put("type", "state").put("state", "closed").put("code", reason).put("transportLost", false)
-            session.ownerId?.let { event.put("ownerId", it) }
-            activity.runOnUiThread { notifyListeners("sshEvent", event) }
-        }
-    }
-
-    private fun closeAll(reason: String) {
-        sessions.values.toList().forEach { closeSession(it, reason) }
-        clearPrivateKeys()
-    }
-
-    private fun clearPrivateKeys() {
-        privateKeys.clear()
-    }
+    private fun closeSession(session: SSHRuntime.Session, reason: String, notify: Boolean = true) = runtime.closeSession(session, reason, notify)
+    private fun closeAll(reason: String) = runtime.closeAll(reason)
 
     override fun handleOnPause() {
         foreground = false
@@ -440,9 +278,20 @@ class TabbySSHPlugin : Plugin() {
         // Opening SAF pauses this Activity. A selected document is different:
         // its import is cancelled by the next genuine foreground loss.
         if (selection.get()?.returned == true) cancelSelection()
-        closeAll("background")
-        notifyListeners("lifecycleState", JSObject().put("active", false)
+        if (!ConnectionService.enabled && !notificationPermissionPending) closeAll("background")
+        else sessions.values.filter { !it.operations.isReady() }.forEach { closeSession(it, "background_auth_cancelled") }
+        sessions.values.forEach { it.pendingPassword?.fill(0); it.pendingPassword = null }
+        privateKeys.clear()
+        notifyListeners("lifecycleState", JSObject().put("active", false).put("retained", ConnectionService.enabled || notificationPermissionPending)
             .put("reason", if (pickerPending.get() && selection.get()?.cancelled?.get() == false) "privateKeyPicker" else "background"))
+    }
+
+    override fun handleOnStop() {
+        if (notificationPermissionPending && !ConnectionService.enabled) {
+            notificationPermissionPending = false
+            closeAll("background")
+            notifyListeners("lifecycleState", JSObject().put("active", false).put("retained", false).put("reason", "background"))
+        }
     }
 
     override fun handleOnResume() {
@@ -459,8 +308,8 @@ class TabbySSHPlugin : Plugin() {
         cancelSelection()
         selection.get()?.takeIf { !it.returned }?.let { finishSelection(it) }
         keyImports.close()
-        closeAll("destroyed")
-        worker.shutdownNow()
+        runtime.detach()
+        if (!ConnectionService.enabled) closeAll("destroyed")
     }
 
     fun emitViewport(value: JSObject) {
@@ -468,6 +317,77 @@ class TabbySSHPlugin : Plugin() {
         if (serialized == lastViewport) return
         lastViewport = serialized
         notifyListeners("keyboardState", value)
+    }
+
+    fun emitBack() { notifyListeners("backAction", JSObject()) }
+    @PluginMethod
+    fun leaveApp(call: PluginCall) { activity.runOnUiThread { activity.moveTaskToBack(true); call.resolve() } }
+
+    @PluginMethod
+    fun backgroundState(call: PluginCall) { call.resolve(JSObject().put("enabled", ConnectionService.enabled).put("notificationsAllowed", ConnectionService.notificationsAllowed(context))) }
+
+    @PluginMethod
+    fun setBackground(call: PluginCall) {
+        if (!foreground || destroyed) { call.reject("Return to the app first", "BACKGROUND"); return }
+        if (call.getBoolean("enabled", false) != true) { ConnectionService.disable(context); notifyListeners("backgroundState", JSObject().put("enabled", false)); call.resolve(JSObject().put("enabled", false)); return }
+        if (Build.VERSION.SDK_INT >= 33 && getPermissionState("notifications") != PermissionState.GRANTED) {
+            notificationPermissionPending = true
+            requestPermissionForAlias("notifications", call, "notificationPermissionResult"); return
+        }
+        enableBackground(call)
+    }
+    @PermissionCallback
+    private fun notificationPermissionResult(call: PluginCall) {
+        // Activity Result can arrive before onResume. Permission is never
+        // treated as permission to start a foreground service from background.
+        val deadline = android.os.SystemClock.elapsedRealtime() + 5000
+        val handler = android.os.Handler(android.os.Looper.getMainLooper())
+        val observe = object : Runnable {
+            override fun run() {
+                if (!notificationPermissionPending || destroyed || !ConnectionService.notificationsAllowed(context)
+                    || android.os.SystemClock.elapsedRealtime() >= deadline) {
+                    notificationPermissionPending = false
+                    notifyListeners("backgroundState", JSObject().put("enabled", false))
+                    call.reject("Return to the app with visible notifications to enable background connections", "BACKGROUND_UNAVAILABLE")
+                    return
+                }
+                if (foreground) { notificationPermissionPending = false; enableBackground(call); return }
+                handler.postDelayed(this, 25)
+            }
+        }
+        handler.post(observe)
+    }
+    private fun enableBackground(call: PluginCall) {
+        try {
+            require(foreground && !destroyed && sessions.values.any { it.operations.isReady() } && ConnectionService.notificationsAllowed(context))
+            ConnectionService.start(context)
+            val deadline = android.os.SystemClock.elapsedRealtime() + 5000
+            val handler = android.os.Handler(android.os.Looper.getMainLooper())
+            val observe = object : Runnable {
+                override fun run() {
+                    if (!foreground || destroyed) { ConnectionService.disable(context); call.reject("Return to the app first", "BACKGROUND"); return }
+                    if (ConnectionService.enabled) { notifyListeners("backgroundState", JSObject().put("enabled", true)); call.resolve(JSObject().put("enabled", true)); return }
+                    if (android.os.SystemClock.elapsedRealtime() >= deadline) { ConnectionService.disable(context); call.reject("Background service did not start", "BACKGROUND_UNAVAILABLE"); return }
+                    handler.postDelayed(this, 25)
+                }
+            }
+            handler.post(observe)
+        } catch (_: Throwable) { notifyListeners("backgroundState", JSObject().put("enabled", false)); call.reject("Visible notifications and a ready connection are required to enable background connections", "BACKGROUND_UNAVAILABLE") }
+    }
+    @PluginMethod
+    fun credentialStatus(call: PluginCall) {
+        try { call.resolve(JSObject().put("saved", runtime.secrets.has(call.getString("host")!!, call.getInt("port")!!, call.getString("username")!!))) }
+        catch (_: Throwable) { call.reject("Cannot read credential status", "CREDENTIAL_UNAVAILABLE") }
+    }
+    @PluginMethod
+    fun deletePassword(call: PluginCall) {
+        try {
+            require(foreground && !destroyed)
+            val host = call.getString("host")!!; val port = call.getInt("port")!!; val user = call.getString("username")!!
+            sessions.values.filter { it.host.equals(host, true) && it.port == port && it.username == user }.forEach { closeSession(it, "credential_deleted") }
+            runtime.secrets.delete(host, port, user)
+            call.resolve()
+        } catch (_: Throwable) { call.reject("Cannot delete credential", "CREDENTIAL_UNAVAILABLE") }
     }
 
     @PluginMethod

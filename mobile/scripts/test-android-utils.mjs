@@ -5,6 +5,7 @@ export const APP = 'org.tabby.android.prototype'
 export const RUNNER = `${APP}.test/androidx.test.runner.AndroidJUnitRunner`
 export const METADATA = 'tabby-ssh-test-fixture.json'
 export const DONE = 'tabby-cloud-webview.done'
+export const READY = 'tabby-cloud-webview.ready'
 export const INPUT = 'tabby-cloud-input.json'
 export const INPUT_RESULT = 'tabby-cloud-input.result.json'
 export const pause = ms => new Promise(resolve => setTimeout(resolve, ms))

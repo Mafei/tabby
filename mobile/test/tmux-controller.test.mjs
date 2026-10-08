@@ -291,3 +291,49 @@ test('unreachable TCP during an established recovery series retries, while it ca
     recovery.cancel()
     context.mock.timers.reset()
 })
+
+test('mobile recovery stops after six transport failures and does not abort a successful connection on reset', async context => {
+    context.mock.timers.enable({ apis: ['setTimeout'] })
+    let starts = 0
+    const delays = [], paused = []
+    const recovery = new MobileTmuxRecovery({ connect: async () => { starts++; throw new MobileTmuxError('tcp_failed') },
+        credentialsAvailable: () => true, foreground: () => true, hasBinding: () => true,
+        paused: reason => paused.push(reason), scheduled: delay => delays.push(delay) })
+    recovery.transportLost({ ...endpoint, type: 'state', state: 'error', code: 'transport_lost', transportLost: true })
+    for (const delay of [1000, 2000, 4000, 8000, 16000, 30000]) {
+        context.mock.timers.tick(delay)
+        for (let turn = 0; turn < 12; turn++) await Promise.resolve()
+    }
+    assert.equal(starts, 6)
+    assert.deepEqual(delays, [1000, 2000, 4000, 8000, 16000, 30000])
+    assert.deepEqual(paused, ['recovery_exhausted'])
+    context.mock.timers.tick(120000)
+    assert.equal(starts, 6)
+    recovery.cancel()
+    let aborted = false
+    let successful
+    successful = new MobileTmuxRecovery({ connect: async signal => {
+        signal.addEventListener('abort', () => { aborted = true })
+        successful.reset()
+    }, credentialsAvailable: () => true, foreground: () => true, hasBinding: () => true, paused: () => {}, scheduled: () => {} })
+    await successful.run()
+    assert.equal(aborted, false)
+    successful.cancel()
+})
+
+test('elapsed recovery budget cancels a pending flight without another reconnect', async context => {
+    context.mock.timers.enable({ apis: ['setTimeout'] })
+    let starts = 0
+    const paused = []
+    const recovery = new MobileTmuxRecovery({ connect: async () => { starts++; await new Promise(() => {}) },
+        credentialsAvailable: () => true, foreground: () => true, hasBinding: () => true,
+        paused: reason => paused.push(reason), scheduled: () => {} })
+    recovery.transportLost({ ...endpoint, type: 'state', state: 'error', code: 'transport_lost', transportLost: true })
+    context.mock.timers.tick(1000)
+    for (let turn = 0; turn < 6; turn++) await Promise.resolve()
+    context.mock.timers.tick(120000)
+    for (let turn = 0; turn < 12; turn++) await Promise.resolve()
+    assert.equal(starts, 1)
+    assert.deepEqual(paused, ['recovery_exhausted'])
+    recovery.cancel()
+})

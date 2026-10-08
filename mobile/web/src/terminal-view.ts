@@ -10,7 +10,7 @@ export class TerminalView {
         allowProposedApi: false,
         logLevel: 'off',
         disableStdin: false,
-        fontFamily: 'monospace', fontSize: 14, cursorBlink: true,
+        fontFamily: 'monospace', fontSize: 16, cursorBlink: true,
         scrollback: 2000,
         theme: { background: '#171b24', foreground: '#eeeeee', cursor: '#8cffff',
             black: colors[0], red: colors[1], green: colors[2], yellow: colors[3], blue: colors[4],
@@ -64,6 +64,10 @@ export class TerminalView {
         this.observer = new ResizeObserver(() => this.fit())
         this.observer.observe(host)
         this.fit()
+    }
+
+    setFontSize(pixels: number): void {
+        if (Number.isFinite(pixels) && pixels > 0 && this.terminal.options.fontSize !== pixels) { this.terminal.options.fontSize = pixels; this.fit() }
     }
 
     fit(): void {

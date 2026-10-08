@@ -67,6 +67,7 @@ test('missing builtins preserve own-property semantics and secure Tab and picker
     await page.getByLabel('密码', { exact:true }).fill('ephemeral-compat-password')
     await page.getByRole('button', { name:'连接', exact:true }).click()
     await expect.poll(() => page.evaluate(() => window.testBridge.starts.length)).toBe(1)
+    await page.getByRole('button', { name: '更多终端操作', exact: true }).click()
     await page.getByRole('button', { name: '新增连接', exact: true }).click()
     const pane = page.locator('.session-pane:not([hidden])')
     await pane.getByRole('combobox', { name: '认证方式', exact: true }).selectOption('privateKey')

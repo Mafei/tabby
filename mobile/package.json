@@ -9,7 +9,7 @@
   "scripts": {
     "dev": "npm run build && node scripts/serve-web.mjs --test-harness",
     "build": "ng build mobile --configuration production && node scripts/verify-web-build.mjs --fresh",
-    "check": "ngc --noEmit -p web/tsconfig.app.json && tsc --noEmit -p web/tsconfig.tests.json",
+    "check": "ngc --noEmit -p web/tsconfig.app.json && tsc --noEmit -p web/tsconfig.tests.json && node --test test/android-acceptance-static.test.mjs test/android-system-ui.test.mjs",
     "test:build": "node scripts/verify-web-build.mjs",
     "test:toolchain": "node scripts/verify-capacitor-toolchain.mjs",
     "test:web": "playwright test --config web/playwright.config.ts",

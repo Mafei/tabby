@@ -10,6 +10,7 @@ import struct
 import subprocess
 import tempfile
 import zipfile
+from manifest_policy import inspect_connection_components, ManifestPolicyError
 from web_security import inspect_web_assets, bind_aot_assets, WebSecurityError
 
 APP = 'org.tabby.android.prototype'
@@ -83,11 +84,15 @@ def main():
     require("minSdkVersion:'26'" in badging and "targetSdkVersion:'36'" in badging, 'Wrong Android SDK range')
     require('application-debuggable' in badging, 'This verifier only describes the prototype debug APK')
     permissions = re.findall(r"^uses-permission: name='([^']+)'", badging, re.M)
-    expected = {'android.permission.INTERNET', APP + '.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION'}
+    expected = {'android.permission.INTERNET', 'android.permission.FOREGROUND_SERVICE', 'android.permission.FOREGROUND_SERVICE_SPECIAL_USE', 'android.permission.POST_NOTIFICATIONS', APP + '.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION'}
     require(set(permissions) == expected, 'Unexpected packaged permission set')
     manifest = run(str(tools / 'aapt2'), 'dump', 'xmltree', '--file', 'AndroidManifest.xml', str(apk))
     for flag in ['allowBackup', 'fullBackupContent', 'usesCleartextTraffic', 'extractNativeLibs']:
         require(re.search(r':' + flag + r'\([^\n]+\)=false', manifest), 'Unsafe or absent packaged flag: ' + flag)
+    try:
+        component_policy = inspect_connection_components(manifest)
+    except ManifestPolicyError as error:
+        raise SystemExit(str(error)) from error
     require('protectionLevel(0x01010009)=0x00000002' in manifest, 'Receiver permission must remain signature protected')
     run(str(tools / 'zipalign'), '-c', '-P', '16', '4', str(apk))
     signature = run(str(tools / 'apksigner'), 'verify', '--verbose', '--print-certs', str(apk))
@@ -109,7 +114,7 @@ def main():
             if name.endswith('.dex'):
                 dex = archive.read(name)
                 for test_class in ['CloudWebViewHarness', 'RealSSHBridgeTest', 'AndroidHostKeyStoreTest',
-                                   'ViewportLifecycleTest', 'SecurityPolicyTest', 'PrivateKeyImportTest',
+                                   'ViewportLifecycleTest', 'EncryptedSecretStoreTest', 'SecurityPolicyTest', 'PrivateKeyImportTest',
                                    'DeferredSSHBridgeTest', 'NativeSessionIsolationTest', 'SessionOperationsTest']:
                     require(('Lorg/tabby/android/prototype/' + test_class + ';').encode() not in dex, 'Instrumentation class packaged in main DEX: ' + test_class)
         config = json.loads(archive.read('assets/capacitor.config.json'))
@@ -147,7 +152,7 @@ def main():
     report = {'verified': True, 'artifact': apk.name, 'sha256': hashlib.file_digest(apk.open('rb'), 'sha256').hexdigest(),
               'bytes': apk.stat().st_size, 'sourceCommit': source, 'sourceTree': tree, 'sourceDirty': dirty,
               'applicationId': APP, 'minSdk': 26, 'targetSdk': 36, 'debuggable': True,
-              'permissions': permissions, 'publicTestCertificateSHA256': certificate[1], 'signatureScheme': 'v2',
+              'permissions': permissions, 'componentPolicy': component_policy, 'publicTestCertificateSHA256': certificate[1], 'signatureScheme': 'v2',
               'zipAlignmentBytes': PAGE, 'expectedABIs': args.expected_abis, 'packagedABIs': packaged_abis,
               'nativeLibraries': libraries, 'arm64RuntimeVerified': False,
               'webSecurity': web_security,

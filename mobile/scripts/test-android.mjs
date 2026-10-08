@@ -91,10 +91,10 @@ try {
         privateKey: plainKey, encryptedPrivateKey: encryptedKey, privateKeyPassphrase: fixture.metadata.privateKeyPassphrase }
     await android.privateFile(METADATA, JSON.stringify(metadata))
     if (!process.argv.includes('--webview-only')) {
-        const classes = ['RealSSHBridgeTest', 'AndroidHostKeyStoreTest', 'ViewportLifecycleTest'].map(name => `${APP}.${name}`).join(',')
+        const classes = ['RealSSHBridgeTest', 'AndroidHostKeyStoreTest', 'ViewportLifecycleTest', 'EncryptedSecretStoreTest'].map(name => `${APP}.${name}`).join(',')
         const command = `am instrument -w -r -e fixtureMetadata ${METADATA} -e class ${classes} ${RUNNER}`
         const result = await android.launch(['shell', '-T', command], { timeout: 180000 }).result
-        report.instrumentation = instrumentationResult(result, 7)
+        report.instrumentation = instrumentationResult(result, 8)
         console.log(`PASS Android instrumentation: ${report.instrumentation.tests} tests, no skips.`)
         // The native Activity tests already initialize the actual provider.
         // Capture only its bounded public identity before WebView boot checks,

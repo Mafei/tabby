@@ -1,5 +1,8 @@
+import { mkdir, writeFile } from 'node:fs/promises'
+import { fileURLToPath } from 'node:url'
 import { createRequire } from 'node:module'
-import { APP, RUNNER, DONE, INPUT, METADATA, check, until, pause, TestFailure, instrumentationResult, observeUntil, observeReadUntil } from './test-android-utils.mjs'
+import { systemUIActionPoint } from './android-system-ui.mjs'
+import { APP, RUNNER, DONE, READY, INPUT, METADATA, check, until, pause, TestFailure, instrumentationResult, observeUntil, observeReadUntil } from './test-android-utils.mjs'
 
 const require = createRequire(import.meta.url)
 const quote = value => `'${value.replace(/'/g, `'"'"'`)}'`
@@ -114,6 +117,7 @@ export async function webviewAcceptance (android, fixture) {
     let harness
     let harnessDeadline
     let harnessPID
+    let retiredHarnessPID
     let page
     let stage = 'harness-start'
     let substage = 'initializing'
@@ -121,6 +125,15 @@ export async function webviewAcceptance (android, fixture) {
     let rotationGeometry
     let systemIME
 
+    async function capture (name) {
+        // Explicitly requested runtime images; synthetic fixture only, never auth forms.
+        const directory = fileURLToPath(new URL('../artifacts/runtime-screenshots/', import.meta.url))
+        await mkdir(directory, { recursive: true })
+        const encoded = await android.command(['exec-out', 'sh', '-c', 'screencap -p | base64'], { timeout: 15000 })
+        const bytes = Buffer.from(encoded.replace(/\s/g, ''), 'base64')
+        check(bytes.length > 8 && bytes.subarray(0, 8).equals(Buffer.from([137,80,78,71,13,10,26,10])), 'ANDROID_SCREENSHOT_INVALID')
+        await writeFile(directory + name + '.png', bytes)
+    }
     const verify = label => { passed.push(label); console.log(`PASS Android WebView: ${label}.`) }
     async function step (name, action) {
         substage = name
@@ -162,6 +175,9 @@ export async function webviewAcceptance (android, fixture) {
                         ['认证中', 'AUTHENTICATING'], ['等待认证', 'WAITING_AUTH'], ['已连接', 'READY']])
                     const noticeNames = new Map([
                         ['请输入有效主机、端口和用户名。', 'INVALID_ENDPOINT'],
+                        ['请输入有效主机地址。', 'INVALID_HOST'],
+                        ['请输入 1–65535 范围内的整数端口。', 'INVALID_PORT'],
+                        ['请输入用户名。', 'INVALID_USERNAME'],
                         ['原生 SSH 插件不可用。此页面不能在普通浏览器中连接 SSH。', 'PLUGIN_UNAVAILABLE'],
                         ['无法建立 SSH 连接。请检查地址和网络。', 'START_FAILED'],
                         ['主机密钥已变化，连接已拒绝。请先通过可信渠道核实。', 'HOST_KEY_CHANGED'],
@@ -185,22 +201,29 @@ export async function webviewAcceptance (android, fixture) {
                     const geometry = values => Object.fromEntries(['sliderCount', 'sliderTop', 'legacyViewportCount', 'legacyScrollTop',
                         'x', 'y', 'width', 'height', 'fromX', 'fromY', 'toX', 'toY', 'terminalX', 'terminalY', 'terminalWidth', 'terminalHeight',
                         'screenWidth', 'screenHeight', 'rowCount', 'scrollbarHeight', 'sliderHeight', 'viewportWidth', 'viewportHeight',
-                        'visualHeight', 'devicePixelRatio', 'nativeViewportWidth', 'nativeViewportHeight', 'firstHistoryOrdinal'].filter(key => Number.isFinite(values?.[key]))
+                        'visualHeight', 'devicePixelRatio', 'nativeViewportWidth', 'nativeViewportHeight', 'nativeKeyboardHeight', 'firstHistoryOrdinal'].filter(key => Number.isFinite(values?.[key]))
                         .map(key => [key, values[key]]))
                     const notice = document.querySelector('.notice')?.textContent || ''
+                    const endpointValue = name => document.querySelector(`.connect-panel input[name="${name}"]`)?.value || ''
+                    const endpointPort = endpointValue('port')
                     return {
                         capabilities: { objectHasOwn: typeof Object.hasOwn === 'function', cryptoRandomUUID: typeof window.crypto?.randomUUID === 'function',
                             arrayAt: typeof Array.prototype.at === 'function', abortSignalAny: typeof window.AbortSignal?.any === 'function',
                             cssDynamicViewport: typeof window.CSS?.supports === 'function' && window.CSS.supports('height', '100dvh') },
                         bootstrapFallback: document.body?.textContent?.includes('界面无法启动。请重新打开应用。') === true,
                         documentReady: ['loading', 'interactive', 'complete'].includes(document.readyState) ? document.readyState : 'unknown',
-                        status: statusNames.get(document.querySelector('header .status')?.textContent) || 'UNRECOGNIZED',
+                        status: statusNames.get(document.querySelector('.pane-status')?.textContent) || 'UNRECOGNIZED',
                         notice: notice ? noticeNames.get(notice) || 'OTHER_FIXED_UI_NOTICE' : 'NONE',
                         formVisible: visible('.connect-panel form'),
                         hostInputCount: document.querySelectorAll('input[name="host"]').length,
                         portInputCount: document.querySelectorAll('input[name="port"]').length,
                         usernameInputCount: document.querySelectorAll('input[name="username"]').length,
                         authSelectCount: document.querySelectorAll('select[name="authMode"]').length,
+                        formInputs: Object.fromEntries(['hostMatch', 'portMatch', 'usernameMatch', 'authModeMatch', 'portValid', 'documentFocused']
+                            .map(key => [key, window.__tabbyCloudObservation?.formInputs?.[key] === true])),
+                        endpointValidity: { host: !!endpointValue('host').trim() && !/[\x00-\x20]/.test(endpointValue('host').trim()),
+                            port: !!endpointPort && Number.isInteger(Number(endpointPort)) && Number(endpointPort) >= 1 && Number(endpointPort) <= 65535,
+                            username: !!endpointValue('username').trim() },
                         passwordInputCount: document.querySelectorAll('input[name="password"]').length,
                         submitVisible: visible('.connect-panel button[type="submit"]'),
                         hostDialogVisible: visible('[role="dialog"][aria-label="确认主机密钥"]'),
@@ -239,6 +262,8 @@ export async function webviewAcceptance (android, fixture) {
                         nativeTouch: geometry(window.__tabbyCloudObservation?.lastNativeTouch),
                         nativeTouchHitTarget: window.__tabbyCloudObservation?.nativeTouchHitTarget === true,
                         nativeTouchDocumentFocused: window.__tabbyCloudObservation?.nativeTouchDocumentFocused === true,
+                        nativeTouchPhase: ['VISIBILITY', 'SCROLL_VISIBILITY', 'GEOMETRY', 'DISPATCH'].includes(window.__tabbyCloudObservation?.nativeTouchPhase)
+                            ? window.__tabbyCloudObservation.nativeTouchPhase : 'UNKNOWN',
                         clipboardOverlay: { observed: window.__tabbyCloudObservation?.clipboardOverlay?.observed === true,
                             cleared: window.__tabbyCloudObservation?.clipboardOverlay?.cleared === true,
                             phase: ['command', 'selection'].includes(window.__tabbyCloudObservation?.clipboardOverlay?.phase)
@@ -260,6 +285,12 @@ export async function webviewAcceptance (android, fixture) {
                                     remote: Object.fromEntries(['rows', 'cols'].filter(key => Number.isFinite(value.remote?.[key])).map(key => [key, value.remote[key]])),
                                     converged: value.converged === true }]
                             })),
+                        keyboardShow: {
+                            visible: window.__tabbyCloudObservation.keyboardShow?.visible === true,
+                            height: Number.isFinite(window.__tabbyCloudObservation.keyboardShow?.height) ? window.__tabbyCloudObservation.keyboardShow.height : null,
+                            viewportHeight: Number.isFinite(window.__tabbyCloudObservation.keyboardShow?.viewportHeight) ? window.__tabbyCloudObservation.keyboardShow.viewportHeight : null,
+                            baselineHeight: Number.isFinite(window.__tabbyCloudObservation.keyboardShow?.baselineHeight) ? window.__tabbyCloudObservation.keyboardShow.baselineHeight : null,
+                        },
                     }
                 }), deadline, 'ANDROID_DOM_DIAGNOSTICS_DEADLINE_EXCEEDED')
             } catch { result.domUnavailable = true }
@@ -276,16 +307,24 @@ export async function webviewAcceptance (android, fixture) {
         await until(() => ['clients', 'sessions', 'ptys', 'timers', 'pendingAuth'].every(key => fixture.stats()[key] === 0), 'ANDROID_FIXTURE_RESOURCES_NOT_RELEASED')
     }
     async function nativeTouch (locator, durationMs = 100, enclosingDeadline = Infinity) {
+        await page.evaluate(() => { window.__tabbyCloudObservation.nativeTouchPhase = 'VISIBILITY' })
+        if (!await locator.isVisible()) {
+            const more = page.getByRole('button', { name: '更多终端操作', exact: true })
+            if (await more.isVisible() && !await more.isDisabled() && !await page.locator('.actions-panel').isVisible()) await nativeTouch(more)
+        }
+
         const deadline = Math.min(Date.now() + 10000, enclosingDeadline)
         const inTime = () => check(Date.now() < deadline, 'ANDROID_TOUCH_TARGET_DID_NOT_STABILIZE')
         await page.evaluate(() => {
             window.__tabbyCloudObservation.nativeTouchHitTarget = false
             window.__tabbyCloudObservation.nativeTouchDocumentFocused = false
+            window.__tabbyCloudObservation.nativeTouchPhase = 'SCROLL_VISIBILITY'
         })
         inTime()
         // Prepare visibility only. Activation remains the one real native
         // MotionEvent below; a viewport-inside box can still be panel-clipped.
         await locator.scrollIntoViewIfNeeded({ timeout: Math.max(1, Math.min(3000, deadline - Date.now())) })
+        await page.evaluate(() => { window.__tabbyCloudObservation.nativeTouchPhase = 'GEOMETRY' })
         inTime()
         let box
         let previous
@@ -319,6 +358,7 @@ export async function webviewAcceptance (android, fixture) {
             return Date.now() - stableSince >= 350
         }, 'ANDROID_TOUCH_TARGET_DID_NOT_STABILIZE', Math.max(1, deadline - Date.now()))
         inTime()
+        await page.evaluate(() => { window.__tabbyCloudObservation.nativeTouchPhase = 'DISPATCH' })
         await android.input({ type: 'touch', x: box.x + box.width / 2, y: box.y + box.height / 2, durationMs })
     }
     async function output (needle) {
@@ -329,10 +369,9 @@ export async function webviewAcceptance (android, fixture) {
         return page.evaluate(async ({ method, options }) => window.Capacitor.Plugins.TabbySSH[method](options), { method, options })
     }
     async function clipboardOverlayCleared (phase) {
-        // A normal outside touch dismisses SystemUI's clipboard preview. Touch
-        // only the passive app status label, through the existing native input
-        // guards, once within this phase's unchanged budget. Still observe real
-        // disappearance before activating any app command.
+        // One normal close touch inside SystemUI's exact clipboard container,
+        // or one guarded outside touch on More when the control is unavailable.
+        // Still observe real disappearance within the unchanged phase budget.
         let observed = false
         let dismissalSent = false
         let clearSince
@@ -350,11 +389,35 @@ export async function webviewAcceptance (android, fixture) {
             if (windows.clipboardOverlayVisible) {
                 observed = true; clearSince = undefined
                 if (!dismissalSent) {
-                    const target = page.locator('header .status')
-                    check(await target.count() === 1, 'ANDROID_CLIPBOARD_DISMISS_TARGET_AMBIGUOUS')
+                    let point
+                    try {
+                        // Clipboard previews need not own the active window.
+                        // Read all windows, then select only the exact SystemUI
+                        // clipboard container; no unrelated control is touched.
+                        await android.shell('uiautomator dump --windows /data/local/tmp/tabby-owned-clipboard.xml', { timeout: Math.max(1, Math.min(3000, deadline - Date.now())) })
+                        point = systemUIActionPoint(await android.shell('cat /data/local/tmp/tabby-owned-clipboard.xml',
+                            { timeout: Math.max(1, Math.min(1000, deadline - Date.now())) }), 'clipboardDismiss')
+                    } catch (error) {
+                        // uiautomator's idle wait can outlast a fading preview.
+                        // An unavailable read supplies no touch coordinates;
+                        // the normal outside gesture still has to pass every
+                        // native guard and actual disappearance deadline.
+                        if (!(error instanceof TestFailure) || !['ADB_COMMAND_FAILED', 'TEST_COMMAND_DEADLINE_EXCEEDED'].includes(error.code)) throw error
+                        inTime()
+                    } finally {
+                        try { await android.shell('rm -f /data/local/tmp/tabby-owned-clipboard.xml', { timeout: Math.max(1, Math.min(500, deadline - Date.now())) }) } catch {}
+                    }
                     inTime()
                     dismissalSent = true
-                    await nativeTouch(target, 100, deadline)
+                    if (point) {
+                        const state = await android.input({ type: 'deviceState' }, { deadline })
+                        check(state.interactive && state.deviceLocked === false && state.keyguardShowing === false && state.secure === false, 'ANDROID_CLIPBOARD_DEVICE_NOT_READY')
+                        await android.shell(`input tap ${point.x} ${point.y}`, { timeout: Math.max(1, deadline - Date.now()) })
+                    } else {
+                        const target = page.getByRole('button', { name: '更多终端操作', exact: true })
+                        check(await target.count() === 1, 'ANDROID_CLIPBOARD_DISMISS_TARGET_AMBIGUOUS')
+                        await nativeTouch(target, 100, deadline)
+                    }
                     inTime()
                 }
             }
@@ -462,17 +525,22 @@ export async function webviewAcceptance (android, fixture) {
     }
     async function beginHarness (previousPID) {
         await android.removeFile(DONE)
-        const command = `am instrument -w -r -e class ${APP}.CloudWebViewHarness -e fixtureMetadata ${METADATA} -e cloudDoneFile ${DONE} -e cloudInputFile ${INPUT} ${RUNNER}`
+        await android.removeFile(READY)
+        const command = `am instrument -w -r -e class ${APP}.CloudWebViewHarness -e fixtureMetadata ${METADATA} -e cloudDoneFile ${DONE} -e cloudReadyFile ${READY} -e cloudInputFile ${INPUT} ${RUNNER}`
         harnessDeadline = Date.now() + 180000
         harness = android.launch(['shell', '-T', command], { timeout: 190000 })
         // Keep the promise handled if the test-only harness fails during startup.
         harness.result.catch(() => {})
         let view
         await until(() => {
-            view = device.webViews().find(view => view.pkg() === APP && view.pid() !== previousPID)
+            view = device.webViews().find(view => view.pkg() === APP && view.pid() !== previousPID && view.pid() !== retiredHarnessPID)
             return !!view
         }, 'ANDROID_TEST_HARNESS_WEBVIEW_NOT_AVAILABLE', 45000)
         harnessPID = view.pid()
+        const readyDeadline = Math.min(harnessDeadline, Date.now() + 45000)
+        await step('owned-input-loop-ready', () => until(async () => await observeReadUntil(() => android.readFile(READY,
+            { timeout: Math.max(1, Math.min(5000, readyDeadline - Date.now())) }), readyDeadline,
+        'ANDROID_HARNESS_INPUT_READY_TIMEOUT') === 'READY', 'ANDROID_HARNESS_INPUT_READY_TIMEOUT', Math.max(1, readyDeadline - Date.now())))
         const preparation = { harness: previousPID === undefined ? 'first' : 'fresh-process', actions: [] }
         deviceStates.push(preparation)
         preparation.beforeCDP = await step('focus-before-cdp-attach', () => focusSample())
@@ -521,8 +589,8 @@ export async function webviewAcceptance (android, fixture) {
         await prepareDevice(preparation, harnessDeadline)
         return view.pid()
     }
-    async function focusSample () {
-        const deadline = Math.min(harnessDeadline, Date.now() + 5000)
+    async function focusSample (enclosingDeadline = Infinity) {
+        const deadline = Math.min(harnessDeadline, Date.now() + 5000, enclosingDeadline)
         check(Date.now() < deadline, 'ANDROID_FOCUS_OBSERVATION_DEADLINE_EXCEEDED')
         const [deviceState, focusState] = await Promise.all([
             android.input({ type: 'deviceState' }, { deadline }), android.focusState({ deadline }),
@@ -581,9 +649,40 @@ export async function webviewAcceptance (android, fixture) {
         instrumentationResult(result, 1)
         harness = undefined
         await quiet()
+        // Playwright caches each process's debug page. An ActivityScenario
+        // closes its WebView, so the next independent phase needs a fresh
+        // disposable app process, as the existing tmux harness already does.
+        retiredHarnessPID = harnessPID
+        await android.shell(`am force-stop ${APP}`)
+        page = undefined
     }
-    async function connect (known, mode = 'password') {
+    async function connect (known, mode = 'password', credential = 'transient') {
         const authenticatedBefore = fixture.stats().authenticated
+        // A newly rebuilt form can exist before native foreground focus and
+        // Angular's queued form-control registration have settled. Observe it;
+        // never repair values, grant focus, or replay a failed submission.
+        const formDeadline = Math.min(harnessDeadline, Date.now() + 10000)
+        let formSince
+        let previousForm
+        await step('form-foreground-ready', () => until(async () => {
+            const [{ deviceState: state, focusState: focus }, form] = await Promise.all([
+                focusSample(formDeadline), page.evaluate(() => ({ focused: document.hasFocus(), width: innerWidth, height: innerHeight,
+                    controlsReady: ['host', 'port', 'username'].every(name => {
+                        const nodes = document.querySelectorAll(`.connect-panel input[name="${name}"]`)
+                        const node = nodes[0]; const box = node?.getBoundingClientRect()
+                        return nodes.length === 1 && !node.disabled && !node.readOnly && box.width > 0 && box.height > 0
+                    }) })),
+            ])
+            check(Date.now() < formDeadline, 'ANDROID_FORM_FOREGROUND_DID_NOT_STABILIZE')
+            check(state.secure === false && state.deviceLocked === false && state.keyguardShowing === false, 'ANDROID_FORM_DEVICE_NOT_READY')
+            const ready = state.interactive && state.windowFocused && state.scenarioState === 'RESUMED' && form.focused && form.controlsReady
+                && focus.appOnInputFocusedDisplay && focus.inputDispatchEnabled && !focus.inputDispatchFrozen && focus.inputFocusRequestResult === 'OK'
+                && ['wmsFocusedWindowCategory', 'wmsFocusedAppCategory', 'inputFocusedWindowCategory', 'inputFocusedApplicationCategory',
+                    'inputFocusRequestCategory', 'activityDisplayResumedCategory'].every(key => focus[key] === 'APP')
+            const current = JSON.stringify(form)
+            if (!ready || current !== previousForm) { formSince = Date.now(); previousForm = current }
+            return ready && Date.now() - formSince >= 350
+        }, 'ANDROID_FORM_FOREGROUND_DID_NOT_STABILIZE', Math.max(1, formDeadline - Date.now())))
         await step('form-host', () => page.getByLabel('主机', { exact: true }).fill('127.0.0.1'))
         await step('form-port', () => page.getByLabel('端口', { exact: true }).fill(String(fixture.metadata.port)))
         await step('form-username', () => page.getByLabel('用户名', { exact: true }).fill(fixture.metadata.username))
@@ -591,10 +690,34 @@ export async function webviewAcceptance (android, fixture) {
         // name. Match the actual form control instead of an exact short label.
         await step('form-auth-mode', () => page.locator('select[name="authMode"]').selectOption(mode))
         if (mode === 'password') {
-            await step('form-password', () => page.getByLabel('密码', { exact: true }).fill(fixture.metadata.password))
+            await step('form-password', () => page.getByLabel('密码', { exact: true }).fill(credential === 'saved' ? '' : fixture.metadata.password))
+            if (credential === 'save') await nativeTouch(page.getByLabel('认证成功后保存 / 更新密码（默认不保存）'))
+            if (credential === 'saved') {
+                await page.getByLabel('密码', { exact: true }).focus()
+                await page.getByLabel('使用此设备已保存的密码（留空输入框）').waitFor()
+                await plugin('hideKeyboard')
+                await nativeTouch(page.getByLabel('使用此设备已保存的密码（留空输入框）'))
+            }
         }
         await step('form-hide-ime', () => plugin('hideKeyboard'))
         await step('form-ime-hidden', () => until(async () => !(await viewport()).visible, 'ANDROID_FORM_IME_DID_NOT_HIDE'))
+        const inputDeadline = Math.min(harnessDeadline, Date.now() + 5000)
+        let inputSince
+        await step('form-input-readback', () => until(async () => {
+            const state = await page.evaluate(({ port, username, mode }) => {
+                const value = name => document.querySelector(`.connect-panel [name="${name}"]`)?.value
+                const portValue = value('port')
+                const result = { hostMatch: value('host') === '127.0.0.1', portMatch: portValue === String(port), usernameMatch: value('username') === username,
+                    authModeMatch: value('authMode') === mode, portValid: !!portValue && Number.isInteger(Number(portValue)) && Number(portValue) >= 1 && Number(portValue) <= 65535,
+                    documentFocused: document.hasFocus() }
+                window.__tabbyCloudObservation.formInputs = result
+                return result
+            }, { port: fixture.metadata.port, username: fixture.metadata.username, mode })
+            check(Date.now() < inputDeadline, 'ANDROID_FORM_FIXTURE_INPUTS_DID_NOT_STABILIZE')
+            const ready = Object.values(state).every(value => value === true)
+            if (!ready || inputSince === undefined) inputSince = Date.now()
+            return ready && Date.now() - inputSince >= 350
+        }, 'ANDROID_FORM_FIXTURE_INPUTS_DID_NOT_STABILIZE', Math.max(1, inputDeadline - Date.now())))
         await step('form-native-submit', () => nativeTouch(page.getByRole('button', { name: '连接', exact: true })))
         if (!known) {
             await step('host-key-dialog', () => page.getByRole('dialog', { name: '确认主机密钥' }).waitFor())
@@ -605,7 +728,7 @@ export async function webviewAcceptance (android, fixture) {
             await step('host-key-native-trust', () => nativeTouch(page.getByRole('button', { name: '核对后信任', exact: true })))
         }
         if (mode === 'password') {
-            await step('ssh-ready', () => until(async () => await page.locator('header .status').textContent() === '已连接', 'ANDROID_WEBVIEW_SSH_NOT_READY'))
+            await step('ssh-ready', () => until(async () => await page.locator('.pane-status').textContent() === '已连接', 'ANDROID_WEBVIEW_SSH_NOT_READY'))
             substage = 'web-storage-password-absence'
             check(await page.evaluate(password => {
                 const saved = [localStorage, sessionStorage].flatMap(storage => Object.keys(storage).map(key => storage.getItem(key) || ''))
@@ -615,7 +738,7 @@ export async function webviewAcceptance (android, fixture) {
     }
     async function disconnect () {
         const button = page.getByRole('button', { name: '断开或取消连接', exact: true })
-        if (await button.count()) { await nativeTouch(button) }
+        if (await page.locator('.connect-panel').count() === 0) { await nativeTouch(page.getByRole('button', { name: '更多终端操作', exact: true })); await nativeTouch(button) }
         await quiet()
     }
     async function setting (namespace, name, value) {
@@ -633,7 +756,7 @@ export async function webviewAcceptance (android, fixture) {
                 page.evaluate(() => window.__tabbyCloudObservation.readScroll()), viewport(),
             ])
             return { ...Object.fromEntries(keys.map(key => [key, scroll[key]])), nativeViewportWidth: native.viewportWidth,
-                nativeViewportHeight: native.viewportHeight, nativeKeyboardVisible: native.visible }
+                nativeViewportHeight: native.viewportHeight, nativeKeyboardVisible: native.visible, nativeKeyboardHeight: native.height }
         }
         const deadline = Date.now() + 10000
         const inTime = () => check(Date.now() < deadline, 'ANDROID_REMOTE_PTY_SIZE_DID_NOT_CONVERGE')
@@ -645,7 +768,9 @@ export async function webviewAcceptance (android, fixture) {
             const current = await geometry()
             inTime()
             const valid = keys.every(key => Number.isFinite(current[key])) && current.rowCount > 0 && current.screenHeight > 0
-                && current.nativeKeyboardVisible === expectedIME && Number.isFinite(current.nativeViewportWidth) && Number.isFinite(current.nativeViewportHeight)
+                && current.nativeKeyboardVisible === expectedIME && Number.isFinite(current.nativeKeyboardHeight)
+                && (expectedIME ? current.nativeKeyboardHeight > 0 : current.nativeKeyboardHeight === 0)
+                && Number.isFinite(current.nativeViewportWidth) && Number.isFinite(current.nativeViewportHeight)
                 && current.nativeViewportWidth > 0 && current.nativeViewportHeight > 0
             const serialized = JSON.stringify(current)
             if (!valid || serialized !== previous) { previous = serialized; stableSince = Date.now(); return false }
@@ -714,6 +839,7 @@ export async function webviewAcceptance (android, fixture) {
         await sendLine('stty -echo')
         await sendLine("printf '%s%s\\n' 'W_DIRECT_' '中文🙂_OK'")
         await output('W_DIRECT_中文🙂_OK')
+        await capture('terminal')
         verify('actual Angular UI → Capacitor → native SSH → Unicode PTY')
 
         stage = 'native-composition-and-auxiliary-keys'
@@ -884,6 +1010,15 @@ export async function webviewAcceptance (android, fixture) {
         await step('clipboard-exact-real-pty-bytes', () => output(`W_CLIP_HEX_${Buffer.from(selected).toString('hex')}`))
         verify('native Android swipe/long-press selection → system clipboard → real PTY paste')
 
+        // Keep every owned instrumentation phase inside its existing 180s
+        // lifetime. Menu navigation adds real touches; it must not consume the
+        // later IME/lifecycle phase's input deadline on slower API37 engines.
+        stage = 'ime-phase-restart'
+        await step('ime-phase-disconnect', () => disconnect())
+        await step('ime-phase-end-owned-harness', () => endHarness())
+        await step('ime-phase-begin-owned-harness', () => beginHarness())
+        await connect(true)
+
         stage = 'system-keyboard-and-rotation-resize'
         await step('keyboard-enable-system-ime', () => setting('secure', 'show_ime_with_hard_keyboard', 1))
         await step('keyboard-hide-for-baseline', () => plugin('hideKeyboard'))
@@ -891,13 +1026,22 @@ export async function webviewAcceptance (android, fixture) {
         const sizeBefore = await size(false, 'hidden')
         const hidden = await viewport()
         await step('keyboard-show-native-touch', () => nativeTouch(page.getByRole('button', { name: '键盘', exact: true })))
-        await step('keyboard-shown-native-state', () => until(async () => (await viewport()).visible, 'ANDROID_SYSTEM_IME_DID_NOT_SHOW'))
+        await step('keyboard-shown-native-state', () => until(async () => {
+            const shown = await viewport()
+            await page.evaluate(value => { window.__tabbyCloudObservation.keyboardShow = value },
+                { visible: shown.visible === true, height: shown.height, viewportHeight: shown.viewportHeight, baselineHeight: hidden.viewportHeight })
+            // Visibility can precede the first nonzero animation inset.
+            // Require the actual docked keyboard and native shrink before
+            // measuring rows; the later real PTY shrink assertion remains.
+            return shown.visible && shown.height > 0 && shown.viewportHeight < hidden.viewportHeight
+        }, 'ANDROID_SYSTEM_IME_DID_NOT_SHOW'))
         const sizeShown = await size(true, 'shown')
         const shown = await viewport()
         substage = 'keyboard-native-viewport-shrank'
         check(shown.height > 0 && shown.viewportHeight < hidden.viewportHeight, 'ANDROID_IME_VIEWPORT_DID_NOT_SHRINK')
         substage = 'keyboard-real-pty-rows-decreased'
         check(sizeShown.rows < sizeBefore.rows, 'ANDROID_IME_DID_NOT_RESIZE_REMOTE_PTY')
+        await capture('terminal-keyboard')
         await step('keyboard-hide-after-shown-size', () => plugin('hideKeyboard'))
         await step('keyboard-hidden-before-rotation', () => until(async () => !(await viewport()).visible, 'ANDROID_IME_DID_NOT_HIDE_AFTER_SHOW'))
         await step('rotation-disable-automatic', () => setting('system', 'accelerometer_rotation', 0))
@@ -942,6 +1086,7 @@ export async function webviewAcceptance (android, fixture) {
         const sizeRotated = await size(false, 'rotated')
         substage = 'rotation-real-pty-cols-changed'
         check(sizeRotated.cols !== sizeBefore.cols, 'ANDROID_ROTATION_DID_NOT_RESIZE_REMOTE_PTY')
+        await capture('terminal-rotated')
         verify('actual AOSP system keyboard show/hide and rotation update WebView and SSH PTY dimensions')
 
         stage = 'background-and-auth-cancel'
@@ -976,7 +1121,7 @@ export async function webviewAcceptance (android, fixture) {
         await fixture.command({ type: 'dropConnections' })
         await step('network-loss-ui-closed', () => until(async () =>
             await page.getByRole('button', { name: '连接', exact: true }).count() === 1
-            && await page.locator('header .status').textContent() === '未连接'
+            && await page.locator('.pane-status').textContent() === '未连接'
             && await page.locator('textarea[aria-label="终端输入"]:enabled').count() === 0,
         'ANDROID_NETWORK_LOSS_DID_NOT_FAIL_CLOSED'))
         await quiet()
@@ -995,6 +1140,104 @@ export async function webviewAcceptance (android, fixture) {
         verify('real TCP loss closes Android UI/resources, rejects old writes and permits explicit reconnect')
         verify('actual Activity background closes resources; canceled auth rejects old responses and reconnects')
         await endHarness()
+
+        stage = 'foreground-service-notification'
+        await beginHarness()
+        await connect(true)
+        const api = Number(await android.shell('getprop ro.build.version.sdk'))
+        async function systemHierarchy (filename, deadline) {
+            const remaining = () => Math.max(1, deadline - Date.now())
+            check(Date.now() < deadline, 'ANDROID_SYSTEM_UI_OBSERVATION_TIMEOUT')
+            try {
+                // No stale snapshot can supply a touch after a failed read.
+                await android.shell(`rm -f /data/local/tmp/${filename}`, { timeout: Math.min(1000, remaining()) })
+                await android.shell(`uiautomator dump /data/local/tmp/${filename}`, { timeout: Math.min(12000, remaining()) })
+                return await android.shell(`cat /data/local/tmp/${filename}`, { timeout: Math.min(3000, remaining()) })
+            } catch (error) {
+                if (!(error instanceof TestFailure) || !['ADB_COMMAND_FAILED', 'TEST_COMMAND_DEADLINE_EXCEEDED'].includes(error.code)) throw error
+                check(Date.now() < deadline, 'ANDROID_SYSTEM_UI_OBSERVATION_TIMEOUT')
+                return undefined
+            }
+        }
+        async function systemButton (pattern, failure) {
+            // This runner only accepts emulator-* serials. Normal dialog/shade UI;
+            // no pm grant, appops changes, battery changes, or physical device access.
+            let point
+            const deadline = Date.now() + 20000
+            await until(async () => {
+                const xml = await systemHierarchy('tabby-owned-dialog.xml', deadline)
+                if (!xml) return false
+                const nodes = xml.match(/<node\b[^>]*>/g) || []
+                const node = nodes.find(value => pattern.test(value))
+                const bounds = node && /bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"/.exec(node)
+                if (!bounds) return false
+                point = { x: (Number(bounds[1]) + Number(bounds[3])) / 2, y: (Number(bounds[2]) + Number(bounds[4])) / 2 }
+                return true
+            }, failure, Math.max(1, deadline - Date.now()))
+            await android.shell(`input tap ${point.x} ${point.y}`)
+            await android.shell('rm -f /data/local/tmp/tabby-owned-dialog.xml')
+        }
+        async function requestBackground () {
+            await nativeTouch(page.getByRole('button', { name: '更多终端操作', exact: true }))
+            await nativeTouch(page.getByRole('button', { name: '开启后台保持', exact: true }))
+        }
+        if (api >= 33) {
+            await requestBackground()
+            await step('notification-normal-permission-denial', () => systemButton(/resource-id="(?:com\.android|com\.google\.android)\.permissioncontroller:id\/permission_deny_button"/, 'ANDROID_NOTIFICATION_DENY_DIALOG_MISSING'))
+            await until(async () => !(await plugin('backgroundState')).enabled && await page.getByRole('button', { name: '开启后台保持', exact: true }).isEnabled(), 'ANDROID_NOTIFICATION_DENIAL_NOT_RESOLVED')
+            check(await page.locator('.pane-status').textContent() === '已连接', 'ANDROID_NOTIFICATION_DIALOG_CLOSED_SSH')
+            // Menu remains open after this setting. Close it before opening for retry.
+            await nativeTouch(page.getByRole('button', { name: '更多终端操作', exact: true }))
+        }
+        await requestBackground()
+        if (api >= 33) await step('notification-normal-permission-allow', () => systemButton(/resource-id="(?:com\.android|com\.google\.android)\.permissioncontroller:id\/permission_allow_button"/, 'ANDROID_NOTIFICATION_ALLOW_DIALOG_MISSING'))
+        await until(async () => (await plugin('backgroundState')).enabled === true, 'ANDROID_FOREGROUND_SERVICE_NOT_ENABLED')
+        await android.shell('input keyevent KEYCODE_HOME')
+        await pause(2000)
+        check(fixture.stats().clients === 1 && fixture.stats().ptys === 1, 'ANDROID_FOREGROUND_SERVICE_LOST_BACKGROUND_SSH')
+        await android.shell(`am start -n ${APP}/.MainActivity`)
+        await until(async () => await page.locator('.pane-status').textContent() === '已连接', 'ANDROID_FOREGROUND_SERVICE_LOST_FOREGROUND_SSH')
+        await nativeTouch(page.getByRole('button', { name: '更多终端操作', exact: true }))
+        await sendLine("printf '%s%s\\n' 'W_BACKGROUND_' 'RETAINED'")
+        await output('W_BACKGROUND_RETAINED')
+        await android.shell('cmd statusbar expand-notifications')
+        const notificationDeadline = Date.now() + 20000
+        let stopPoint
+        let expanded = false
+        await step('notification-owned-stop-visible', () => until(async () => {
+            const xml = await systemHierarchy('tabby-owned-notification.xml', notificationDeadline)
+            if (!xml) return false
+            stopPoint = systemUIActionPoint(xml, 'notificationStop')
+            if (stopPoint) return true
+            if (!expanded) {
+                const point = systemUIActionPoint(xml, 'notificationExpand')
+                if (point) { expanded = true; await android.shell(`input tap ${point.x} ${point.y}`) }
+            }
+            return false
+        }, 'ANDROID_NOTIFICATION_STOP_ACTION_MISSING', Math.max(1, notificationDeadline - Date.now())))
+        await capture('connection-notification')
+        await android.shell(`input tap ${stopPoint.x} ${stopPoint.y}`)
+        await android.shell('rm -f /data/local/tmp/tabby-owned-notification.xml')
+        await quiet()
+        await android.shell('cmd statusbar collapse')
+        await android.shell(`am start -n ${APP}/.MainActivity`)
+        await until(async () => !(await plugin('backgroundState')).enabled, 'ANDROID_USER_STOP_DID_NOT_DISABLE_SERVICE')
+        await endHarness()
+        verify('normal notification permission decisions, real background foreground retention and notification Stop All')
+
+        stage = 'native-encrypted-password'
+        await beginHarness()
+        await connect(true, 'password', 'save')
+        check((await plugin('credentialStatus', { host: '127.0.0.1', port: fixture.metadata.port, username: fixture.metadata.username })).saved === true, 'ANDROID_PASSWORD_NOT_SAVED')
+        await disconnect()
+        await connect(true, 'password', 'saved')
+        await sendLine("printf '%s%s\\n' 'W_VAULT_' 'NATIVE_LOGIN'")
+        await output('W_VAULT_NATIVE_LOGIN')
+        await disconnect()
+        await plugin('deletePassword', { host: '127.0.0.1', port: fixture.metadata.port, username: fixture.metadata.username })
+        check((await plugin('credentialStatus', { host: '127.0.0.1', port: fixture.metadata.port, username: fixture.metadata.username })).saved === false, 'ANDROID_PASSWORD_NOT_DELETED')
+        await endHarness()
+        verify('optional native Keystore password save, secret-free saved login and deletion')
 
         stage = 'durable-pin-fresh-process'
         await step('durable-first-process-force-stop', () => android.shell(`am force-stop ${APP}`))
@@ -1024,12 +1267,21 @@ export async function webviewAcceptance (android, fixture) {
         return { passed: true, cases: passed, skipped: 0, deviceStates, inputEvidence: 'Actual Android InputConnection; specific Chinese IME candidate UI unverified.',
             touchEvidence: 'Android instrumentation MotionEvent injection, not synthetic DOM touch.' }
     } catch (error) {
+        // Requested real images, never credential forms or unknown stages.
+        // A failed acceptance image is diagnostic evidence, not a passed APK.
+        if (page && ['native-touch-scroll-selection-clipboard', 'foreground-service-notification', 'native-encrypted-password'].includes(stage)) {
+            try {
+                if (await page.locator('.pane-status').textContent() === '已连接' && await page.getByRole('dialog').count() === 0
+                    && await page.locator('input[type="password"]').count() === 0) await capture('failure-' + stage)
+            } catch { /* Original test failure remains authoritative. */ }
+        }
         const failure = error instanceof TestFailure ? error
             : new TestFailure(`ANDROID_WEBVIEW_${stage.toUpperCase().replaceAll('-', '_')}_${substage.toUpperCase().replaceAll('-', '_')}_FAILED`)
         failure.diagnostics = await diagnostics(error)
         throw failure
     } finally {
         for (const observation of bootObservations) { observation.dispose() }
+        try { await android.shell('rm -f /data/local/tmp/tabby-owned-notification.xml /data/local/tmp/tabby-owned-clipboard.xml') } catch {}
         if (harness) {
             try { await android.privateFile(DONE, ''); await harness.result } catch { harness.terminate() }
         }

@@ -1,5 +1,5 @@
 import { createRequire } from 'node:module'
-import { APP, RUNNER, DONE, INPUT, check, until, pause, TestFailure, instrumentationResult, observeUntil, observeReadUntil } from './test-android-utils.mjs'
+import { APP, RUNNER, DONE, READY, INPUT, check, until, pause, TestFailure, instrumentationResult, observeUntil, observeReadUntil } from './test-android-utils.mjs'
 import { TMUX_WEBVIEW_CASES } from './test-android-tmux-cases.mjs'
 import { javaScriptBootObservation } from './test-android-webview.mjs'
 import { connect as sshConnect, exec as sshExec, terminal as sshTerminal, quote } from '../test/ssh-fixture-client.mjs'
@@ -156,8 +156,9 @@ export async function tmuxWebviewAcceptance (android, fixture) {
     }
     async function beginHarness (index) {
         await android.removeFile(DONE)
+        await android.removeFile(READY)
         harnessDeadline = Date.now() + 180000
-        const command = `am instrument -w -r -e class ${APP}.CloudWebViewHarness -e fixtureMetadata ${METADATA} -e cloudDoneFile ${DONE} -e cloudInputFile ${INPUT} ${RUNNER}`
+        const command = `am instrument -w -r -e class ${APP}.CloudWebViewHarness -e fixtureMetadata ${METADATA} -e cloudDoneFile ${DONE} -e cloudReadyFile ${READY} -e cloudInputFile ${INPUT} ${RUNNER}`
         harness = android.launch(['shell', '-T', command], { timeout: 190000 })
         harness.result.catch(() => {})
         let view
@@ -166,6 +167,10 @@ export async function tmuxWebviewAcceptance (android, fixture) {
             return !!view
         }, 'ANDROID_TMUX_HARNESS_WEBVIEW_NOT_AVAILABLE', 45000)
         harnessPID = view.pid()
+        const readyDeadline = Math.min(harnessDeadline, Date.now() + 45000)
+        await step('owned-input-loop-ready', () => until(async () => await observeReadUntil(() => android.readFile(READY,
+            { timeout: Math.max(1, Math.min(5000, readyDeadline - Date.now())) }), readyDeadline,
+        'ANDROID_TMUX_HARNESS_INPUT_READY_TIMEOUT') === 'READY', 'ANDROID_TMUX_HARNESS_INPUT_READY_TIMEOUT', Math.max(1, readyDeadline - Date.now())))
         const record = { harness: `tmux-${index + 1}`, actions: [] }
         harnesses.push(record)
         record.beforeCDP = await step('focus-before-cdp-attach', focusSample)
@@ -236,6 +241,11 @@ export async function tmuxWebviewAcceptance (android, fixture) {
         page = undefined
     }
     async function nativeTouch (locator) {
+        if (!await locator.isVisible()) {
+            const more = page.getByRole('button', { name: '更多终端操作', exact: true })
+            if (await more.isVisible() && !await more.isDisabled() && !await page.locator('.actions-panel').isVisible()) await nativeTouch(more)
+        }
+
         const deadline = deadlineFor(10000)
         await observeReadUntil(() => locator.scrollIntoViewIfNeeded({ timeout: Math.min(3000, deadline - Date.now()) }), deadline, 'ANDROID_TMUX_TOUCH_TARGET_DID_NOT_STABILIZE')
         let previous
@@ -316,7 +326,7 @@ export async function tmuxWebviewAcceptance (android, fixture) {
         await refresh()
     }
     async function ready () {
-        await wait(async () => await active().locator('header .status').textContent() === '已连接'
+        await wait(async () => await active().locator('.pane-status').textContent() === '已连接'
             && await active().getByLabel('终端输入', { exact: true }).isEnabled(), 'ANDROID_TMUX_TERMINAL_NOT_READY')
         return observe(() => page.evaluate(() => {
             // Called immediately after this pane becomes ready. Switching back
@@ -333,7 +343,7 @@ export async function tmuxWebviewAcceptance (android, fixture) {
         await active().getByLabel('访问方式', { exact: true }).selectOption(mode)
         await nativeTouch(active().getByRole('button', { name: `连接 ${name}`, exact: true }))
         if (mode === 'readonly') {
-            await wait(async () => await active().locator('header .status').textContent() === '已连接'
+            await wait(async () => await active().locator('.pane-status').textContent() === '已连接'
                 && await active().getByLabel('终端输入', { exact: true }).isDisabled(), 'ANDROID_TMUX_READONLY_NOT_READY')
         } else { await ready() }
     }
@@ -398,7 +408,7 @@ export async function tmuxWebviewAcceptance (android, fixture) {
                         arrayAt: typeof Array.prototype.at === 'function', abortSignalAny: typeof window.AbortSignal?.any === 'function',
                         cssDynamicViewport: typeof window.CSS?.supports === 'function' && window.CSS.supports('height', '100dvh') },
                     bootstrapFallback: document.body?.textContent?.includes('界面无法启动。请重新打开应用。') === true,
-                    status: statusNames.get(pane?.querySelector('header .status')?.textContent) || 'UNRECOGNIZED',
+                    status: statusNames.get(pane?.querySelector('.pane-status')?.textContent) || 'UNRECOGNIZED',
                     notice: notice ? noticeNames.get(notice) || 'OTHER_FIXED_UI_NOTICE' : 'NONE',
                     tmuxUnavailableHint: [...(pane?.querySelectorAll('.tmux-panel .hint') || [])].some(element =>
                         element.textContent === '服务器没有 tmux。可使用普通 SSH；应用不会安装软件。'),
@@ -469,8 +479,10 @@ export async function tmuxWebviewAcceptance (android, fixture) {
                 await disconnect()
                 await active().getByLabel('恢复访问方式', { exact: true }).selectOption('readonly')
                 await connect({ restore: true })
-                await wait(async () => await active().locator('header .status').textContent() === '已连接' && await active().getByLabel('终端输入', { exact: true }).isDisabled(), 'ANDROID_TMUX_READONLY_NOT_READY')
+                await wait(async () => await active().locator('.pane-status').textContent() === '已连接' && await active().getByLabel('终端输入', { exact: true }).isDisabled(), 'ANDROID_TMUX_READONLY_NOT_READY')
+                await step('readonly-open-terminal-actions', () => nativeTouch(page.getByRole('button', { name: '更多终端操作', exact: true })))
                 check(await active().getByRole('button', { name: '粘贴', exact: true }).isDisabled(), 'ANDROID_TMUX_READONLY_INPUT_ENABLED')
+                await step('readonly-close-terminal-actions', () => nativeTouch(page.getByRole('button', { name: '更多终端操作', exact: true })))
                 const flags = (await run(`${base} list-clients -F ${quote('#{client_readonly}')}`)).trim().split('\n').sort()
                 check(JSON.stringify(flags) === JSON.stringify(['0', '1']) && !other.closed(), 'ANDROID_TMUX_REAL_READONLY_FLAG_MISSING')
                 const readonly = await observe(() => page.evaluate(() => window.__tabbyTmuxObservation.events.slice().reverse()
@@ -562,6 +574,7 @@ export async function tmuxWebviewAcceptance (android, fixture) {
                     } catch (error) { return error?.code === 'SSH_COMMAND_REJECTED' }
                 }, old))
                 check(rejected, 'ANDROID_TMUX_CANCELLED_OLD_GENERATION_ACCEPTED')
+                if (!await page.getByRole('tab', { name: 'isolation_android', exact: true }).isVisible()) await nativeTouch(page.getByRole('button', { name: '选择会话', exact: true }))
                 await nativeTouch(page.getByRole('tab', { name: 'isolation_android', exact: true }))
                 await ready(); await marker('isolation_android', '__ANDROID_OTHER_TAB_ALIVE__')
                 await wait(() => fixture.stats().timers === 0 && fixture.stats().execs === 0, 'ANDROID_TMUX_CANCELLED_EXEC_RESOURCES_REMAIN')

@@ -63,7 +63,10 @@ and generation; owner IDs isolate events arriving before start returns its ID. H
 is required before any credential response. First-use confirmation shows the
 algorithm/fingerprint; a changed key closes the connection. Password/passphrase
 form values are cleared on start, authentication, cancellation and backgrounding;
-there is no Web credential/profile persistence. Native private key import exposes
+there is no Web credential/profile persistence. The optional native password vault
+never returns decrypted passwords to Web code; saved authentication passes a
+boolean selector after host verification. Native AES-GCM storage is excluded from
+backup and can be updated or deleted from the connection form. Native private key import exposes
 only an in-memory key handle to this UI.
 The controlled system file-picker pause still closes SSH and clears previous
 credentials, but preserves its independent picker request token until the import
@@ -89,7 +92,8 @@ Terminal logging is disabled, including upstream parser diagnostics.
 Backgrounding closes all SSH transports and clears prompts and transient
 passwords. Foreground tmux password sessions recover an unexpected transport
 loss with increasing backoff while the original complete identity is available.
-Missing credentials, authentication/key/identity failures and occupied sessions
+The mobile retry budget is six attempts and 120 seconds elapsed. Missing
+credentials, authentication/key/identity failures and occupied sessions
 pause. Private-key/interactive sessions need explicit fresh authentication.
 Auto recovery never takes over or creates a session; manual share/read-only and
 explicit takeover remain distinct choices. Saved identity storage is opt-in and

@@ -1,6 +1,10 @@
 import { test, expect, type Page } from '@playwright/test'
 import type { SSHEvent } from '../src/bridge'
 
+async function actions(page: Page): Promise<void> {
+    if (!await page.locator('.actions-panel').isVisible()) await page.getByRole('button', { name: '更多终端操作', exact: true }).click()
+}
+
 async function start(page: Page): Promise<void> {
     await page.getByLabel('主机', { exact: true }).fill('fixture.local')
     await page.getByLabel('用户名', { exact: true }).fill('test-user')
@@ -36,7 +40,7 @@ async function waitForTerminalFit(page: Page): Promise<void> {
             Math.abs(innerHeight - requestedViewport.height) < 1 &&
             Math.abs(visualWidth - requestedViewport.width) < 1 &&
             Math.abs(visualHeight - requestedViewport.height) < 1)
-        if (!viewportApplied || Math.abs(shell.height - Math.round(visualHeight)) >= 1) { return false }
+        if (!viewportApplied || Math.abs(shell.height + document.querySelector('.workspace-header')!.getBoundingClientRect().height - Math.round(visualHeight)) >= 1) { return false }
         const host = document.querySelector<HTMLElement>('.terminal-host')!
         const screen = document.querySelector<HTMLElement>('.xterm-screen')!
         const rows = document.querySelector('.xterm-rows')!
@@ -113,7 +117,7 @@ test('short landscape form scrolls by touch and submits from an unobscured butto
     })
     // Browser-engine touch scrolling, without a synthetic scroll event or an
     // automatic click scroll that could conceal the clipped-button regression.
-    for (let swipe = 0; swipe < 4 && !(await connectTouchable()); swipe++) {
+    for (let swipe = 0; swipe < 10 && !(await connectTouchable()); swipe++) {
         const priorScrollTop = await panel.evaluate(element => element.scrollTop)
         const x = bounds.x + 6
         const startY = bounds.y + bounds.height * .85
@@ -141,7 +145,7 @@ test('hidden terminal fits on short landscape connect, viewport growth and recon
         ;(window as unknown as { initialTerminalHost: HTMLElement }).initialTerminalHost = element as HTMLElement
     })
     await ready(page, true, { fitBeforeReady: true })
-    for (const selector of ['.terminal-area', '.tools', '.actions', '.input-strip']) {
+    for (const selector of ['.terminal-area', '.input-strip']) {
         await expect(page.locator(selector)).toBeVisible()
         expect(await page.locator(selector).evaluate(element => {
             const bounds = element.getBoundingClientRect()
@@ -151,10 +155,15 @@ test('hidden terminal fits on short landscape connect, viewport growth and recon
     const rows = () => page.evaluate(() => document.querySelector('.xterm-rows')!.children.length)
     const shortRows = await rows()
     expect(shortRows).toBeGreaterThan(0)
-    expect(shortRows).toBeLessThan(4)
+    expect(shortRows).toBeLessThan(7)
+    // The compact layout gives rows back to output and moves hidden keys to the panel.
+    await page.getByRole('button', { name: '更多终端操作' }).click()
+    await page.getByRole('button', { name: '全部辅助键', exact: true }).click()
+    await page.getByRole('button', { name: '更多终端操作' }).click()
     await expect.poll(() => page.evaluate(() => window.testBridge.commands.flatMap(item => item.command.type === 'resize' ? [item.command.rows] : []).at(-1))).toBe(shortRows)
     await textInput(page, 'short-input')
     await page.getByRole('button', { name: 'Esc', exact: true }).click()
+    await page.getByRole('button', { name: '关闭辅助键面板', exact: true }).click()
     await expect.poll(() => writes(page)).toEqual(['short-input', '\x1b'])
     await page.setViewportSize({ width: 815, height: 384 })
     await waitForTerminalFit(page)
@@ -163,6 +172,7 @@ test('hidden terminal fits on short landscape connect, viewport growth and recon
     await expect.poll(() => page.evaluate(() => window.testBridge.commands.flatMap(item => item.command.type === 'resize' ? [item.command.rows] : []).at(-1))).toBe(largeRows)
     await emit(page, { type: 'data', data: btoa('LANDSCAPE_AFTER_FIT') })
     await expect(page.locator('.xterm-rows')).toContainText('LANDSCAPE_AFTER_FIT')
+    await actions(page)
     await page.getByRole('button', { name: '断开或取消连接', exact: true }).click()
     await expect(page.locator('.terminal-area')).toBeHidden()
     await expect(page.getByLabel('密码', { exact: true })).toHaveValue('')
@@ -290,6 +300,7 @@ test('disconnect cancels the old long press and releases its selection and termi
     await ready(page, true)
     await emit(page, { type: 'data', data: btoa('PRIVATE_OLD_SCREEN') })
     await expect(page.locator('.xterm-rows')).toContainText('PRIVATE_OLD_SCREEN')
+    await actions(page)
     await page.locator('.terminal-area').evaluate(element => {
         element.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerType: 'touch', pointerId: 71, isPrimary: true, clientX: 100, clientY: 100 }))
         document.querySelector<HTMLButtonElement>('[aria-label="断开或取消连接"]')!.click()
@@ -299,6 +310,7 @@ test('disconnect cancels the old long press and releases its selection and termi
     // This browser timer check is separate from real Android MotionEvent gates.
     await page.waitForTimeout(600)
     await expect(page.locator('.selection-layer')).toHaveCount(0)
+    await actions(page)
     await expect(page.getByRole('button', { name: '选择文字', exact: true })).toHaveAttribute('aria-pressed', 'false')
     await expect(page.locator('.xterm-rows')).not.toContainText('PRIVATE_OLD_SCREEN')
     await textInput(page, 'current-connection')
@@ -328,7 +340,7 @@ test('a secondary touch cannot start selection or finish another pointer gesture
 test('a short narrow terminal keeps the input visible and touch-scrolls auxiliary keys into reach', async ({ page }) => {
     await page.setViewportSize({ width: 260, height: 170 })
     await ready(page, true)
-    for (const selector of ['header', '.terminal-area', '.tools', '.actions', '.input-strip']) {
+    for (const selector of ['header', '.terminal-area', '.input-strip']) {
         expect(await page.locator(selector).evaluate(element => {
             const bounds = element.getBoundingClientRect()
             return bounds.top >= 0 && bounds.bottom <= innerHeight + 1 && bounds.left >= 0 && bounds.right <= innerWidth + 1
@@ -336,6 +348,10 @@ test('a short narrow terminal keeps the input visible and touch-scrolls auxiliar
     }
     expect(await page.locator('.xterm-rows').evaluate(element => element.children.length)).toBeGreaterThan(0)
     const tools = page.locator('.tools')
+    // Compact landscape keeps 48dp targets; expand to test the scrolling row separately.
+    await expect(page.locator('.key-row')).toBeHidden()
+    await page.setViewportSize({ width: 260, height: 320 })
+    await waitForTerminalFit(page)
     expect(await tools.evaluate(element => element.scrollWidth > element.clientWidth)).toBe(true)
     const bounds = (await tools.boundingBox())!
     const client = await page.context().newCDPSession(page)
@@ -361,6 +377,7 @@ test('a short narrow terminal keeps the input visible and touch-scrolls auxiliar
 
 test('system paste and auxiliary keys send once without stealing input focus', async ({ page }) => {
     await ready(page)
+    await actions(page)
     await page.getByRole('button', { name: '键盘', exact: true }).click()
     const field = page.getByRole('textbox', { name: '终端输入' })
     await expect(field).toBeFocused()
@@ -381,6 +398,7 @@ test('system paste and auxiliary keys send once without stealing input focus', a
     await page.waitForTimeout(30)
     await page.evaluate(() => { window.testBridge.clipboard = 'clipboard' })
     await page.getByRole('button', { name: '向左', exact: true }).click()
+    await actions(page)
     await page.getByRole('button', { name: '粘贴', exact: true }).click()
     await expect.poll(() => writes(page)).toEqual(['你好', '\x03', '\x1b', '\t', '\x1b[A', '\r', '\x1bOD', '\x1b[200~clipboard\x1b[201~'])
 })
@@ -390,6 +408,7 @@ test('known-host authentication succeeds and auth before verification is rejecte
     expect(await page.evaluate(() => window.testBridge.commands.find(item => item.command.type === 'authResponse')!.command))
         .toEqual({ type: 'authResponse', requestId: 2, password: 'ephemeral-test-password' })
     expect(await page.evaluate(() => localStorage.length)).toBe(0)
+    await actions(page)
     await page.getByRole('button', { name: '断开或取消连接' }).click()
     await start(page)
     await emit(page, { type: 'auth', requestId: 99, mode: 'password' })
@@ -420,6 +439,7 @@ test('changed key never sends credentials; cancelled modal ignores old generatio
 test('cancel while start is pending closes late handle and permits a new connection', async ({ page }) => {
     await page.evaluate(() => { window.testBridge.holdStart = true })
     await start(page)
+    await actions(page)
     await page.getByRole('button', { name: '断开或取消连接' }).click()
     await page.evaluate(() => { window.testBridge.holdStart = false })
     await ready(page)
@@ -451,6 +471,7 @@ test('selection snapshot uses parsed public buffer; copy is plain text with wrap
     await emit(page, { type: 'data', data: Buffer.from(`\x1b[31m${value}\x1b[0m`).toString('base64') })
     await expect.poll(() => page.evaluate(() => window.testBridge.commands.filter(item => item.command.type === 'outputAck').length)).toBe(1)
     await expect(page.locator('.xterm-rows')).toContainText(value)
+    await actions(page)
     await page.getByRole('button', { name: '选择文字', exact: true }).click()
     const snapshot = page.locator('.selection-layer pre')
     await expect(snapshot).toContainText(value)
@@ -459,6 +480,7 @@ test('selection snapshot uses parsed public buffer; copy is plain text with wrap
         const range = document.createRange(); range.selectNodeContents(element)
         window.getSelection()?.removeAllRanges(); window.getSelection()?.addRange(range)
     })
+    await actions(page)
     await page.getByRole('button', { name: '复制', exact: true }).click()
     await expect.poll(() => page.evaluate(() => window.testBridge.clipboard)).toContain(value)
     await expect(page.getByRole('textbox', { name: '终端输入' })).toBeDisabled()
@@ -467,6 +489,7 @@ test('selection snapshot uses parsed public buffer; copy is plain text with wrap
 test('DSR parser replies survive selection and sticky Ctrl; output ACK follows parsing', async ({ page }) => {
     await ready(page)
     await page.getByRole('button', { name: 'Ctrl', exact: true }).click()
+    await actions(page)
     await page.getByRole('button', { name: '选择文字', exact: true }).click()
     await emit(page, { type: 'data', data: btoa('\x1b[6n') })
     await expect.poll(() => writes(page)).toEqual(['\x1b[1;1R'])
@@ -478,6 +501,7 @@ test('DSR parser replies survive selection and sticky Ctrl; output ACK follows p
 
 test('old composition and delayed clipboard never enter a new connection', async ({ page }) => {
     await ready(page)
+    await actions(page)
     await page.getByRole('textbox', { name: '终端输入' }).focus()
     await page.getByRole('textbox', { name: '终端输入' }).evaluate((element: HTMLTextAreaElement) => {
         ;(window as unknown as { oldInput: HTMLTextAreaElement }).oldInput = element
@@ -497,7 +521,9 @@ test('old composition and delayed clipboard never enter a new connection', async
     })
     expect(await writes(page)).toEqual([])
     await page.evaluate(() => { window.testBridge.holdClipboard = true })
+    await actions(page)
     await page.getByRole('button', { name: '粘贴', exact: true }).click()
+    await actions(page)
     await page.getByRole('button', { name: '断开或取消连接' }).click()
     await ready(page, true)
     await page.evaluate(() => window.testBridge.resolveClipboards('OLD_CLIPBOARD'))
@@ -507,6 +533,7 @@ test('old composition and delayed clipboard never enter a new connection', async
 
 test('old queued output is disposed on reconnect; malformed overproduction closes explicitly', async ({ page }) => {
     await ready(page)
+    await actions(page)
     await page.evaluate(() => {
         const active = window.testBridge.starts.at(-1)!
         window.testBridge.emit({ connectionId: active.connectionId, generation: active.generation, type: 'data',
@@ -516,6 +543,7 @@ test('old queued output is disposed on reconnect; malformed overproduction close
     await ready(page, true)
     await emit(page, { type: 'data', data: btoa('NEW_REMOTE_OUTPUT') })
     await expect.poll(() => page.evaluate(() => window.testBridge.commands.filter(item => item.command.type === 'outputAck').length)).toBeGreaterThan(0)
+    await actions(page)
     await page.getByRole('button', { name: '选择文字', exact: true }).click()
     await expect(page.locator('.selection-layer pre')).toContainText('NEW_REMOTE_OUTPUT')
     await expect(page.locator('.selection-layer pre')).not.toContainText('OLD_REMOTE_OUTPUT')
@@ -528,6 +556,7 @@ test('large UTF8 paste is chunked byte-exactly; oversized paste is rejected befo
     await ready(page)
     const value = '中'.repeat(24000)
     await page.evaluate(value => { window.testBridge.clipboard = value }, value)
+    await actions(page)
     await page.getByRole('button', { name: '粘贴', exact: true }).click()
     await expect.poll(() => page.evaluate(() => window.testBridge.commands.filter(item => item.command.type === 'write').length)).toBe(3)
     const restored = await page.evaluate(() => {
@@ -538,6 +567,7 @@ test('large UTF8 paste is chunked byte-exactly; oversized paste is rejected befo
     expect(restored.max).toBeLessThanOrEqual(32 * 1024)
     expect(restored.text).toBe(value)
     await page.evaluate(() => { window.testBridge.clipboard = 'x'.repeat(128 * 1024 + 1) })
+    await actions(page)
     await page.getByRole('button', { name: '粘贴', exact: true }).click()
     await expect(page.getByRole('status').last()).toContainText('单次输入最多 128 KiB')
     expect(await page.evaluate(() => window.testBridge.commands.filter(item => item.command.type === 'write').length)).toBe(3)
@@ -580,6 +610,7 @@ test('owned SAF lifecycle preserves only picker operation; stale picker result i
     await emit(page, { type: 'auth', requestId: 11, mode: 'privateKey' })
     await expect.poll(() => page.evaluate(() => window.testBridge.commands.find(item => item.command.type === 'authResponse')?.command))
         .toEqual({ type: 'authResponse', requestId: 11, keyId: 'owned-key', passphrase: '' })
+    await actions(page)
     await page.getByRole('button', { name: '断开或取消连接' }).click()
     await page.getByRole('button', { name: '选择私钥文件' }).click()
     await page.evaluate(() => window.testBridge.nativeEvent('lifecycleState', { active: false, reason: 'background' }))
@@ -610,6 +641,7 @@ test('private key is discarded on cancellation before start returns its ID', asy
     await expect(page.locator('.connect-panel')).toContainText('test.pem')
     await page.evaluate(() => { window.testBridge.holdStart = true })
     await start(page)
+    await actions(page)
     await page.getByRole('button', { name: '断开或取消连接' }).click()
     await expect.poll(() => page.evaluate(() => window.testBridge.discardedKeys)).toContain('test-key')
     await page.getByRole('button', { name: '连接', exact: true }).click()
@@ -626,6 +658,7 @@ test('late old start rejection cannot discard a newly imported private key', asy
     await expect(page.locator('.connect-panel')).toContainText('test.pem')
     await page.evaluate(() => { window.testBridge.holdStart = true })
     await start(page)
+    await actions(page)
     await page.getByRole('button', { name: '断开或取消连接' }).click()
     await page.evaluate(() => { window.testBridge.holdPicker = true })
     await page.getByRole('button', { name: '选择私钥文件' }).click()
@@ -700,6 +733,7 @@ test('adversarial terminal snapshot and clipboard stay plain text with only requ
     await emit(page, { type: 'data', data: Buffer.from(adversarialText).toString('base64') })
     await expect.poll(count).toBe(baseline + 1)
     expect(await page.evaluate(() => window.testBridge.commands.filter(item => item.command.type !== 'resize').at(-1)!.command.type)).toBe('outputAck')
+    await actions(page)
     await page.getByRole('button', { name: '选择文字', exact: true }).click()
     const snapshot = page.locator('.selection-layer pre')
     await expect(snapshot).toContainText(adversarialText)
@@ -710,12 +744,15 @@ test('adversarial terminal snapshot and clipboard stay plain text with only requ
         return window.getSelection()?.toString() ?? ''
     })
     expect(selectedText).toContain(adversarialText)
+    await actions(page)
     await page.getByRole('button', { name: '复制', exact: true }).click()
     await expect.poll(() => page.evaluate(() => window.testBridge.clipboard)).toBe(selectedText)
     expect(await page.evaluate(() => window.testBridge.clipboardWrites)).toBe(1)
     expect(await count()).toBe(baseline + 1)
+    await actions(page)
     await page.getByRole('button', { name: '结束选择', exact: true }).click()
     await page.evaluate(value => { window.testBridge.clipboard = value }, adversarialText)
+    await actions(page)
     await page.getByRole('button', { name: '粘贴', exact: true }).click()
     await expect.poll(() => writes(page)).toEqual([adversarialText])
     expect(await page.evaluate(() => window.testBridge.clipboardReads)).toBe(1)

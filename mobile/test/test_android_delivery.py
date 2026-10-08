@@ -54,7 +54,7 @@ class DeliveryBindingTest(unittest.TestCase):
         self.emulator_receipt = self.build(self.emulator, self.emulator_entries, ['arm64-v8a', 'x86_64'])
         self.runtime = {
             'suite': 'real-android-emulator', 'passed': True, 'scope': 'native-and-webview',
-            'instrumentation': {'passed': True, 'tests': 7, 'skipped': 0},
+            'instrumentation': {'passed': True, 'tests': 8, 'skipped': 0},
             'webview': {'passed': True, 'cases': delivery.WEBVIEW_CASES.copy(), 'skipped': 0},
             'tmux': {'passed': True, 'instrumentation': {'passed': True, 'tests': 4, 'skipped': 0},
                      'webview': {'passed': True, 'cases': delivery.TMUX_WEBVIEW_CASES.copy(), 'skipped': 0}},

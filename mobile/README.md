@@ -1,4 +1,4 @@
-# Android SSH and tmux prototype
+# Android mobile SSH candidate
 
 This branch starts from desktop commit
 `fb869900e1ac6da0ff577a53ab7084778d6389bc`. Mobile code is isolated here;
@@ -17,6 +17,46 @@ Mobile saved host-key identities use the native verified public-key blob;
 desktop retains its existing algorithm/fingerprint representation. The shared
 core does not define a cross-platform saved-identity import format.
 
+## Candidate interaction and lifecycle
+
+This product batch is based on design SHA `667663dbeb6b8439dd26471a3fa0be64ab814d7f`.
+It preserves the device-tested prototype `ded417ba852295f3ad76bcca4e6e557d1288ca12`.
+Home returns to the connection workbench without disconnecting. Phones switch
+adjacent sessions by dragging only the central title; larger windows show scrolling
+Tabs. Terminal swipes remain local history gestures. A single scrolling auxiliary
+key row has 48dp targets, one-shot Ctrl/Alt and an accessible all-keys panel. Dragged
+or cancelled key gestures send no bytes. Short landscape hides this row and retains
+the 48dp genuine editor. Font controls use Android's nonlinear sp conversion and
+resize the actual terminal/PTY cells; each pane retains its own size.
+
+Background retention is off by default and starts only from the foreground with
+an established connection. Android 13+ asks through the normal notification
+permission dialog; denial keeps the foreground connection available. The product
+requires visible notifications even though Android itself permits foreground
+services without notification permission. The private `specialUse` service has a
+generic notification and Stop All action, uses `START_NOT_STICKY`, and declares its
+interactive SSH purpose. There is no boot receiver, battery-setting change, wake
+lock or task rescheduling. This is a sideload candidate; specialUse distribution
+review is outside this draft's scope.
+
+Activity recreation cannot preserve the old WebView parser. On reopening, old
+native streams close and saved tmux identity is offered for manual recovery;
+remote tmux sessions are never killed. Background transport loss requires a
+foreground return. Foreground tmux restoration allows at most six backoffs
+(1/2/4/8/16/30 seconds) and 120 seconds elapsed; auth, host-key, account/session
+identity or occupied-session checks pause it. Plain SSH requires an explicit new
+shell. Input queued before backgrounding or a Tab switch is not replayed. The
+existing native and renderer output limits remain bounded; overflow closes with
+an error rather than silently dropping terminal output. Process death never
+promises connection survival or complete output history.
+
+Generated-key creation, encrypted persistent private keys and confirmed public-key
+installation remain a later batch; this APK does not perform enrollment. Existing
+plain/encrypted private-key imports are preserved. No real credentials are accepted
+by this development task. Runtime images and tests use disposable test fixtures;
+only emulator serials are accepted by the runner. Notification decisions use the
+normal UI in fresh disposable emulators and never use `pm grant`.
+
 ## Supported scope
 
 - Password, ordinary/encrypted OpenSSH private-key and keyboard-interactive
@@ -26,8 +66,9 @@ core does not define a cross-platform saved-identity import format.
 - A real textarea for system IME composition; terminal rendering, touch scroll,
   long-press text selection, native clipboard and Ctrl/Esc/Tab/arrow buttons.
 - Viewport-driven PTY resize, connection cancellation, bounded output/input
-  queues and generation checks. Backgrounding closes all connections and
-  clears transient credentials. Each Tab owns its own native SSH transport.
+  queues and generation checks. Backgrounding clears transient credentials.
+  Connections close by default; an explicit visible foreground service can retain
+  established connections while switching apps. Each Tab owns its own native SSH transport.
 - Optional tmux discovery on the authenticated account and chosen socket,
   explicit session selection or atomic named creation, shared/read-only access,
   and explicit takeover. Ordinary SSH remains available; missing tmux is never
@@ -44,7 +85,9 @@ core does not define a cross-platform saved-identity import format.
   takeover do not start automatic recovery. Occupied automatic recovery pauses
   without detaching another client. Private-key and keyboard-interactive sessions
   require explicit credentials/import on recovery; passwords are only kept in
-  foreground memory. No background SSH or hard fencing is promised.
+  foreground memory unless optional native password storage is selected. Background
+  retention is best effort; system termination and network changes can disconnect.
+  No hard fencing is promised.
 
 The configured minimum is Android 8 / API 26; compile/target SDK is 36. The
 default application build targets ARM64. The cloud emulator build explicitly
@@ -55,7 +98,7 @@ bar/cutout or visible IME inset, including navigation space when the IME is
 visible with zero height. Child WebView system-bar/cutout insets are cleared
 after native padding to avoid applying them twice. Capacitor's automatic inset
 handler is disabled; the final WebView layout still drives terminal/PTY resize.
-Jump hosts, SSH agents, X11, host certificates and background SSH remain
+Jump hosts, SSH agents, X11, host certificates and generated-key enrollment remain
 outside this mobile prototype. Real exec control channels are separate from the
 PTY terminal. A framed response is accepted only after native complete channel
 close with an exit status; cancellation/time/output limits fail closed and do
@@ -71,7 +114,13 @@ window transitions and keyboard-height changes while preserving the session
 and updating PTY dimensions; they do not establish a physical fold transition.
 Record the device's installed Android/WebView/IME versions during acceptance.
 
-Credentials are neither logged nor saved to profiles, localStorage or files.
+Credentials are never logged or saved to profiles or Web storage. Optional saved
+passwords use Android Keystore AES-256-GCM and app-private `noBackupFilesDir`,
+bound to normalized host/port/account and the verified host-key blob. They are
+written only after successful authentication. Failed authentication leaves the
+previous entry intact; deletion cancels connections to that target before removing
+the entry. Secret bytes are cleared where practical; temporary JVM/JNI strings
+cannot be guaranteed to be zeroized.
 Public host keys and explicitly saved tmux identities are persistent SSH data;
 saved identity JSON never contains passwords, private keys, key handles or output. Private keys are bounded to
 64 KiB, RSA keys to 8192 bits and encrypted OpenSSH bcrypt cost to 64 rounds;
@@ -162,12 +211,28 @@ input-event categories and focus booleans, never editor text. The history-render
 gate also retains its last bounded geometry and a fixed synthetic-marker
 visibility flag before the later swipe initializes its baseline. Its original
 readiness predicate and deadline remain; no terminal contents are reported.
-When SystemUI's clipboard preview is observed, the harness sends one normal
-native outside touch to the passive app status label, using the existing
-app-window, focus, visibility and stable-geometry guards. It then still requires
-350ms of observed preview absence within the original 10-second phase budget.
-This changes no SystemUI settings, permissions or IME configuration and does
-not touch a foreign window, retry the gesture or synthesize DOM activation.
+When SystemUI's clipboard preview is observed, the harness selects the normal
+close button only inside the exact SystemUI clipboard container. If that control
+is absent, it uses one guarded native outside touch to the app's More button.
+The read-only hierarchy lists system windows because a clipboard preview need
+not own the active window; control selection remains confined to that container.
+See [AOSP's window hierarchy command](https://android.googlesource.com/platform/prebuilts/fullsdk/sources/+/88c7ff1cd72d6305ec59f97aadc2198cc2dc3592/android-34/com/android/commands/uiautomator/DumpCommand.java).
+It still requires 350ms of observed preview absence within the original
+10-second phase budget. Notification Stop similarly belongs to this app's exact
+notification card; a collapsed card is normally expanded once before clicking
+Stop. These bounded actions change no SystemUI settings, permissions or IME
+configuration and never dismiss an ANR, security dialog or foreign notification.
+Independent cloud WebView phases finish their owned instrumentation and restart
+only the disposable app process, retaining native public pins and encrypted
+fixture records. They cannot reuse a cached debug page from a destroyed WebView.
+The actual lifecycle and network checks run within each phase; focus emulation
+is disabled and the native focus gates remain mandatory on every new attach.
+Rebuilt connection forms must also have native foreground focus and stable
+controls before synthetic fixture entry, then retain exact endpoint readback
+for 350ms before the one native submission. These observations remain inside
+the existing harness budget; they neither repair input values nor replay failed
+submissions. Failure diagnostics contain only field-validity/match booleans and
+fixed per-field validation categories, never host, account or credential values.
 See [Android's device-lock API](https://developer.android.com/reference/android/app/KeyguardManager#isDeviceLocked())
 and [TrustManager's direct user dump](https://github.com/aosp-mirror/platform_frameworks_base/blob/master/services/core/java/com/android/server/trust/TrustManagerService.java).
 The

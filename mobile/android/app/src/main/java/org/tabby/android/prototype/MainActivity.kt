@@ -2,6 +2,11 @@ package org.tabby.android.prototype
 
 import android.content.res.Configuration
 import android.os.Bundle
+import android.util.TypedValue
+import android.view.ViewConfiguration
+import androidx.activity.OnBackPressedCallback
+import android.view.inputmethod.InputMethodManager
+import android.content.Context
 import androidx.core.graphics.Insets
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
@@ -13,6 +18,14 @@ class MainActivity : BridgeActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         registerPlugin(TabbySSHPlugin::class.java)
         super.onCreate(savedInstanceState)
+        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() {
+                val insets = ViewCompat.getRootWindowInsets(window.decorView)
+                if (insets?.isVisible(WindowInsetsCompat.Type.ime()) == true) {
+                    (getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager).hideSoftInputFromWindow(bridge.webView.windowToken, 0)
+                } else (bridge?.getPlugin("TabbySSH")?.instance as? TabbySSHPlugin)?.emitBack()
+            }
+        })
         // Also use explicit edge-to-edge on older supported Android versions,
         // so framework fitting cannot duplicate this Activity's safe-area padding.
         WindowCompat.setDecorFitsSystemWindows(window, false)
@@ -52,6 +65,8 @@ class MainActivity : BridgeActivity() {
         val ime = insets?.getInsets(WindowInsetsCompat.Type.ime())
         val visible = insets?.isVisible(WindowInsetsCompat.Type.ime()) ?: false
         return JSObject().apply {
+            put("fontPixels", org.json.JSONObject((12..26).associate { it.toString() to TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, it.toFloat(), resources.displayMetrics) / density }))
+            put("touchSlop", ViewConfiguration.get(this@MainActivity).scaledTouchSlop / density)
             put("visible", visible)
             put("height", if (visible) (ime?.bottom ?: 0) / density else 0)
             put("viewportWidth", (webView?.width ?: 0) / density)
