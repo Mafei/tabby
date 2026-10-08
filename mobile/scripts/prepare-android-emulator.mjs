@@ -35,6 +35,8 @@ function category (value) {
     if (/\bApplication Error: /.test(name)) { return 'CRASH' }
     if (/\bError Dialog\b/.test(name)) { return 'ERROR' }
     if (/\bKeyguard\b|\bBouncer\b/.test(name)) { return 'KEYGUARD' }
+    if (/^Window\{[a-f0-9]+ u\d+ (?:StatusBar|NotificationShade)\}$/.test(name)
+        || /^[a-f0-9]+ (?:StatusBar|NotificationShade)$/.test(name)) { return 'SYSTEM_UI' }
     if (/(?:^|[ \t{])com\.android\.launcher3\/(?:com\.android\.launcher3\.|\.)(?:Launcher|uioverrides\.QuickstepLauncher)(?=[ \t}'\]]|$)/.test(name)) { return 'LAUNCHER' }
     return 'OTHER'
 }
@@ -147,6 +149,55 @@ export function launcherReady (state) {
         && state.windowDrawState === 'HAS_DRAWN'
 }
 
+/** AOSP KeyguardServiceDelegate.dump: unique delegate and direct fields only. */
+export function keyguardPolicyResult (dump) {
+    const body = text(dump)
+    const headers = [...body.matchAll(/^([ \t]*)KeyguardServiceDelegate[ \t]*$/gm)]
+    let direct = ''
+    if (headers.length === 1) {
+        const header = headers[0]
+        const indent = header[1].length
+        for (const line of body.slice(header.index + header[0].length).split('\n')) {
+            const depth = line.match(/^[ \t]*/)?.[0].length || 0
+            if (line.trim() && depth <= indent) { break }
+            if (depth === indent + 2) { direct += line.trim() + '\n' }
+        }
+    }
+    const value = name => unique(direct, new RegExp(`^${name}=([^\\n]*)$`, 'gm'))
+    const result = Object.fromEntries(['showing', 'secure', 'occluded', 'deviceHasKeyguard', 'enabled', 'bootCompleted']
+        .map(name => [name, boolean(value(name))]))
+    const screen = value('screenState'); const interactive = value('interactiveState')
+    result.screenState = ['SCREEN_STATE_OFF', 'SCREEN_STATE_TURNING_ON', 'SCREEN_STATE_ON', 'SCREEN_STATE_TURNING_OFF'].includes(screen) ? screen : 'UNKNOWN'
+    result.interactiveState = ['INTERACTIVE_STATE_SLEEP', 'INTERACTIVE_STATE_WAKING', 'INTERACTIVE_STATE_AWAKE', 'INTERACTIVE_STATE_GOING_TO_SLEEP'].includes(interactive) ? interactive : 'UNKNOWN'
+    return result
+}
+
+export function keyguardReady (state, policy) {
+    // Only the exact SystemUI shade/status-bar titles are eligible. KEYGUARD
+    // remains a diagnostic category, never permission to send this key.
+    // The delegate reports cached policy; this is not a fresh secure-state query.
+    // No focus request
+    // or secure-lock dismissal is performed by this one ordinary MENU event.
+    return policy.secure === false && policy.showing === true && policy.occluded === false
+        && policy.deviceHasKeyguard === true && policy.enabled === true && policy.bootCompleted === true
+        && policy.screenState === 'SCREEN_STATE_ON' && policy.interactiveState === 'INTERACTIVE_STATE_AWAKE'
+        && state.displayId === 0 && state.inputFocusedDisplayId === 0 && state.currentError === false
+        && ['wmsWindow', 'inputWindow', 'inputRequest'].every(key => state[key] === 'SYSTEM_UI')
+        && ['wmsApplication', 'inputApplication', 'activityResumed'].every(key => ['LAUNCHER', 'KEYGUARD', 'SYSTEM_UI', 'NONE'].includes(state[key]))
+        && state.inputRequestResult === 'OK' && state.inputDispatchEnabled === true && state.inputDispatchFrozen === false
+        && state.sameInputWindow === true && state.windowSurface === true && state.windowReadyForDisplay === true
+        && state.windowVisible === true && state.surfaceShown === true && state.windowDrawState === 'HAS_DRAWN'
+}
+
+export function preMenuTarget (state, policy) {
+    const knownPolicy = ['showing', 'secure', 'occluded', 'deviceHasKeyguard', 'enabled', 'bootCompleted']
+        .every(key => typeof policy[key] === 'boolean')
+    if (knownPolicy && policy.secure === false && policy.showing === false && policy.bootCompleted === true
+        && policy.screenState === 'SCREEN_STATE_ON' && policy.interactiveState === 'INTERACTIVE_STATE_AWAKE'
+        && launcherReady(state)) { return 'LAUNCHER' }
+    return keyguardReady(state, policy) ? 'KEYGUARD' : undefined
+}
+
 export function hostCapacity (cpus, meminfo) {
     const kib = name => {
         const value = unique(meminfo, new RegExp(`^${name}:[ \\t]*(\\d+)[ \\t]+kB[ \\t]*$`, 'gm'))
@@ -166,12 +217,17 @@ async function capacity () {
 
 /** One original startup budget; unknown states never satisfy readiness. */
 export async function waitForBoot (android, api, { now = () => performance.now(), sleep = ms => new Promise(resolve => setTimeout(resolve, ms)), report = () => {}, isCancelled = () => false } = {}) {
-    const deadline = now() + BUDGET_MS
+    const started = now()
+    const deadline = started + BUDGET_MS
     let booted = false
     let menuSent = false
     let stableSince
     let stableIdentity
     let lastState
+    let lastPolicy
+    let beforeMenu
+    let preMenuSince
+    let preMenuIdentity
     const inTime = () => {
         check(!isCancelled(), 'ANDROID_BOOT_CANCELLED')
         check(now() < deadline, 'ANDROID_BOOT_READINESS_DEADLINE_EXCEEDED')
@@ -201,26 +257,36 @@ export async function waitForBoot (android, api, { now = () => performance.now()
             }
             if (booted) {
                 const commands = { windows: 'dumpsys window windows', displays: 'dumpsys window displays',
-                    input: 'dumpsys input', activities: 'dumpsys activity activities' }
+                    input: 'dumpsys input', activities: 'dumpsys activity activities',
+                    ...(!menuSent ? { policy: 'dumpsys window policy' } : {}) }
                 const readings = await Promise.allSettled(Object.values(commands).map(shell))
                 inTime()
-                lastState = bootStateResult(Object.fromEntries(Object.keys(commands).map((name, index) => [name,
-                    readings[index].status === 'fulfilled' ? readings[index].value : ''])))
+                const dumps = Object.fromEntries(Object.keys(commands).map((name, index) => [name,
+                    readings[index].status === 'fulfilled' ? readings[index].value : '']))
+                lastState = bootStateResult(dumps)
+                if (!menuSent) { lastPolicy = keyguardPolicyResult(dumps.policy) }
                 check(lastState.currentError !== true, 'ANDROID_BOOT_CURRENT_ERROR_DIALOG')
-                if (!menuSent && lastState.currentError === false) {
-                    // Retain the workflow's one existing ordinary MENU action.
-                    // It cannot bypass a secure keyguard. The application's
-                    // later native secure-keyguard guard remains authoritative.
-                    // No dialog dismissal, focus request or input retry.
-                    menuSent = true
-                    await shell('input keyevent 82')
-                    stableSince = undefined
+                if (!menuSent) {
+                    const target = preMenuTarget(lastState, lastPolicy)
+                    const identity = target ? `${target}:${identities.get(lastState)}:${JSON.stringify(lastPolicy)}` : undefined
+                    if (!target) { preMenuSince = undefined; preMenuIdentity = undefined }
+                    else if (preMenuSince === undefined || preMenuIdentity !== identity) { preMenuSince = now(); preMenuIdentity = identity }
+                    else if (now() - preMenuSince >= STABLE_MS) {
+                        inTime()
+                        beforeMenu = { elapsedMs: Math.min(BUDGET_MS, Math.max(0, Math.floor(now() - started))), target,
+                            state: lastState, keyguard: lastPolicy }
+                        // Readiness is proven before the existing single event;
+                        // a no-focused-window startup cannot enqueue this key.
+                        menuSent = true
+                        await shell('input keyevent 82')
+                        stableSince = undefined
+                    }
                 } else if (menuSent && launcherReady(lastState)) {
                     const identity = identities.get(lastState)
                     if (stableSince === undefined || stableIdentity !== identity) { stableSince = now(); stableIdentity = identity }
                     if (now() - stableSince >= STABLE_MS) {
                         inTime()
-                        report({ status: 'READY', api, menuSent, state: lastState })
+                        report({ status: 'READY', api, menuSent, beforeMenu, state: lastState })
                         return
                     }
                 } else { stableSince = undefined; stableIdentity = undefined }
@@ -233,7 +299,8 @@ export async function waitForBoot (android, api, { now = () => performance.now()
         }
         throw new TestFailure('ANDROID_BOOT_READINESS_DEADLINE_EXCEEDED')
     } catch (error) {
-        report({ status: 'FAILED', api, menuSent, state: lastState || null })
+        report({ status: 'FAILED', api, menuSent, beforeMenu: beforeMenu || null, state: lastState || null,
+            keyguard: lastPolicy || null })
         throw error
     }
 }
