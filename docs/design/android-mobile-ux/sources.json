@@ -1,0 +1,31 @@
+{
+  "checkedAt": "2026-10-08",
+  "baseline": "ded417ba852295f3ad76bcca4e6e557d1288ca12",
+  "sources": [
+    {"id":"termux-view","title":"Termux TerminalView 第一方源码","url":"https://github.com/termux/termux-app/blob/master/terminal-view/src/main/java/com/termux/view/TerminalView.java","scope":"网格指标、历史、选择、mouse tracking；master为读取时源码，不作发布版本声明"},
+    {"id":"termux-client","title":"Termux ViewClient 第一方源码","url":"https://github.com/termux/termux-app/blob/master/app/src/main/java/com/termux/app/terminal/TermuxTerminalViewClient.java","scope":"onScale阶梯字号、点按IME、copyModeChanged抑制drawer"},
+    {"id":"connectbot-host","title":"ConnectBot HostListScreen","url":"https://github.com/connectbot/connectbot/blob/c961b2c36b17bafea5984397c821651b333e612c/app/src/main/java/org/connectbot/ui/screens/hostlist/HostListScreen.kt","scope":"host与console分离、文字/图标状态、48dp主机入口"},
+    {"id":"connectbot-console","title":"ConnectBot ConsoleScreen","url":"https://github.com/connectbot/connectbot/blob/c961b2c36b17bafea5984397c821651b333e612c/app/src/main/java/org/connectbot/ui/screens/console/ConsoleScreen.kt","scope":"可选收起标题、会话选择器、辅助键、显式重连；仅源码"},
+    {"id":"connectbot-public-image","title":"ConnectBot 官方仓库公开商店截图","url":"https://github.com/connectbot/connectbot/blob/c961b2c36b17bafea5984397c821651b333e612c/app/src/oss/play/listings/en-US/graphics/phone-screenshots/2.png","scope":"已目视检查全屏btop内容优先；无app chrome不等于应隐去安全状态；不复制该图到方案"},
+    {"id":"termius-mobile","title":"Termius Mobile terminal","url":"https://docs.termius.com/terminal/mobile-terminal","scope":"官方图示/文档，明确iOS/iPadOS；pinch、扩展键、标准选择，非Android实现证据"},
+    {"id":"termius-workspace","title":"Termius Workspaces","url":"https://docs.termius.com/terminal/workspaces","scope":"focus模式、侧面会话与状态；不采用broadcast/日志/跨端模板"},
+    {"id":"termius-identity","title":"Termius Identities","url":"https://docs.termius.com/keychain/identities","scope":"host与凭据分离；本方案限制为endpoint-account本地密码，不跟随其云模式"},
+    {"id":"android-units","title":"Android Dimension 资源单位","url":"https://developer.android.com/guide/topics/resources/more-resources#Dimension","scope":"dp几何、sp文字、像素不能作可读性或触控面积替代"},
+    {"id":"android-font","title":"Android14 非线性200%字体缩放","url":"https://developer.android.com/about/versions/14/features#non-linear-font-scaling","scope":"sp与TypedValue转换，不使用线性fontScale近似"},
+    {"id":"android-accessibility","title":"Android 可访问性","url":"https://developer.android.com/guide/topics/ui/accessibility/apps","scope":"48dp触摸、对比、标签；控制最小面积不以字体缩小"},
+    {"id":"android-window","title":"Android Window size classes","url":"https://developer.android.com/develop/ui/compose/layouts/adaptive/use-window-size-classes","scope":"随当前窗口尺寸变化；本项目保留WebView而非为了设计迁Compose"},
+    {"id":"android-fold","title":"Android fold-aware布局","url":"https://developer.android.com/develop/ui/compose/layouts/adaptive/foldables/make-your-app-fold-aware","scope":"姿态、分隔hinge和occlusion；需要native WindowManager事实，不能仅用物理面板像素"},
+    {"id":"android16","title":"Android16 目标行为变化","url":"https://developer.android.com/about/versions/16/behavior-changes-16","scope":"edge-to-edge、预测返回、大屏可调整尺寸与配置变化"},
+    {"id":"android-insets","title":"Android Views edge-to-edge","url":"https://developer.android.com/develop/ui/views/layout/edge-to-edge","scope":"system bars、cutout、IME正确留白；延续现有单一所有权"},
+    {"id":"android-ime","title":"Android 输入法可见性","url":"https://developer.android.com/develop/ui/views/touch-and-input/keyboard-input/visibility","scope":"真实焦点、IME显示时机，不用DOM假聚焦替代"},
+    {"id":"android-clipboard","title":"Android 复制粘贴","url":"https://developer.android.com/develop/ui/views/touch-and-input/copy-paste","scope":"用户触发系统剪贴板与反馈；不重复Android13+复制toast"},
+    {"id":"android-fgs-types","title":"Android 前台服务类型","url":"https://developer.android.com/develop/background-work/services/fgs/service-types","scope":"specialUse需声明用途；类型选择为待实现工程判断，非Play批准"},
+    {"id":"android-fgs-start","title":"Android 后台启动FGS限制","url":"https://developer.android.com/develop/background-work/services/fgs/restrictions-bg-start","scope":"用户在前台明确启动；不等Home之后尝试新建服务"},
+    {"id":"android-fgs-timeout","title":"Android FGS超时","url":"https://developer.android.com/develop/background-work/services/fgs/timeout","scope":"dataSync/mediaProcessing六小时限制，shortService更短"},
+    {"id":"android-fgs-stop","title":"Android 用户停止FGS应用","url":"https://developer.android.com/develop/background-work/services/fgs/handle-user-stopping","scope":"Active apps停止可能无回调，REASON_USER_REQUESTED；不自动复活"},
+    {"id":"android-notifications","title":"Android 通知运行时权限","url":"https://developer.android.com/develop/ui/compose/notifications/notification-permission","scope":"拒绝通知仍有Task Manager系统控制；本产品选择需可见通知才开启后台"},
+    {"id":"android-keystore","title":"Android Keystore","url":"https://developer.android.com/privacy-and-security/keystore","scope":"不可导出密钥、可选硬件保护；不保证所有机型StrongBox或进程内明文安全"},
+    {"id":"android-backup","title":"Android Auto Backup","url":"https://developer.android.com/identity/data/autobackup","scope":"noBackupFilesDir与cloud/device-transfer排除；OEM差异不能只依赖allowBackup=false"},
+    {"id":"find-n6","title":"OPPO Find N6 官方参数","url":"https://www.oppo.com/cn/smartphones/series-find-n/find-n6/specs/","scope":"内屏2480×2248、外屏2616×1140、ColorOS16；不推导未测逻辑density"}
+  ]
+}

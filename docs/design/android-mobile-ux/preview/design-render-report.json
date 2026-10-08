@@ -1,0 +1,394 @@
+{
+  "kind": "fictional-design-browser-checks-not-Android-runtime",
+  "baseSourceSha": "ded417ba852295f3ad76bcca4e6e557d1288ca12",
+  "externalRequests": [],
+  "consoleErrors": [],
+  "checks": [
+    {
+      "state": "hosts",
+      "width": 360,
+      "height": 800,
+      "smallTargets": [],
+      "terminalHeight": null
+    },
+    {
+      "state": "connect",
+      "width": 360,
+      "height": 800,
+      "smallTargets": [],
+      "terminalHeight": null
+    },
+    {
+      "state": "trust",
+      "width": 360,
+      "height": 800,
+      "smallTargets": [],
+      "terminalHeight": null
+    },
+    {
+      "state": "tmux",
+      "width": 360,
+      "height": 800,
+      "smallTargets": [],
+      "terminalHeight": null
+    },
+    {
+      "state": "new-session",
+      "width": 360,
+      "height": 800,
+      "smallTargets": [],
+      "terminalHeight": 752
+    },
+    {
+      "state": "occupied",
+      "width": 360,
+      "height": 800,
+      "smallTargets": [],
+      "terminalHeight": 752
+    },
+    {
+      "state": "takeover",
+      "width": 360,
+      "height": 800,
+      "smallTargets": [],
+      "terminalHeight": 752
+    },
+    {
+      "state": "terminal",
+      "width": 360,
+      "height": 800,
+      "smallTargets": [],
+      "terminalHeight": 752
+    },
+    {
+      "state": "terminal-ime",
+      "width": 360,
+      "height": 800,
+      "smallTargets": [],
+      "terminalHeight": 404
+    },
+    {
+      "state": "sessions",
+      "width": 360,
+      "height": 800,
+      "smallTargets": [],
+      "terminalHeight": 752
+    },
+    {
+      "state": "directions",
+      "width": 360,
+      "height": 800,
+      "smallTargets": [],
+      "terminalHeight": 404
+    },
+    {
+      "state": "more",
+      "width": 360,
+      "height": 800,
+      "smallTargets": [],
+      "terminalHeight": 752
+    },
+    {
+      "state": "font",
+      "width": 360,
+      "height": 800,
+      "smallTargets": [],
+      "terminalHeight": 752
+    },
+    {
+      "state": "fold",
+      "width": 840,
+      "height": 900,
+      "smallTargets": [],
+      "terminalHeight": 852
+    },
+    {
+      "state": "fold-ime",
+      "width": 840,
+      "height": 900,
+      "smallTargets": [],
+      "terminalHeight": 484
+    },
+    {
+      "state": "fold-panel",
+      "width": 840,
+      "height": 900,
+      "smallTargets": [],
+      "terminalHeight": 852
+    },
+    {
+      "state": "landscape",
+      "width": 800,
+      "height": 360,
+      "smallTargets": [],
+      "terminalHeight": 132
+    },
+    {
+      "state": "selection",
+      "width": 360,
+      "height": 800,
+      "smallTargets": [],
+      "terminalHeight": 752
+    },
+    {
+      "state": "history",
+      "width": 360,
+      "height": 800,
+      "smallTargets": [],
+      "terminalHeight": 752
+    },
+    {
+      "state": "paste",
+      "width": 360,
+      "height": 800,
+      "smallTargets": [],
+      "terminalHeight": 752
+    },
+    {
+      "state": "readonly",
+      "width": 360,
+      "height": 800,
+      "smallTargets": [],
+      "terminalHeight": 752
+    },
+    {
+      "state": "mouse",
+      "width": 360,
+      "height": 800,
+      "smallTargets": [],
+      "terminalHeight": 752
+    },
+    {
+      "state": "mouse-active",
+      "width": 360,
+      "height": 800,
+      "smallTargets": [],
+      "terminalHeight": 752
+    },
+    {
+      "state": "offline",
+      "width": 360,
+      "height": 800,
+      "smallTargets": [],
+      "terminalHeight": 752
+    },
+    {
+      "state": "offline-details",
+      "width": 360,
+      "height": 800,
+      "smallTargets": [],
+      "terminalHeight": 752
+    },
+    {
+      "state": "changed",
+      "width": 360,
+      "height": 800,
+      "smallTargets": [],
+      "terminalHeight": null
+    },
+    {
+      "state": "missing",
+      "width": 360,
+      "height": 800,
+      "smallTargets": [],
+      "terminalHeight": 752
+    },
+    {
+      "state": "collision",
+      "width": 360,
+      "height": 800,
+      "smallTargets": [],
+      "terminalHeight": 752
+    },
+    {
+      "state": "credentials",
+      "width": 360,
+      "height": 800,
+      "smallTargets": [],
+      "terminalHeight": null
+    },
+    {
+      "state": "update-password",
+      "width": 360,
+      "height": 800,
+      "smallTargets": [],
+      "terminalHeight": 752
+    },
+    {
+      "state": "update-failed",
+      "width": 360,
+      "height": 800,
+      "smallTargets": [],
+      "terminalHeight": 752
+    },
+    {
+      "state": "delete-password",
+      "width": 360,
+      "height": 800,
+      "smallTargets": [],
+      "terminalHeight": 752
+    },
+    {
+      "state": "deleted",
+      "width": 360,
+      "height": 800,
+      "smallTargets": [],
+      "terminalHeight": null
+    },
+    {
+      "state": "background",
+      "width": 360,
+      "height": 800,
+      "smallTargets": [],
+      "terminalHeight": 752
+    },
+    {
+      "state": "permission",
+      "width": 360,
+      "height": 800,
+      "smallTargets": [],
+      "terminalHeight": 752
+    },
+    {
+      "state": "permission-denied",
+      "width": 360,
+      "height": 800,
+      "smallTargets": [],
+      "terminalHeight": 752
+    },
+    {
+      "state": "notification",
+      "width": 360,
+      "height": 800,
+      "smallTargets": [],
+      "terminalHeight": null
+    },
+    {
+      "state": "disconnect",
+      "width": 360,
+      "height": 800,
+      "smallTargets": [],
+      "terminalHeight": 752
+    },
+    {
+      "state": "stopped",
+      "width": 360,
+      "height": 800,
+      "smallTargets": [],
+      "terminalHeight": null
+    },
+    {
+      "flow": "first-login",
+      "transitions": 4,
+      "passed": true
+    },
+    {
+      "flow": "takeover",
+      "transitions": 3,
+      "passed": true
+    },
+    {
+      "flow": "duplicate",
+      "transitions": 3,
+      "passed": true
+    },
+    {
+      "flow": "paste-cancel",
+      "transitions": 3,
+      "passed": true
+    },
+    {
+      "flow": "delete",
+      "transitions": 3,
+      "passed": true
+    },
+    {
+      "flow": "update-failure",
+      "transitions": 3,
+      "passed": true
+    },
+    {
+      "flow": "notification-stop",
+      "transitions": 5,
+      "passed": true
+    },
+    {
+      "flow": "permission-denial",
+      "transitions": 3,
+      "passed": true
+    },
+    {
+      "flow": "missing-recovery",
+      "transitions": 3,
+      "passed": true
+    },
+    {
+      "viewport": [
+        360,
+        800
+      ],
+      "screen": "terminal-ime",
+      "passed": true
+    },
+    {
+      "viewport": [
+        420,
+        900
+      ],
+      "screen": "terminal",
+      "passed": true
+    },
+    {
+      "viewport": [
+        840,
+        900
+      ],
+      "screen": "fold-ime",
+      "passed": true
+    },
+    {
+      "viewport": [
+        800,
+        360
+      ],
+      "screen": "landscape",
+      "passed": true
+    }
+  ],
+  "storageEntries": 0,
+  "status": "passed",
+  "artifacts": {
+    "Tabby-Android-First-Connection-Design.png": {
+      "bytes": 266294,
+      "sha256": "e30b9d1f729f400a3910be6dec66e6cec109d6af037aab04a7099c673cabd07e"
+    },
+    "Tabby-Android-Foldable-Design.png": {
+      "bytes": 194735,
+      "sha256": "d8dcb5225fcc399e8ac1aac6ac1a7f8d409b956182bafc6506ec228d222899da"
+    },
+    "fold-ime.png": {
+      "bytes": 143282,
+      "sha256": "580b8c24e717b7f754d4867b7c57cf5ec39746e893a2a1aeeb3c8364bf90aee9"
+    },
+    "landscape.png": {
+      "bytes": 64110,
+      "sha256": "fc9070217fed617376f05f4afc11e98d06c0d3915ebf160728d77204b78986c6"
+    },
+    "Tabby-Android-Design-Review.pdf": {
+      "bytes": 1461176,
+      "sha256": "2d7d26f22cbeee6a89b88b93e931162cdb5d11bb58df680e82224dabb7856f53"
+    },
+    "Tabby-Android-Terminal-Design.png": {
+      "bytes": 298068,
+      "sha256": "a0d9446fa330570639e9dc9abc9303e58f1cbc7b1866c508a20891945ccc3aae"
+    },
+    "terminal.png": {
+      "bytes": 83895,
+      "sha256": "1764f6faf23bd6f42858fd863590a872b1b5da4838540ef0249659383748a3a2"
+    },
+    "terminal-ime.png": {
+      "bytes": 96401,
+      "sha256": "4b97edf9e937a81b57e49e792d9ef4133aaaeebd91823e39a26bd44086798e2e"
+    }
+  }
+}

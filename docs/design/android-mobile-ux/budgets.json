@@ -1,0 +1,18 @@
+{
+  "kind":"design-estimate-not-device-measurement",
+  "fontSp":16,
+  "cellWidthDp":9.6,
+  "cellHeightDp":20.8,
+  "paddingDp":8,
+  "statusDp":48,
+  "rows":[
+    {"id":"phone-off","label":"窄屏·键盘关","width":360,"height":800,"ime":0,"keys":0,"input":0,"panel":0},
+    {"id":"phone-on","label":"窄屏·键盘开","width":360,"height":800,"ime":300,"keys":48,"input":0,"panel":0},
+    {"id":"phone-minimal","label":"窄屏·快捷条收起","width":360,"height":800,"ime":300,"keys":0,"input":0,"panel":0},
+    {"id":"phone-safe-input","label":"窄屏·保留输入条降级","width":360,"height":800,"ime":300,"keys":48,"input":48,"panel":0},
+    {"id":"unfold-off","label":"展开·键盘关","width":840,"height":900,"ime":0,"keys":0,"input":0,"panel":0},
+    {"id":"unfold-on","label":"展开·键盘开","width":840,"height":900,"ime":320,"keys":48,"input":0,"panel":0},
+    {"id":"landscape-on","label":"横屏·键盘开","width":800,"height":360,"ime":180,"keys":0,"input":0,"panel":0}
+  ],
+  "colors":{"background":"#111820","surface":"#19232e","text":"#e7edf3","muted":"#acbbc7","accent":"#74e4c8","warning":"#ffc780","danger":"#ff9c9c"}
+}

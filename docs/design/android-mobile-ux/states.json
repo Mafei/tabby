@@ -1,0 +1,158 @@
+{
+  "hosts": {
+    "label": "01 · 连接工作台",
+    "note": "工作台保留连接入口；登录后不常驻主机表单。"
+  },
+  "connect": {
+    "label": "02 · 首次连接",
+    "note": ""
+  },
+  "trust": {
+    "label": "03 · 首次主机校验",
+    "note": ""
+  },
+  "tmux": {
+    "label": "04 · tmux 列表",
+    "note": ""
+  },
+  "new-session": {
+    "label": "05 · 新建会话",
+    "note": ""
+  },
+  "occupied": {
+    "label": "06 · 已被使用",
+    "note": ""
+  },
+  "takeover": {
+    "label": "07 · 显式接管",
+    "note": ""
+  },
+  "terminal": {
+    "label": "08 · 专注终端 · 键盘关",
+    "note": "只有 48dp 状态行常驻。大块内容区不放重复品牌、新建或断开按钮。"
+  },
+  "terminal-ime": {
+    "label": "09 · 专注终端 · 键盘开",
+    "note": "360×800 安全窗口假设，IME300dp。终端矩形404dp，35×18估算；非设备测量。"
+  },
+  "sessions": {
+    "label": "10 · 切换会话",
+    "note": ""
+  },
+  "directions": {
+    "label": "11 · 方向键面板",
+    "note": ""
+  },
+  "more": {
+    "label": "12 · 按需操作",
+    "note": ""
+  },
+  "font": {
+    "label": "13 · 终端字号",
+    "note": ""
+  },
+  "fold": {
+    "label": "14 · 展开 · 专注终端",
+    "note": "设计窗口840×900；85×40估算。展开也不自动出现占宽侧栏。"
+  },
+  "fold-ime": {
+    "label": "15 · 展开 · 键盘开",
+    "note": "设计窗口840×900，IME320；终端矩形484dp，85×22估算。"
+  },
+  "fold-panel": {
+    "label": "16 · 展开 · 可选会话面板",
+    "note": "用户主动展开240dp会话侧栏后，网格按剩余窗口重算。"
+  },
+  "landscape": {
+    "label": "17 · 横屏短窗口",
+    "note": "800×360，IME180。默认收起快捷条，终端矩形132dp；81×5估算。"
+  },
+  "selection": {
+    "label": "18 · 文本选择",
+    "note": "第一批保留冻结解析文本与系统选择柄的两阶段行为，待真机验证后再简化。"
+  },
+  "history": {
+    "label": "19 · 回看历史",
+    "note": ""
+  },
+  "paste": {
+    "label": "20 · 多行粘贴确认",
+    "note": ""
+  },
+  "readonly": {
+    "label": "21 · 只读会话",
+    "note": "允许回看、选择和复制；键盘、粘贴、快捷键和鼠标均不得发送远端输入。"
+  },
+  "mouse": {
+    "label": "22 · 显式鼠标模式",
+    "note": ""
+  },
+  "mouse-active": {
+    "label": "23 · 鼠标模式活动",
+    "note": "初批在鼠标模式关闭双指缩放，避免第一指提前发送远端输入。"
+  },
+  "offline": {
+    "label": "24 · 等待网络",
+    "note": ""
+  },
+  "offline-details": {
+    "label": "25 · 恢复详情",
+    "note": ""
+  },
+  "changed": {
+    "label": "26 · 主机密钥变化",
+    "note": ""
+  },
+  "missing": {
+    "label": "27 · 恢复目标不存在",
+    "note": ""
+  },
+  "collision": {
+    "label": "28 · 新建重名失败",
+    "note": ""
+  },
+  "credentials": {
+    "label": "29 · 本地凭据",
+    "note": ""
+  },
+  "update-password": {
+    "label": "30 · 更新密码",
+    "note": ""
+  },
+  "update-failed": {
+    "label": "31 · 更新认证失败",
+    "note": ""
+  },
+  "delete-password": {
+    "label": "32 · 删除密码确认",
+    "note": ""
+  },
+  "deleted": {
+    "label": "33 · 密码已删除",
+    "note": ""
+  },
+  "background": {
+    "label": "34 · 后台连接说明",
+    "note": ""
+  },
+  "permission": {
+    "label": "35 · 通知权限解释",
+    "note": ""
+  },
+  "permission-denied": {
+    "label": "36 · 通知权限拒绝",
+    "note": ""
+  },
+  "notification": {
+    "label": "37 · 连接通知示意",
+    "note": ""
+  },
+  "disconnect": {
+    "label": "38 · 断开当前连接",
+    "note": ""
+  },
+  "stopped": {
+    "label": "39 · 用户停止",
+    "note": ""
+  }
+}
