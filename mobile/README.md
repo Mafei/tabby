@@ -214,6 +214,9 @@ readiness predicate and deadline remain; no terminal contents are reported.
 When SystemUI's clipboard preview is observed, the harness selects the normal
 close button only inside the exact SystemUI clipboard container. If that control
 is absent, it uses one guarded native outside touch to the app's More button.
+The read-only hierarchy lists system windows because a clipboard preview need
+not own the active window; control selection remains confined to that container.
+See [AOSP's window hierarchy command](https://android.googlesource.com/platform/prebuilts/fullsdk/sources/+/88c7ff1cd72d6305ec59f97aadc2198cc2dc3592/android-34/com/android/commands/uiautomator/DumpCommand.java).
 It still requires 350ms of observed preview absence within the original
 10-second phase budget. Notification Stop similarly belongs to this app's exact
 notification card; a collapsed card is normally expanded once before clicking

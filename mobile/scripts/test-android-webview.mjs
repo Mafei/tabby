@@ -381,7 +381,10 @@ export async function webviewAcceptance (android, fixture) {
                 if (!dismissalSent) {
                     let point
                     try {
-                        await android.shell('uiautomator dump /data/local/tmp/tabby-owned-clipboard.xml', { timeout: Math.max(1, Math.min(3000, deadline - Date.now())) })
+                        // Clipboard previews need not own the active window.
+                        // Read all windows, then select only the exact SystemUI
+                        // clipboard container; no unrelated control is touched.
+                        await android.shell('uiautomator dump --windows /data/local/tmp/tabby-owned-clipboard.xml', { timeout: Math.max(1, Math.min(3000, deadline - Date.now())) })
                         point = systemUIActionPoint(await android.shell('cat /data/local/tmp/tabby-owned-clipboard.xml',
                             { timeout: Math.max(1, Math.min(1000, deadline - Date.now())) }), 'clipboardDismiss')
                     } catch (error) {

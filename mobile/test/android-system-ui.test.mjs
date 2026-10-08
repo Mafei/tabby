@@ -17,6 +17,8 @@ test('clipboard close must belong to the exact SystemUI clipboard container', ()
     const close = button('com.android.systemui:id/dismiss_button')
     assert.equal(systemUIActionPoint(close, 'clipboardDismiss'), undefined)
     assert.deepEqual(systemUIActionPoint(`<node resource-id="com.android.systemui:id/clipboard_ui">${close}</node>`, 'clipboardDismiss'), { x: 30, y: 40 })
+    const windows = `<displays><display><window><hierarchy><node resource-id="other.app:id/root">${close}</node></hierarchy></window><window><hierarchy><node resource-id="com.android.systemui:id/clipboard_ui">${close}</node></hierarchy></window></display></displays>`
+    assert.deepEqual(systemUIActionPoint(windows, 'clipboardDismiss'), { x: 30, y: 40 })
 })
 test('malformed, empty or disabled bounds and foreign packages fail closed', () => {
     for (const value of [button('android:id/expand_button', 'other.app'), button('android:id/expand_button').replace('[50,60]', '[10,20]'), button('android:id/expand_button').replace('enabled="true"', 'enabled="false"')]) {
