@@ -192,7 +192,10 @@ export function keyguardReady (state, policy) {
 export function preMenuTarget (state, policy) {
     const knownPolicy = ['showing', 'secure', 'occluded', 'deviceHasKeyguard', 'enabled', 'bootCompleted']
         .every(key => typeof policy[key] === 'boolean')
-    if (knownPolicy && policy.secure === false && policy.showing === false && policy.bootCompleted === true
+    // The cached secure flag can remain true after boot even with an unlocked
+    // Launcher. Its full live focus/drawing checks and showing=false authorize
+    // only the ordinary MENU event; the keyguard path still requires secure=false.
+    if (knownPolicy && policy.showing === false && policy.bootCompleted === true
         && policy.screenState === 'SCREEN_STATE_ON' && policy.interactiveState === 'INTERACTIVE_STATE_AWAKE'
         && launcherReady(state)) { return 'LAUNCHER' }
     return keyguardReady(state, policy) ? 'KEYGUARD' : undefined

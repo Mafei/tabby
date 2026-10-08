@@ -64,6 +64,22 @@ test('a proven nonsecure drawn keyguard receives one MENU then actual Launcher r
     assert.equal(fixture.reports.at(-1).beforeMenu.target, 'KEYGUARD')
     assert.equal(fixture.reports.at(-1).beforeMenu.keyguard.secure, false)
 })
+test('an unlocked focused Launcher with a known cached secure flag receives one ordinary MENU', async () => {
+    const fixture = controlled(() => dumps({ secure: true }))
+    await fixture.run()
+    assert.equal(fixture.menuCount(), 1)
+    assert(fixture.menuAt() >= 350)
+    assert(fixture.clock() - fixture.menuAt() >= 350)
+    const report = fixture.reports.at(-1)
+    assert.equal(report.status, 'READY')
+    assert.equal(report.beforeMenu.target, 'LAUNCHER')
+    assert.equal(report.beforeMenu.keyguard.secure, true)
+    assert.equal(report.beforeMenu.keyguard.showing, false)
+    assert(launcherReady(report.beforeMenu.state))
+    const unknown = controlled(() => ({ ...dumps(), policy: keyguardPolicy().replace('secure=false', 'secure=unknown') }))
+    await assert.rejects(unknown.run(), error => error.code === 'ANDROID_BOOT_READINESS_DEADLINE_EXCEEDED')
+    assert.equal(unknown.menuCount(), 0)
+})
 test('secure and unknown keyguard policy never dispatch MENU or pass after 240s', async () => {
     for (const policy of [keyguardPolicy(true, true), '', keyguardPolicy(true).replace('secure=false', 'secure=unknown')]) {
         const fixture = controlled(() => ({ ...dumps({ target: 'keyguard', showing: true }), policy }))
