@@ -93,7 +93,7 @@ const nextInputOwner = () => ++inputOwnerGeneration
       </section>
       <div class="key-row" [hidden]="!busy || selectionOpen || hideKeys || viewportHeight < 220">
         <div *ngIf="ctrlHeld || altHeld" class="modifier-chips" aria-label="已启用的修饰键"><button (pointerdown)="keepInputFocus($event)" (click)="clearModifiers()">{{ctrlHeld ? 'Ctrl ' : ''}}{{altHeld ? 'Alt' : ''}} ×</button></div>
-        <nav class="tools" aria-label="终端辅助键" (pointerdown)="keyStart($event)" (pointermove)="keyMove($event)" (pointerup)="keyEnd($event)" (pointercancel)="keyCancel()" (click)="keyClick($event)">
+        <nav class="tools" aria-label="终端辅助键" (pointerdown)="keyStart($event)" (pointermove)="keyMove($event)" (pointerup)="keyEnd($event)" (pointercancel)="keyCancel()" (click)="keyClick($event)" (mousedown)="keepInputFocus($event)">
           <button *ngFor="let key of auxiliaryKeys" [attr.data-key]="key.id" [disabled]="!connected || readOnly || !!modal" [attr.aria-label]="key.label" [attr.aria-pressed]="key.id === 'Ctrl' ? ctrlHeld : key.id === 'Alt' ? altHeld : null">{{key.text}}</button>
         </nav>
         <button class="all-keys" [disabled]="!connected || readOnly" (pointerdown)="keepInputFocus($event)" (click)="keysOpen = !keysOpen" aria-label="全部辅助键">⋯</button>
@@ -247,8 +247,8 @@ export class SessionPaneComponent implements AfterViewInit, OnDestroy {
             try { await this.connect(true); await ready }
             finally { signal.removeEventListener('abort', abort) }
         },
-        credentialsAvailable: () => this.authMode === 'password' && this.volatilePassword !== undefined,
-        foreground: () => !this.destroyed && document.visibilityState !== 'hidden',
+        credentialsAvailable: () => this.authMode === 'password' && (this.volatilePassword !== undefined || this.savedPassword && this.useSavedPassword),
+        foreground: () => this.foreground && !this.destroyed && document.visibilityState !== 'hidden',
         hasBinding: () => !!this.boundBinding,
         paused: reason => this.zone.run(() => { this.releaseTransport(false, false); this.notice = this.tmuxMessage(reason) }),
         scheduled: delay => this.zone.run(() => { this.statusText = '等待恢复'; this.notice = `网络已中断，将在 ${Math.ceil(delay / 1000)} 秒后尝试恢复。` }),
@@ -615,6 +615,7 @@ export class SessionPaneComponent implements AfterViewInit, OnDestroy {
             endpoint_changed: '服务器主机密钥、地址或账号与保存身份不同，恢复已停止。', account_changed: '认证后的 Unix 账号已变化，恢复已停止。',
             host_verification_required: '此设备需要重新确认主机密钥，请手动恢复会话。',
             session_occupied: '会话已有其他客户端，自动恢复已暂停。可手动选择共享、只读或显式接管。', credentials_required: '需要新的认证凭据。请手动恢复会话。',
+            recovery_exhausted: '自动恢复已达到 6 次 / 120 秒上限。会话身份已保留，请手动恢复。',
             background: '应用进入后台，SSH 已关闭。返回后请手动恢复会话。', session_create_failed: '无法新建会话。名称可能已存在；不会转为连接同名会话。',
             tmux_missing: '服务器没有 tmux，恢复已停止；不会安装或重新创建。', tmux_detection_failed: '无法检测所选 tmux socket。请检查权限、socket 和 tmux 版本。',
             invalid_tmux_metadata: '服务器返回的会话身份信息无效，操作已停止。', transport_lost: '网络已中断，请等待恢复或手动重新连接。',
@@ -775,7 +776,7 @@ export class SessionPaneComponent implements AfterViewInit, OnDestroy {
         catch { this.zone.run(() => { this.notice = '无法删除本地密码。请重试。' }) }
     }
 
-    keepInputFocus(event: PointerEvent): void { event.preventDefault() }
+    keepInputFocus(event: Event): void { event.preventDefault() }
     focusInput(): void {
         if (this.foreground && this.active && this.connected && !this.modal && !this.selectionMode && !this.readOnly) {
             this.inputElement?.nativeElement.focus({ preventScroll: true })

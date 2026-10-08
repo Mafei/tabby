@@ -304,15 +304,30 @@ interface RecoveryOptions {
 /** Retry only an unexpected transport loss while bound and in the foreground. */
 export class MobileTmuxRecovery {
     private readonly controller = new SSHReconnectController()
+    private attempts = 0
+    private deadline = 0
+    private budgetTimer?: ReturnType<typeof setTimeout>
     constructor(private readonly options: RecoveryOptions) {}
-    cancel(): void { this.controller.cancel() }
-    reset(): void { this.controller.reset() }
+    cancel(): void { this.controller.cancel(); if (this.budgetTimer) clearTimeout(this.budgetTimer); this.budgetTimer = undefined }
+    reset(): void { this.cancel(); this.controller.reset(); this.attempts = 0; this.deadline = 0 }
+    private schedule(): number {
+        if (!this.deadline) {
+            this.deadline = performance.now() + 120000
+            this.budgetTimer = setTimeout(() => { this.cancel(); this.options.paused('recovery_exhausted') }, 120000)
+        }
+        if (this.attempts >= 6 || performance.now() >= this.deadline) {
+            this.cancel(); this.options.paused('recovery_exhausted'); return 0
+        }
+        const delay = this.controller.schedule(() => { void this.run() }, () => .5)
+        if (delay) this.attempts++
+        return delay
+    }
     current(epoch: number): boolean { return this.controller.current(epoch) }
     transportLost(event: SSHEvent): boolean {
         if (event.type !== 'state' || event.state !== 'error' || event.code !== 'transport_lost' || event.transportLost !== true || !this.options.hasBinding()) { return false }
         if (!this.options.foreground()) { this.cancel(); this.options.paused('background'); return true }
         if (!this.options.credentialsAvailable()) { this.cancel(); this.options.paused('credentials_required'); return true }
-        const delay = this.controller.schedule(() => { void this.run() })
+        const delay = this.schedule()
         if (delay) { this.options.scheduled(delay) }
         return true
     }
@@ -321,7 +336,7 @@ export class MobileTmuxRecovery {
             if (signal.aborted || !this.options.hasBinding() || !this.options.foreground() || !this.options.credentialsAvailable()) { return }
             try {
                 await new Promise<void>((resolve, reject) => {
-                    const timer = setTimeout(() => reject(new MobileTmuxError('recovery_timeout')), 75000)
+                    const timer = setTimeout(() => reject(new MobileTmuxError('recovery_timeout')), Math.max(1, Math.min(75000, this.deadline - performance.now())))
                     const abort = () => { clearTimeout(timer); reject(new MobileTmuxError('exec_cancelled')) }
                     signal.addEventListener('abort', abort, { once: true })
                     Promise.resolve().then(() => this.options.connect(signal, epoch)).then(resolve, reject)
@@ -332,7 +347,7 @@ export class MobileTmuxRecovery {
                 if (this.controller.current(epoch)) {
                     if (error instanceof MobileTmuxError && ['transport_lost', 'tcp_failed', 'tcp_timeout'].includes(error.code) &&
                         this.options.hasBinding() && this.options.foreground() && this.options.credentialsAvailable()) {
-                        const delay = this.controller.schedule(() => { void this.run() })
+                        const delay = this.schedule()
                         if (delay) { this.options.scheduled(delay) }
                         return
                     }
