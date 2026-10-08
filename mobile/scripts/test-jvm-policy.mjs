@@ -76,10 +76,12 @@ try {
         source('app/src/main/java/org/tabby/android/prototype/ConnectionGate.kt'),
         source('app/src/main/java/org/tabby/android/prototype/OutputWindow.kt'),
         source('app/src/main/java/org/tabby/android/prototype/PrivateKeyVault.kt'),
+        source('app/src/main/java/org/tabby/android/prototype/PrivateKeyImport.kt'),
         source('app/src/main/java/org/tabby/android/prototype/BridgeNumbers.kt'),
-        source('app/src/test/java/org/tabby/android/prototype/SecurityPolicyTest.kt')])
+        source('app/src/test/java/org/tabby/android/prototype/SecurityPolicyTest.kt'),
+        source('app/src/test/java/org/tabby/android/prototype/PrivateKeyImportTest.kt')])
     await run(java, ['-cp', `${classes}${delimiter}${classpath}`, 'org.junit.runner.JUnitCore',
-        'org.tabby.android.prototype.SecurityPolicyTest'])
+        'org.tabby.android.prototype.SecurityPolicyTest', 'org.tabby.android.prototype.PrivateKeyImportTest'])
 } finally {
     await rm(classes, { recursive: true, force: true })
 }

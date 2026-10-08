@@ -9,14 +9,14 @@ button.primary, button.active { background: #165765; border-color: #8cffff; }
 .app-shell { height: 100dvh; display: flex; flex-direction: column; padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }
 header { display: flex; align-items: center; gap: 12px; padding: .35rem .7rem; border-bottom: 1px solid #364052; flex: 0 0 auto; }
 header strong { color: #8cffff; font-size: 1.15rem; }
-.status { flex: 1; font-size: .85rem; }
+.status { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .85rem; }
 .connect-panel { flex: 1 1 0; min-height: 0; padding: .3rem .8rem; overflow: auto; }
 .connect-panel p { margin: .4rem 0; }
 form label { display: flex; flex-direction: column; gap: .3rem; margin: .5rem 0; }
 input, select { min-height: 42px; padding: .45rem; width: 100%; background: #212936; color: #fff; border: 1px solid #607088; border-radius: 6px; }
 .endpoint-row { display: flex; gap: .7rem; }
-.endpoint-row label:first-child { flex: 1; }
-.port { width: 90px; }
+.endpoint-row label:first-child { flex: 1; min-width: 0; }
+.port { width: 90px; flex: 0 0 90px; }
 .hint { color: #a9b6ca; font-size: .78rem; }
 .terminal-area { flex: 1 1 0; min-height: 0; position: relative; overflow: hidden; touch-action: none; }
 .terminal-host { width: 100%; height: 100%; padding: 3px; }
@@ -24,16 +24,16 @@ input, select { min-height: 42px; padding: .45rem; width: 100%; background: #212
 .selection-layer { position: absolute; inset: 0; display: flex; flex-direction: column; background: #171b24; }
 .selection-notice { font-size: .74rem; padding: .5rem; background: #293343; color: #b9cfdf; }
 .selection-layer pre { margin: 0; padding: .65rem; flex: 1; min-height: 0; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; -webkit-user-select: text; touch-action: pan-y; font: 14px/1.4 monospace; }
-.tools, .actions { display: flex; gap: 3px; padding: 3px 4px; flex: 0 0 auto; background: #202733; }
-.tools button { flex: 1; padding-inline: .2rem; }
-.actions button { flex: 1; font-size: .76rem; padding-inline: .25rem; }
+.tools, .actions { display: flex; gap: 3px; padding: 3px 4px; flex: 0 0 auto; min-width: 0; overflow-x: auto; overscroll-behavior-x: contain; touch-action: pan-x; background: #202733; }
+.tools button { flex: 1 0 44px; padding-inline: .2rem; }
+.actions button { flex: 1 0 auto; font-size: .76rem; padding-inline: .25rem; white-space: nowrap; }
 .input-strip { display: flex; align-items: center; gap: 5px; padding: 3px 5px; flex: 0 0 auto; background: #202733; }
 .input-strip span { font-size: .75rem; color: #bcc9db; }
 .input-strip textarea { flex: 1; min-width: 0; height: 44px; resize: none; padding: 10px; border: 1px solid #607088; border-radius: 5px; color: #eee; background: #171b24; }
 /* Keep the static terminal host and generation-owned input in the DOM, but
    reserve their layout space only while connecting or connected. */
 .terminal-area[hidden], .tools[hidden], .actions[hidden], .input-strip[hidden] { display: none; }
-.notice { flex: 0 0 auto; padding: .35rem .65rem; font-size: .78rem; background: #3c3422; }
+.notice { flex: 0 0 auto; max-height: 3.2em; overflow: auto; padding: .35rem .65rem; font-size: .78rem; background: #3c3422; }
 .modal-backdrop { position: fixed; inset: 0; background: #000b; display: flex; align-items: center; justify-content: center; padding: 16px; z-index: 10; overflow-y: auto; }
 .modal-card { width: min(480px, 100%); max-height: 100%; overflow: auto; background: #212936; border: 1px solid #607088; border-radius: 12px; padding: 1rem; }
 .modal-card h2 { margin: 0 0 .8rem; font-size: 1.2rem; }
@@ -41,3 +41,14 @@ input, select { min-height: 42px; padding: .45rem; width: 100%; background: #212
 .modal-card p { font-size: .9rem; line-height: 1.5; }
 .modal-card div { display: flex; gap: 10px; justify-content: flex-end; }
 @media (max-height: 450px) { header { padding-block: 0; } .tools button, .actions button, .input-strip textarea { min-height: 36px; height: 36px; } .input-strip span { display: none; } }
+/* Keep one terminal row and the input reachable when a keyboard or small
+   landscape window leaves too little height for both toolbar rows. */
+@media (max-height: 180px) {
+    .app-shell.terminal-active { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr) auto auto auto; }
+    .terminal-active > header { grid-column: 1 / -1; grid-row: 1; }
+    .terminal-active > .terminal-area { grid-column: 1 / -1; grid-row: 2; }
+    .terminal-active > .tools { grid-column: 1; grid-row: 3; }
+    .terminal-active > .actions { grid-column: 2; grid-row: 3; }
+    .terminal-active > .input-strip { grid-column: 1 / -1; grid-row: 4; }
+    .terminal-active > .notice { grid-column: 1 / -1; grid-row: 5; }
+}

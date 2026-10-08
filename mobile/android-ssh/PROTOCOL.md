@@ -73,6 +73,18 @@ stored in profiles/localStorage/logs. This crate erases its secret wrappers on
 best-effort drop; the JVM and russh may create temporary copies, so this is not a
 guarantee of locked-memory storage.
 
+The Android picker uses a separate process-wide single-flight import coordinator.
+Its absolute 30-second deadline starts after document selection, not during user
+browsing. Provider read/query work stays off the UI thread and waits for actual
+foreground resume; delivery rechecks the request and foreground state. Provider
+cancellation and descriptor close use bounded independent workers. A provider
+that ignores cancellation retains the single import permit until actual cleanup,
+including after Activity recreation; cancellation never creates replacement
+reader threads or delivers late key bytes to the vault. Temporary byte buffers
+are erased when the read/handoff cleanup actually runs. If a provider never
+returns, a canceled import can remain unavailable until process restart, and
+its partial buffer cannot be promised erased at the deadline.
+
 Encrypted OpenSSH keys have a maximum bcrypt cost of 64 rounds; encrypted
 PKCS#8 keys are outside prototype support. Key text is limited to 64 KiB and RSA
 client keys to 8192 bits. Two global key-decoder permits remain held until the

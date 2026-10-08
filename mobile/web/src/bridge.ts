@@ -48,8 +48,9 @@ export interface SSHBridge {
     writeClipboard(options: { text: string }): Promise<void>
     readClipboard(): Promise<{ text: string }>
     selectPrivateKey(): Promise<{ keyId: string, label: string }>
+    cancelPrivateKeySelection(): Promise<void>
     discardPrivateKey(options: { keyId: string }): Promise<void>
-    showKeyboard(): Promise<void>
+    showKeyboard(options: { connectionId: string, generation: number }): Promise<void>
     hideKeyboard(): Promise<void>
     getViewport(): Promise<{ visible: boolean, height: number, viewportWidth: number, viewportHeight: number }>
 }

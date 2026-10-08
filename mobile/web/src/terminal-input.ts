@@ -11,9 +11,12 @@ export class TerminalInput {
     constructor(private element: HTMLTextAreaElement, private send: (value: string) => void,
         private keySequence?: (event: KeyboardEvent) => string | undefined) {
         this.reset()
+        // A cancelled or blurred editor must not commit an IME candidate to a
+        // different focus owner or retain a composing state until reconnect.
+        this.listen('blur', () => this.cancel())
         this.listen('compositionstart', () => { if (this.focused) { this.composing = true } })
         this.listen('compositionend', () => {
-            if (!this.composing || !this.focused) { this.reset(); return }
+            if (!this.composing || !this.focused) { this.cancel(); return }
             this.composing = false
             // Chromium can deliver the committed input after compositionend.
             this.commitTimer = setTimeout(() => {
@@ -73,6 +76,7 @@ export class TerminalInput {
     }
 
     private commit(): void {
+        if (!this.focused) { this.cancel(); return }
         const text = this.element.value.replace(TerminalInput.sentinel, '')
         if (text) { this.send(text) }
         this.reset()

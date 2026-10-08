@@ -4,7 +4,7 @@ This branch starts from desktop commit
 `fb869900e1ac6da0ff577a53ab7084778d6389bc`. Mobile code is isolated here;
 desktop source and packaging remain unchanged.
 
-The prototype has one host and one terminal. Angular 15 and xterm 6 render the
+The prototype has one host and one terminal. Angular 22.2.1 and xterm 6 render the
 terminal; a Capacitor 8 Kotlin plugin calls a JNI library using the same pinned
 `russh 0.63.3` core as desktop Tabby. SSH connects directly from the device to
 the host. The production app contains no test bridge, Node runtime or gateway.
@@ -48,13 +48,18 @@ Record the device's installed Android/WebView/IME versions during acceptance.
 Credentials are neither logged nor saved to profiles, localStorage or files.
 Public host keys are the only persistent SSH data. Private keys are bounded to
 64 KiB, RSA keys to 8192 bits and encrypted OpenSSH bcrypt cost to 64 rounds;
-encrypted PKCS#8 is outside prototype support. Memory cleanup is best effort:
+encrypted PKCS#8 is outside prototype support. After the document picker returns,
+provider I/O runs off the UI thread with one process-wide reader and a 30-second
+absolute deadline. Cancellation invalidates delivery, cancels provider access
+and closes its descriptor; a provider that ignores cancellation retains the
+import slot until actual cleanup, including across Activity recreation.
+No new workers accumulate while it is stuck. Memory cleanup is best effort:
 JVM strings and SSH libraries can create temporary copies. See the precise
 [native protocol and limits](android-ssh/PROTOCOL.md).
 
 ## Checks without Android SDK
 
-Use Node 22+, Rust 1.90, JDK 21, a C compiler, Python 3 and an installed Chromium
+Use the pinned Node 24.19.0, Rust 1.90, JDK 21, a C compiler, Python 3 and an installed Chromium
 or Chrome. All SSH tests use an isolated loopback server, generated temporary
 credentials and a real system PTY; they never connect to a user server.
 
@@ -62,6 +67,9 @@ credentials and a real system PTY; they never connect to a user server.
 npm ci --ignore-scripts --prefix mobile
 npm run check --prefix mobile
 npm run build --prefix mobile
+npm run test:toolchain --prefix mobile
+npm audit --omit=dev --audit-level=low --prefix mobile
+npm audit --audit-level=low --prefix mobile
 CHROMIUM_PATH=/usr/bin/chromium npm run test:web --prefix mobile
 npm run test:fixture --prefix mobile
 cargo fmt --check --manifest-path mobile/android-ssh/Cargo.toml
@@ -70,6 +78,7 @@ cargo build --locked --features jni --manifest-path mobile/android-ssh/Cargo.tom
 node mobile/scripts/test-fixture-jni.mjs
 node mobile/scripts/test-jvm-policy.mjs
 npm run test:delivery --prefix mobile
+python3 -m unittest discover -s mobile/test -p test_android_web_security.py -v
 ```
 
 `JAVA_HOME` selects JDK 21. The JVM runners fetch public Maven compiler/test
@@ -145,6 +154,12 @@ ANDROID_HOME=/path/to/approved/sdk python3 mobile/scripts/verify-android-apk.py 
 
 The receipt records source commit/tree, APK and public test certificate hashes,
 packaged permissions, native ABIs, JNI exports and 16 KiB ZIP/ELF alignment.
+It also inspects the actual bundled HTML/script bytes, requires the production
+CSP and local external app script, and rejects test/debug assets, inline scripts,
+inline event handlers, duplicate policies and script-policy overrides. The APK's
+web payload must match the verified AOT graph and delivery-file hashes in
+`mobile/.angular/`; repeat the web build from the same committed source before
+independently inspecting a downloaded APK.
 APK inspection expects only ARM64 by default. The emulator APK requires the
 explicit verifier option `--expected-abis arm64-v8a,x86_64`; an APK with the wrong
 or repeated native entries fails inspection.
@@ -206,9 +221,21 @@ GUI acceptance. Local cloud KVM is absent, and ADB requires a read-only home pat
 Android runtime verification uses the supported GitHub runner rather than changing
 that workspace boundary. Inspect the runtime receipt and CI conclusion for results.
 
-Angular 15 was retained for reuse with the desktop code. The production dependency
-audit reports 5 affected packages (3 high, 2 moderate). The prototype does not
-use HTTP transfer cache, SSR/hydration, SVG or dynamic remote templates; remote
-output is terminal data/plain text. A supported Angular/AOT migration and a fresh
-dependency review are required before a production mobile release. The audit is
-not clean.
+The mobile frontend independently uses the supported
+[Angular 22 line](https://angular.dev/reference/releases), TypeScript 6.0.3 and
+the public application builder with strict AOT compilation. The runtime does not
+include Angular's compiler. Production graph verification binds its SHA256 to
+all generated delivery bytes, and repeated verification refuses stale or altered
+output. Build statistics, source maps and browser-test code remain outside the APK.
+The CSP allows only same-origin external scripts; it permits neither script
+`unsafe-eval` nor script `unsafe-inline`. The style policy retains `unsafe-inline`
+for Angular/xterm's dynamic styles. Normal page-script negative tests measure
+actual CSP enforcement rather than privileged browser-debugger execution.
+
+As checked on 2026-10-08, both production and complete `npm audit` results have
+zero findings for this exact mobile lockfile. CI requires both audits to pass at
+the low threshold. Capacitor core/Android remain 8.5.2; CLI 8.5.3 has a narrow
+`xcode@3.0.1` → `uuid@11.1.1` override. Its actual CommonJS UUID generation and
+small-buffer rejection are tested before Capacitor sync. This audit is a dated
+dependency check, not proof that the prototype is free of security defects.
+Desktop dependency versions are not changed by this migration.

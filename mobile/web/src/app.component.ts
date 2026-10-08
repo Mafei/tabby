@@ -1,4 +1,4 @@
-import { AfterViewInit, Component, ElementRef, NgZone, OnDestroy, ViewChild, inject } from '@angular/core'
+import { AfterViewInit, ChangeDetectionStrategy, Component, ElementRef, NgZone, OnDestroy, ViewChild, inject } from '@angular/core'
 import { CommonModule } from '@angular/common'
 import { FormsModule } from '@angular/forms'
 import type { PluginListenerHandle } from '@capacitor/core'
@@ -10,10 +10,10 @@ interface AuthFields { password: string, passphrase: string, keyId: string }
 interface Prompt { text: string, echo: boolean, response: string }
 
 @Component({
-    selector: 'tabby-mobile', standalone: true,
+    selector: 'tabby-mobile', standalone: true, changeDetection: ChangeDetectionStrategy.Eager,
     imports: [CommonModule, FormsModule],
     template: `
-    <main class="app-shell" [style.height.px]="viewportHeight || null">
+    <main class="app-shell" [class.terminal-active]="busy" [style.height.px]="viewportHeight || null">
       <header><strong>Tabby</strong><span class="status" role="status">{{statusText}}</span>
         <button *ngIf="busy" (click)="disconnect()" aria-label="断开或取消连接">断开</button></header>
       <section *ngIf="!busy" class="connect-panel" aria-label="SSH 连接">
@@ -79,8 +79,8 @@ export class AppComponent implements AfterViewInit, OnDestroy {
         if (this.inputElement?.nativeElement === value?.nativeElement) { return }
         this.inputElement?.nativeElement.removeEventListener('paste', this.pasteEvent)
         this.input?.dispose(); this.input = undefined
+        this.inputElement = value
         if (value) {
-            this.inputElement = value
             this.input = new TerminalInput(value.nativeElement, text => this.sendText(text), event => {
                 const direction = ({ ArrowUp: 'A', ArrowDown: 'B', ArrowRight: 'C', ArrowLeft: 'D' } as const)[event.key as 'ArrowUp']
                 if (!direction) { return undefined }
@@ -90,7 +90,7 @@ export class AppComponent implements AfterViewInit, OnDestroy {
             value.nativeElement.addEventListener('paste', this.pasteEvent)
         }
     }
-    inputElement!: ElementRef<HTMLTextAreaElement>
+    inputElement?: ElementRef<HTMLTextAreaElement>
     inputEpochs = [0]
     readonly trackInputEpoch = (_index: number, epoch: number) => epoch
     @ViewChild('selectionText') selectionElement?: ElementRef<HTMLElement>
@@ -122,7 +122,7 @@ export class AppComponent implements AfterViewInit, OnDestroy {
     private pendingInputBytes = 0
     private protocolReplies: Uint8Array[] = []
     private protocolReplyBytes = 0
-    private touch?: { y: number, x: number, moved: boolean }
+    private touch?: { pointerId: number, y: number, x: number, moved: boolean }
     private touchTimer?: ReturnType<typeof setTimeout>
     private pastePending?: string
     private readonly viewportListener = () => this.zone.run(() => this.updateViewport())
@@ -165,7 +165,7 @@ export class AppComponent implements AfterViewInit, OnDestroy {
         this.password = ''; this.passphrase = ''
         this.busy = true; this.connected = false; this.statusText = '连接中'; this.notice = ''
         this.events = []; this.ctrlHeld = false; this.selectionMode = false; this.hostVerified = false; this.lastSequence = -1
-        this.input?.cancel(); this.inputElement.nativeElement.blur(); this.inputEpochs = [generation]; this.createView()
+        this.input?.cancel(); this.inputElement?.nativeElement.blur(); this.inputEpochs = [generation]; this.createView()
         await this.ready
         if (generation !== this.generation || this.destroyed) { return }
         try {
@@ -205,7 +205,7 @@ export class AppComponent implements AfterViewInit, OnDestroy {
             if (event.status === 'known') { this.hostVerified = true; return }
             if (!Number.isSafeInteger(event.requestId) || !event.fingerprint || !event.algorithm) { this.fail('主机密钥信息不完整。'); return }
             this.requestId = event.requestId; this.hostKeyFingerprint = event.fingerprint; this.hostKeyAlgorithm = event.algorithm
-            this.modal = 'hostKey'; this.statusText = '等待主机密钥确认'; this.inputElement.nativeElement.blur()
+            this.modal = 'hostKey'; this.statusText = '等待主机密钥确认'; this.inputElement?.nativeElement.blur()
             this.input?.cancel()
         } else if (event.type === 'auth') {
             if (!this.hostVerified) { this.fail('主机密钥尚未验证，认证已停止。'); return }
@@ -214,7 +214,7 @@ export class AppComponent implements AfterViewInit, OnDestroy {
             if (event.mode === 'keyboardInteractive') {
                 this.prompts = (event.prompts ?? []).map(prompt => ({ text: prompt.prompt, echo: prompt.echo, response: '' }))
                 this.authInstructions = event.instructions ?? ''
-                this.modal = 'auth'; this.statusText = '等待认证'; this.inputElement.nativeElement.blur()
+                this.modal = 'auth'; this.statusText = '等待认证'; this.inputElement?.nativeElement.blur()
                 this.input?.cancel()
             } else {
                 const auth = this.auth; this.auth = undefined
@@ -255,7 +255,10 @@ export class AppComponent implements AfterViewInit, OnDestroy {
     }
 
     disconnect(invalidatePicker = true): void {
-        if (invalidatePicker) { ++this.pickerToken }
+        if (invalidatePicker) {
+            ++this.pickerToken
+            void this.bridge.cancelPrivateKeySelection().catch(() => {})
+        }
         ++this.generation
         const connectionId = this.connectionId; this.connectionId = undefined
         const keyId = this.keyId
@@ -264,9 +267,14 @@ export class AppComponent implements AfterViewInit, OnDestroy {
         this.busy = false; this.connected = false; this.statusText = '未连接'; this.ctrlHeld = false
         this.hostVerified = false; this.commandQueue = Promise.resolve(); this.pendingInputBytes = 0
         this.protocolReplies = []; this.protocolReplyBytes = 0
+        this.touchCancel()
+        this.selectionMode = false; this.selectionSnapshot = ''; this.mouseMode = false; this.pastePending = undefined
+        window.getSelection()?.removeAllRanges()
         this.inputElement?.nativeElement.blur()
         this.input?.cancel()
         this.inputEpochs = [this.generation]
+        this.view?.dispose(); this.view = undefined
+        this.terminalHost?.nativeElement.replaceChildren()
         // start can reject or cancellation can precede its returned connection
         // ID. Release imported material independently of transport cleanup.
         if (keyId) { void this.bridge.discardPrivateKey({ keyId }).catch(() => {}) }
@@ -355,8 +363,10 @@ export class AppComponent implements AfterViewInit, OnDestroy {
     keepInputFocus(event: PointerEvent): void { event.preventDefault() }
     focusInput(): void {
         if (this.connected && !this.modal && !this.selectionMode) {
-            this.inputElement.nativeElement.focus()
-            void this.bridge.showKeyboard().catch(() => {})
+            this.inputElement?.nativeElement.focus({ preventScroll: true })
+            if (document.activeElement !== this.inputElement?.nativeElement) { return }
+            const connectionId = this.connectionId
+            if (connectionId) { void this.bridge.showKeyboard({ connectionId, generation: this.generation }).catch(() => {}) }
         }
     }
 
@@ -387,7 +397,7 @@ export class AppComponent implements AfterViewInit, OnDestroy {
         this.selectionMode = !this.selectionMode
         if (this.selectionMode) {
             this.selectionSnapshot = this.view?.snapshot() ?? ''
-            this.inputElement.nativeElement.blur(); this.mouseMode = false
+            this.inputElement?.nativeElement.blur(); this.mouseMode = false
         } else { this.selectionSnapshot = ''; window.getSelection()?.removeAllRanges() }
     }
 
@@ -397,7 +407,11 @@ export class AppComponent implements AfterViewInit, OnDestroy {
         const selection = window.getSelection()
         const text = this.selectionElement?.nativeElement.contains(selection?.anchorNode ?? null) ? selection?.toString() : this.view?.terminal.getSelection()
         if (!text) { this.notice = '请先长按或拖动选择文字。'; return }
-        try { await this.bridge.writeClipboard({ text }); this.setNotice('已复制。') } catch { this.setNotice('复制失败。') }
+        const generation = this.generation
+        try {
+            await this.bridge.writeClipboard({ text })
+            if (generation === this.generation && !this.destroyed) { this.setNotice('已复制。') }
+        } catch { if (generation === this.generation && !this.destroyed) { this.setNotice('复制失败。') } }
     }
 
     private readonly pasteEvent = (event: ClipboardEvent) => {
@@ -427,15 +441,19 @@ export class AppComponent implements AfterViewInit, OnDestroy {
     }
 
     touchStart(event: PointerEvent): void {
-        if (event.pointerType !== 'touch' || this.selectionMode || this.mouseMode) { return }
-        this.touch = { y: event.clientY, x: event.clientX, moved: false }
+        if (event.pointerType !== 'touch' || !event.isPrimary || !this.connected || this.modal || this.selectionMode || this.mouseMode) { return }
+        this.touchCancel()
+        const touch = this.touch = { pointerId: event.pointerId, y: event.clientY, x: event.clientX, moved: false }
+        const generation = this.generation
         this.touchTimer = setTimeout(() => this.zone.run(() => {
-            if (this.touch && !this.touch.moved) { this.toggleSelection(); this.touchCancel() }
+            if (this.touch === touch && generation === this.generation && this.connected && !this.modal && !touch.moved) {
+                this.toggleSelection(); this.touchCancel()
+            }
         }), 550)
     }
 
     touchMove(event: PointerEvent): void {
-        if (!this.touch || this.selectionMode || this.mouseMode) { return }
+        if (!this.touch || event.pointerId !== this.touch.pointerId || this.selectionMode || this.mouseMode) { return }
         const delta = event.clientY - this.touch.y
         if (Math.abs(delta) > 6 || Math.abs(event.clientX - this.touch.x) > 6) {
             this.touch.moved = true
@@ -447,7 +465,8 @@ export class AppComponent implements AfterViewInit, OnDestroy {
     }
 
     touchEnd(event: PointerEvent): void {
-        if (this.touch && !this.touch.moved && !this.selectionMode && !this.modal) { this.focusInput() }
+        if (!this.touch || event.pointerId !== this.touch.pointerId) { return }
+        if (!this.touch.moved && !this.selectionMode && !this.modal) { this.focusInput() }
         this.touchCancel()
     }
 
@@ -459,7 +478,7 @@ export class AppComponent implements AfterViewInit, OnDestroy {
     ngOnDestroy(): void {
         this.destroyed = true; this.disconnect(); this.touchCancel()
         this.handles.forEach(handle => { void handle.remove() }); this.handles = []
-        this.inputElement.nativeElement.removeEventListener('paste', this.pasteEvent)
+        this.inputElement?.nativeElement.removeEventListener('paste', this.pasteEvent)
         this.input?.dispose(); this.view?.dispose()
         window.visualViewport?.removeEventListener('resize', this.viewportListener)
         window.visualViewport?.removeEventListener('scroll', this.viewportListener)

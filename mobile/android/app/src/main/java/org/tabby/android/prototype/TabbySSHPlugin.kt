@@ -5,6 +5,9 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
+import android.os.CancellationSignal
+import android.os.ParcelFileDescriptor
 import android.provider.OpenableColumns
 import android.view.inputmethod.InputMethodManager
 import androidx.activity.result.ActivityResult
@@ -24,6 +27,7 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicReference
 
 @CapacitorPlugin(name = "TabbySSH")
 class TabbySSHPlugin : Plugin() {
@@ -34,7 +38,15 @@ class TabbySSHPlugin : Plugin() {
         val hostKeys: MutableMap<String, String> = ConcurrentHashMap(),
         val batchPending: AtomicBoolean = AtomicBoolean(false),
         val outputWindow: OutputWindow = OutputWindow(),
+        @Volatile var ready: Boolean = false,
     )
+
+    private class Selection(val call: PluginCall) {
+        val cancelled = AtomicBoolean(false)
+        val settled = AtomicBoolean(false)
+        @Volatile var returned = false
+    }
+    private data class SelectedDocument(val selection: Selection, val uri: Uri)
 
     private val sessions = ConcurrentHashMap<Long, Session>()
     private val privateKeys = PrivateKeyVault()
@@ -42,6 +54,33 @@ class TabbySSHPlugin : Plugin() {
     @Volatile private var foreground = true
     @Volatile private var destroyed = false
     private val pickerPending = AtomicBoolean(false)
+    private val selectionLock = Any()
+    private val selection = AtomicReference<Selection?>()
+    private val keyImports by lazy {
+        PrivateKeyImport<SelectedDocument>(
+            foreground = { foreground && !destroyed },
+            dispatch = { action -> activity.runOnUiThread(action) },
+            read = { document, ticket -> readPrivateKey(document.uri, ticket) },
+            success = { document, material ->
+                synchronized(selectionLock) {
+                    val chosen = document.selection
+                    require(foreground && !destroyed && selection.get() === chosen && !chosen.cancelled.get())
+                    require(!chosen.settled.get())
+                    val keyId = UUID.randomUUID().toString()
+                    try {
+                        privateKeys.replace(keyId, material.bytes.copyOf())
+                        chosen.call.resolve(JSObject().put("keyId", keyId).put("label", material.label.take(256)))
+                        chosen.settled.set(true)
+                    } catch (error: Throwable) {
+                        privateKeys.discard(setOf(keyId))
+                        throw error
+                    }
+                }
+            },
+            failure = { document, code -> rejectSelection(document.selection, code) },
+            finished = { document -> finishSelection(document.selection) },
+        )
+    }
     private var lastViewport = ""
     private lateinit var hostKeyStore: HostKeyStore
     private lateinit var hostKeyPolicy: HostKeyPolicy
@@ -64,6 +103,7 @@ class TabbySSHPlugin : Plugin() {
 
     @PluginMethod
     fun start(call: PluginCall) {
+        cancelSelection()
         val startingKeys = privateKeys.snapshot()
         var allocatedId: Long? = null
         var allocatedSession: Session? = null
@@ -266,6 +306,7 @@ class TabbySSHPlugin : Plugin() {
                 emit(session, event)
             }
             else -> {
+                if (event.optString("type") == "state" && event.optString("state") == "ready") session.ready = true
                 emit(session, event)
                 if (event.optString("type") == "state" && event.optString("state") in setOf("closed", "error")) {
                     closeSession(session, event.optString("code", "closed"), notify = false)
@@ -317,20 +358,27 @@ class TabbySSHPlugin : Plugin() {
 
     override fun handleOnPause() {
         foreground = false
+        // Opening SAF pauses this Activity. A selected document is different:
+        // its import is cancelled by the next genuine foreground loss.
+        if (selection.get()?.returned == true) cancelSelection()
         closeAll("background")
         notifyListeners("lifecycleState", JSObject().put("active", false)
-            .put("reason", if (pickerPending.get()) "privateKeyPicker" else "background"))
+            .put("reason", if (pickerPending.get() && selection.get()?.cancelled?.get() == false) "privateKeyPicker" else "background"))
     }
 
     override fun handleOnResume() {
         foreground = true
         notifyListeners("lifecycleState", JSObject().put("active", true))
+        keyImports.resume()
         activity.runOnUiThread { (activity as? MainActivity)?.let { emitViewport(it.viewportState()) } }
     }
 
     override fun handleOnDestroy() {
         destroyed = true
         foreground = false
+        cancelSelection()
+        selection.get()?.takeIf { !it.returned }?.let { finishSelection(it) }
+        keyImports.close()
         closeAll("destroyed")
         worker.shutdownNow()
     }
@@ -349,11 +397,22 @@ class TabbySSHPlugin : Plugin() {
 
     @PluginMethod
     fun showKeyboard(call: PluginCall) {
+        val id = call.getString("connectionId")?.toLongOrNull()
+        val generation = try { BridgeNumbers.generation(call.data.opt("generation")) } catch (_: Throwable) { null }
+        val session = id?.let { sessions[it] }
         activity.runOnUiThread {
-            bridge.webView.requestFocus()
-            val manager = context.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
-            manager.showSoftInput(bridge.webView, InputMethodManager.SHOW_IMPLICIT)
-            call.resolve()
+            try {
+                val webView = bridge.webView
+                require(id != null && session != null && sessions[id] === session && generation == session.gate.generation)
+                require(foreground && !destroyed && session.gate.isActive() && session.ready)
+                require(activity.window.decorView.hasWindowFocus() && webView.hasWindowFocus()
+                    && webView.hasFocus() && webView.isAttachedToWindow && webView.isShown && webView.onCheckIsTextEditor())
+                val manager = context.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
+                if (manager.showSoftInput(webView, InputMethodManager.SHOW_IMPLICIT)) call.resolve()
+                else call.reject("The terminal editor is not ready for the keyboard", "KEYBOARD_NOT_READY")
+            } catch (_: Throwable) {
+                call.reject("The terminal editor is not ready for the keyboard", "KEYBOARD_NOT_READY")
+            }
         }
     }
 
@@ -391,17 +450,46 @@ class TabbySSHPlugin : Plugin() {
             call.reject("Key selection is unavailable or already in progress", "KEY_PICKER_UNAVAILABLE")
             return
         }
+        val chosen = Selection(call)
+        selection.set(chosen)
         val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
             addCategory(Intent.CATEGORY_OPENABLE)
             type = "*/*"
         }
         // Transient SAF access only: no storage permission or persisted URI grant.
-        try {
-            startActivityForResult(call, intent, "privateKeySelected")
-        } catch (_: Throwable) {
-            pickerPending.set(false)
-            call.reject("Cannot open the system file picker", "KEY_PICKER_UNAVAILABLE")
+        activity.runOnUiThread {
+            try {
+                require(foreground && !destroyed && selection.get() === chosen && !chosen.cancelled.get())
+                startActivityForResult(call, intent, "privateKeySelected")
+            } catch (_: Throwable) {
+                rejectSelection(chosen, "KEY_PICKER_UNAVAILABLE")
+                finishSelection(chosen)
+            }
         }
+    }
+
+    @PluginMethod
+    fun cancelPrivateKeySelection(call: PluginCall) {
+        cancelSelection()
+        call.resolve()
+    }
+
+    private fun cancelSelection() {
+        synchronized(selectionLock) {
+            selection.get()?.let { chosen ->
+                chosen.cancelled.set(true)
+                rejectSelection(chosen, "KEY_IMPORT_CANCELLED")
+            }
+        }
+        keyImports.cancel()
+    }
+
+    private fun rejectSelection(chosen: Selection, code: String) {
+        if (chosen.settled.compareAndSet(false, true)) chosen.call.reject("Private key selection or import did not complete", code)
+    }
+
+    private fun finishSelection(chosen: Selection) {
+        if (selection.compareAndSet(chosen, null)) pickerPending.set(false)
     }
 
     @PluginMethod
@@ -412,48 +500,67 @@ class TabbySSHPlugin : Plugin() {
 
     @ActivityCallback
     private fun privateKeySelected(call: PluginCall?, result: ActivityResult) {
-        if (call == null) {
-            pickerPending.set(false)
+        val chosen = selection.get()
+        if (chosen == null || call !== chosen.call) {
+            return
+        }
+        chosen.returned = true
+        if (destroyed || chosen.cancelled.get()) {
+            rejectSelection(chosen, "KEY_IMPORT_CANCELLED")
+            finishSelection(chosen)
             return
         }
         if (result.resultCode != Activity.RESULT_OK || result.data?.data == null) {
-            pickerPending.set(false)
-            call.reject("Key selection cancelled", "CANCELLED")
+            rejectSelection(chosen, "CANCELLED")
+            finishSelection(chosen)
             return
         }
+        // Only the transient URI/call waits for onResume; no provider I/O or
+        // private-key bytes run on this Activity callback's main thread.
+        if (!keyImports.begin(SelectedDocument(chosen, result.data!!.data!!))) {
+            rejectSelection(chosen, "KEY_IMPORT_UNAVAILABLE")
+            finishSelection(chosen)
+        }
+    }
+
+    private fun readPrivateKey(uri: Uri, ticket: PrivateKeyImport.Ticket): PrivateKeyImport.Material {
         var imported: ByteArray? = null
+        val cancellation = CancellationSignal()
+        ticket.onCancel { cancellation.cancel() }
         try {
-            require(!destroyed)
-            val uri = result.data!!.data!!
-            val bytes = context.contentResolver.openInputStream(uri)?.use { stream ->
-                val buffer = ByteArray(65_537)
-                try {
-                    var count = 0
-                    while (count < buffer.size) {
-                        val read = stream.read(buffer, count, buffer.size - count)
-                        if (read < 0) break
-                        if (read == 0) continue
-                        count += read
+            ticket.check()
+            val descriptor = context.contentResolver.openFileDescriptor(uri, "r", cancellation) ?: error("unreadable")
+            ticket.onCancel { descriptor.close() }
+            val bytes = descriptor.use {
+                ParcelFileDescriptor.AutoCloseInputStream(descriptor).use { stream ->
+                    val buffer = ByteArray(65_537)
+                    try {
+                        var count = 0
+                        while (count < buffer.size) {
+                            ticket.check()
+                            val read = stream.read(buffer, count, buffer.size - count)
+                            if (read < 0) break
+                            require(read > 0)
+                            count += read
+                        }
+                        require(count in 1..65_536)
+                        buffer.copyOf(count).also { imported = it }
+                    } finally {
+                        buffer.fill(0)
                     }
-                    require(count in 1..65_536)
-                    buffer.copyOf(count)
-                } finally {
-                    buffer.fill(0)
                 }
-            } ?: error("unreadable")
+            }
             imported = bytes
-            val label = context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
-                if (cursor.moveToFirst()) cursor.getString(0) else "Private key"
+            ticket.check()
+            val label = context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null, cancellation)?.use { cursor ->
+                if (cursor.moveToFirst()) cursor.getString(0) ?: "Private key" else "Private key"
             } ?: "Private key"
-            val keyId = UUID.randomUUID().toString()
-            privateKeys.replace(keyId, bytes)
-            imported = null // Ownership is transferred to the native-memory vault.
-            call.resolve(JSObject().put("keyId", keyId).put("label", label.take(256)))
-        } catch (_: Throwable) {
-            call.reject("Cannot read the selected private key", "KEY_IMPORT_FAILED")
+            ticket.check()
+            val material = PrivateKeyImport.Material(bytes, label.take(256))
+            imported = null // The single-flight coordinator now owns this buffer.
+            return material
         } finally {
             imported?.fill(0)
-            pickerPending.set(false)
         }
     }
 }

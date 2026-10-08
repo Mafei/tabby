@@ -1,6 +1,6 @@
 # Android web interface prototype
 
-This is an independent Angular 15 / xterm 6 build. It imports Tabby's existing
+This is an independent Angular 22.2.1 AOT / xterm 6 build. It imports Tabby's existing
 `tabby-terminal/src/generatePalette.ts` directly; it does not load desktop
 Electron, Node, filesystem, plugin installer, or SSH N-API modules. Native SSH is
 provided by the Android `TabbySSH` Capacitor plugin. Ordinary browsers cannot
@@ -17,8 +17,10 @@ CHROMIUM_PATH=/usr/bin/chromium npm run test:web
 
 The optional `CHROMIUM_PATH` selects an already installed browser. Otherwise
 Playwright uses its standard installed Chromium. The test harness and fake
-bridge live exclusively under `web/tests/`; the production build includes only
-`web/index.html` and does not package them.
+bridge live exclusively under `web/tests/`. The static test server serves the
+actual compiled production application, adding an external test-only native RPC
+shim only to the harness page. The ordinary production page has no fake bridge.
+The APK packages neither the shim nor CSP probe, build graph or source maps.
 
 ## Input and touch behavior
 
@@ -65,6 +67,11 @@ The controlled system file-picker pause still closes SSH and clears previous
 credentials, but preserves its independent picker request token until the import
 returns. A genuine cancellation, new connection, background event, or destruction
 invalidates that token; stale imported key handles are explicitly discarded.
+Native import waits for foreground resume, reads provider data off the UI thread
+and only commits to the in-memory vault after checking the current request and
+foreground state again. Canceling the preconnection picker has an explicit
+native path. Requests to show the keyboard carry connection ID/generation and
+require the actual focused, visible terminal editor and native window.
 
 Every connection receives a new xterm instance so queued output/parser replies
 cannot reach a new host. User input and parser replies have separate paths;
@@ -94,9 +101,12 @@ commit/backspace/cancel, different system IMEs, touch selection handles/context
 menu, system copy/paste, scroll versus TUI mouse behavior, keyboard height and
 rotation, and remote `stty size`/TUI resize. No browser test replaces those checks.
 
-Angular 15 matches the desktop code generation but is an older dependency line.
-The dependency audit reports advisories in Angular packages. This prototype does
-not use HTTP transfer cache, SSR/hydration, SVG or dynamic remote templates, and
-remote output is displayed only as terminal data/plain text. A production mobile
-release still needs a supported Angular/AOT migration and a fresh dependency
-review; this prototype does not claim a clean dependency audit.
+Strict AOT compilation omits the runtime Angular compiler. Production build
+verification checks the compiled graph and binds it to every generated delivery
+file by SHA256. The script CSP is exactly `script-src 'self'`, without eval or
+inline script exceptions; Angular/xterm still require dynamic inline styles.
+Separate normal-page CSP tests verify that eval, Function, string timers and
+inline DOM scripts are blocked while an external script and callable timer work.
+These tests do not use privileged debugger evaluation as an enforcement result.
+Both production and full mobile dependency audits are clean as checked on
+2026-10-08; the workflow fails on new findings at the low threshold.

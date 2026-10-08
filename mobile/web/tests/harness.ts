@@ -1,12 +1,6 @@
-// This entry is served only by Vite's development test server. Production builds
-// include index.html alone: no fake transport is included in the Android APK.
-import 'zone.js'
-import '@angular/compiler'
-import { enableProdMode } from '@angular/core'
-import { bootstrapApplication } from '@angular/platform-browser'
-import { AppComponent } from '../src/app.component'
-import { SSH_BRIDGE, type SSHBridge, type SSHCommand, type SSHEvent, type SSHStart } from '../src/bridge'
-import '../src/styles.css'
+// Test-only native RPC substitute, loaded before the unchanged production AOT
+// app. It is served outside www and contains no Angular bootstrap/compiler.
+import type { SSHBridge, SSHCommand, SSHEvent, SSHStart } from '../src/bridge'
 
 export class TestBridge implements SSHBridge {
     readonly starts: (SSHStart & { connectionId: string })[] = []
@@ -22,6 +16,7 @@ export class TestBridge implements SSHBridge {
     holdClipboard = false
     holdPicker = false
     discardedKeys: string[] = []
+    cancelledKeySelections = 0
     nextDataSequence = 0
     private startResolvers: { resolve: () => void, reject: (error: Error) => void }[] = []
     private commandResolvers: (() => void)[] = []
@@ -63,6 +58,7 @@ export class TestBridge implements SSHBridge {
         return { keyId: 'test-key', label: this.pickerLabel }
     }
     async discardPrivateKey({ keyId }: { keyId: string }): Promise<void> { this.discardedKeys.push(keyId) }
+    async cancelPrivateKeySelection(): Promise<void> { this.cancelledKeySelections++ }
     async showKeyboard(): Promise<void> {}
     async hideKeyboard(): Promise<void> {}
     async getViewport() { return { visible: false, height: 0, viewportWidth: innerWidth, viewportHeight: innerHeight } }
@@ -71,6 +67,27 @@ export class TestBridge implements SSHBridge {
 declare global { interface Window { testBridge: TestBridge, attackMarker: number[] } }
 window.testBridge = new TestBridge()
 window.attackMarker = []
-enableProdMode()
-bootstrapApplication(AppComponent, { providers: [{ provide: SSH_BRIDGE, useValue: window.testBridge }] })
-    .catch(error => { document.body.textContent = `Test harness failed: ${error.message}` })
+const nativeListeners = new Map<string, { remove: () => Promise<void> }>()
+let callbackSequence = 0
+const methods = ['start', 'command', 'close', 'writeClipboard', 'readClipboard', 'selectPrivateKey',
+    'discardPrivateKey', 'cancelPrivateKeySelection', 'showKeyboard', 'hideKeyboard', 'getViewport', 'removeListener']
+;(window as unknown as { Capacitor: unknown }).Capacitor = {
+    PluginHeaders: [{ name: 'TabbySSH', methods: [
+        ...methods.map(name => ({ name, rtype: 'promise' })), { name: 'addListener', rtype: 'callback' },
+    ] }],
+    nativePromise: async (plugin: string, method: string, options: Record<string, string>) => {
+        if (plugin !== 'TabbySSH') { throw new Error('Unexpected test plugin') }
+        if (method === 'removeListener') {
+            await nativeListeners.get(options.callbackId)?.remove(); nativeListeners.delete(options.callbackId); return
+        }
+        const action = (window.testBridge as unknown as Record<string, (options: unknown) => Promise<unknown>>)[method]
+        if (!action) { throw new Error('Unexpected test native method') }
+        return action.call(window.testBridge, options)
+    },
+    nativeCallback: async (plugin: string, method: string, options: { eventName: string }, callback: (event: never) => void) => {
+        if (plugin !== 'TabbySSH' || method !== 'addListener') { throw new Error('Unexpected test callback') }
+        const callbackId = `test-callback-${++callbackSequence}`
+        nativeListeners.set(callbackId, await window.testBridge.addListener(options.eventName, callback))
+        return callbackId
+    },
+}

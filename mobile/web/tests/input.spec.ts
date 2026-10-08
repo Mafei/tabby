@@ -261,6 +261,104 @@ test('composition preedit is withheld; candidate commits once with final Chromiu
     await expect.poll(() => writes(page)).toEqual(['你', '\x7f', '中'])
 })
 
+test('blur cancels preedit and a pending composition commit without poisoning the next editor focus', async ({ page }) => {
+    await ready(page, true)
+    const field = page.getByRole('textbox', { name: '终端输入' })
+    await field.focus()
+    await field.evaluate((element: HTMLTextAreaElement) => {
+        element.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true }))
+        element.value = '\u200b未提交'
+        element.blur()
+        element.dispatchEvent(new CompositionEvent('compositionend', { bubbles: true, data: '未提交' }))
+        element.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertFromComposition', data: '未提交' }))
+    })
+    await page.getByRole('button', { name: 'Esc', exact: true }).click()
+    await expect.poll(() => writes(page)).toEqual(['\x1b'])
+    await field.focus()
+    await field.evaluate((element: HTMLTextAreaElement) => {
+        element.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true }))
+        element.value = '\u200b晚到候选'
+        element.dispatchEvent(new CompositionEvent('compositionend', { bubbles: true, data: '晚到候选' }))
+        // Lose focus before Chromium's queued final-commit callback runs.
+        element.blur()
+    })
+    await textInput(page, '新输入')
+    await expect.poll(() => writes(page)).toEqual(['\x1b', '新输入'])
+})
+
+test('disconnect cancels the old long press and releases its selection and terminal buffer', async ({ page }) => {
+    await ready(page, true)
+    await emit(page, { type: 'data', data: btoa('PRIVATE_OLD_SCREEN') })
+    await expect(page.locator('.xterm-rows')).toContainText('PRIVATE_OLD_SCREEN')
+    await page.locator('.terminal-area').evaluate(element => {
+        element.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerType: 'touch', pointerId: 71, isPrimary: true, clientX: 100, clientY: 100 }))
+        document.querySelector<HTMLButtonElement>('[aria-label="断开或取消连接"]')!.click()
+    })
+    await expect(page.locator('.xterm')).toHaveCount(0)
+    await ready(page, true)
+    // This browser timer check is separate from real Android MotionEvent gates.
+    await page.waitForTimeout(600)
+    await expect(page.locator('.selection-layer')).toHaveCount(0)
+    await expect(page.getByRole('button', { name: '选择文字', exact: true })).toHaveAttribute('aria-pressed', 'false')
+    await expect(page.locator('.xterm-rows')).not.toContainText('PRIVATE_OLD_SCREEN')
+    await textInput(page, 'current-connection')
+    await expect.poll(() => writes(page)).toEqual(['current-connection'])
+})
+
+test('a secondary touch cannot start selection or finish another pointer gesture', async ({ page }) => {
+    await ready(page, true)
+    await page.evaluate(() => {
+        ;(window as unknown as { keyboardShows: number }).keyboardShows = 0
+        window.testBridge.showKeyboard = async () => { (window as unknown as { keyboardShows: number }).keyboardShows++ }
+    })
+    await page.locator('.terminal-area').evaluate(element => {
+        const send = (type: string, pointerId: number, isPrimary: boolean) => element.dispatchEvent(new PointerEvent(type,
+            { bubbles: true, pointerType: 'touch', pointerId, isPrimary, clientX: 100, clientY: 100 }))
+        send('pointerdown', 1, true)
+        send('pointerdown', 2, false)
+        send('pointerup', 2, false)
+    })
+    expect(await page.evaluate(() => (window as unknown as { keyboardShows: number }).keyboardShows)).toBe(0)
+    await page.locator('.terminal-area').evaluate(element => element.dispatchEvent(new PointerEvent('pointerup',
+        { bubbles: true, pointerType: 'touch', pointerId: 1, isPrimary: true, clientX: 100, clientY: 100 })))
+    await expect(page.getByRole('textbox', { name: '终端输入' })).toBeFocused()
+    await expect.poll(() => page.evaluate(() => (window as unknown as { keyboardShows: number }).keyboardShows)).toBe(1)
+})
+
+test('a short narrow terminal keeps the input visible and touch-scrolls auxiliary keys into reach', async ({ page }) => {
+    await page.setViewportSize({ width: 260, height: 170 })
+    await ready(page, true)
+    for (const selector of ['header', '.terminal-area', '.tools', '.actions', '.input-strip']) {
+        expect(await page.locator(selector).evaluate(element => {
+            const bounds = element.getBoundingClientRect()
+            return bounds.top >= 0 && bounds.bottom <= innerHeight + 1 && bounds.left >= 0 && bounds.right <= innerWidth + 1
+        })).toBe(true)
+    }
+    expect(await page.locator('.xterm-rows').evaluate(element => element.children.length)).toBeGreaterThan(0)
+    const tools = page.locator('.tools')
+    expect(await tools.evaluate(element => element.scrollWidth > element.clientWidth)).toBe(true)
+    const bounds = (await tools.boundingBox())!
+    const client = await page.context().newCDPSession(page)
+    const y = bounds.y + bounds.height / 2
+    const x = bounds.x + bounds.width * .9
+    await client.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y }] })
+    for (let step = 1; step <= 10; step++) {
+        await client.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: x - bounds.width * step * .07, y }] })
+        await page.waitForTimeout(20)
+    }
+    await client.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
+    await expect.poll(() => tools.evaluate(element => element.scrollLeft)).toBeGreaterThan(0)
+    await page.getByRole('button', { name: '向右', exact: true }).scrollIntoViewIfNeeded()
+    await textInput(page, 'small-window')
+    const right = (await page.getByRole('button', { name: '向右', exact: true }).boundingBox())!
+    await page.touchscreen.tap(right.x + right.width / 2, right.y + right.height / 2)
+    await page.getByRole('button', { name: '发送回车', exact: true }).click()
+    await expect.poll(() => writes(page)).toEqual(['small-window', '\x1b[C', '\r'])
+    await expect(page.getByRole('textbox', { name: '终端输入' })).toBeFocused()
+    expect(await page.evaluate(() => window.testBridge.starts.length)).toBe(1)
+    await client.detach()
+})
+
 test('system paste and auxiliary keys send once without stealing input focus', async ({ page }) => {
     await ready(page)
     await page.getByRole('button', { name: '键盘', exact: true }).click()

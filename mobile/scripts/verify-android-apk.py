@@ -10,6 +10,7 @@ import struct
 import subprocess
 import tempfile
 import zipfile
+from web_security import inspect_web_assets, bind_aot_assets, WebSecurityError
 
 APP = 'org.tabby.android.prototype'
 PAGE = 16384
@@ -68,6 +69,9 @@ def main():
     sdk = Path(os.environ['ANDROID_HOME'])
     tools = sdk / 'build-tools' / '36.0.0'
     repository = Path(__file__).resolve().parents[2]
+    build_directory = repository / 'mobile' / '.angular'
+    build_receipt = json.loads((build_directory / 'web-build-receipt.json').read_bytes())
+    build_graph = (build_directory / 'build-stats.json').read_bytes()
     source = run('git', '-C', str(repository), 'rev-parse', 'HEAD').strip()
     tree = run('git', '-C', str(repository), 'rev-parse', 'HEAD^{tree}').strip()
     # The web build also imports desktop's palette generator. Record the whole
@@ -94,6 +98,7 @@ def main():
     libraries = {}
     with zipfile.ZipFile(apk) as archive, apk.open('rb') as raw, tempfile.TemporaryDirectory() as temporary:
         names = archive.namelist()
+        require(len(names) == len(set(names)), 'Duplicate APK archive member')
         required_libraries = {f'lib/{abi}/libtabby_ssh.so': ABI_MACHINES[abi] for abi in args.expected_abis}
         native_names = [name for name in names if name.startswith('lib/')]
         require(len(native_names) == len(required_libraries) and set(native_names) == set(required_libraries),
@@ -103,17 +108,23 @@ def main():
         for name in names:
             if name.endswith('.dex'):
                 dex = archive.read(name)
-                for test_class in ['CloudWebViewHarness', 'RealSSHBridgeTest', 'AndroidHostKeyStoreTest', 'ViewportLifecycleTest']:
+                for test_class in ['CloudWebViewHarness', 'RealSSHBridgeTest', 'AndroidHostKeyStoreTest',
+                                   'ViewportLifecycleTest', 'SecurityPolicyTest', 'PrivateKeyImportTest']:
                     require(('Lorg/tabby/android/prototype/' + test_class + ';').encode() not in dex, 'Instrumentation class packaged in main DEX: ' + test_class)
         config = json.loads(archive.read('assets/capacitor.config.json'))
         require(config.get('loggingBehavior') == 'none', 'Capacitor logging must remain disabled')
         require(config['android'].get('allowMixedContent') is False and config['android'].get('webContentsDebuggingEnabled') is False, 'Unsafe WebView configuration')
         require(config['server'].get('allowNavigation') == [] and config['server'].get('androidScheme') == 'https', 'Unexpected WebView navigation policy')
         require('url' not in config['server'] and config['server'].get('hostname') == 'localhost', 'The native bridge must use bundled localhost assets')
-        for name in names:
-            if name.startswith('assets/public/') and name.endswith(('.js', '.html')):
-                content = archive.read(name)
-                require(not any(marker in content for marker in [b'TestBridge', b'attackMarker', b'fixturePassword', b'tabby-ssh-test-fixture']), 'Test bridge or fixture packaged in web assets')
+        try:
+            web_names = [name for name in names if name.startswith('assets/public/') and not name.endswith('/')]
+            require(len(web_names) <= 512 and sum(archive.getinfo(name).file_size for name in web_names) <= 16 * 1024 * 1024,
+                    'Unexpected packaged web asset count or size')
+            web_assets = {name[len('assets/public/'):]: archive.read(name) for name in web_names}
+            web_security = inspect_web_assets(web_assets)
+            web_security.update(bind_aot_assets(web_assets, build_receipt, build_graph))
+        except WebSecurityError as error:
+            raise SystemExit(str(error)) from error
         reader = sdk / 'ndk' / '27.3.13750724' / 'toolchains' / 'llvm' / 'prebuilt' / 'linux-x86_64' / 'bin' / 'llvm-readelf'
         for name, machine in required_libraries.items():
             info = archive.getinfo(name)
@@ -138,6 +149,7 @@ def main():
               'permissions': permissions, 'publicTestCertificateSHA256': certificate[1], 'signatureScheme': 'v2',
               'zipAlignmentBytes': PAGE, 'expectedABIs': args.expected_abis, 'packagedABIs': packaged_abis,
               'nativeLibraries': libraries, 'arm64RuntimeVerified': False,
+              'webSecurity': web_security,
               'limitations': ['Debug prototype, not a production release.', 'Packaging verification does not establish Android runtime or GUI behavior.',
                               'ARM64 device, 16 KiB page-size runtime, physical touch and system Chinese IME acceptance remain separate checks.']}
     destination = Path(args.report)

@@ -24,7 +24,7 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24.19.0
           cache: npm
           cache-dependency-path: mobile/package-lock.json
       - uses: actions/setup-java@v4
@@ -36,6 +36,11 @@ jobs:
       - name: Install isolated mobile dependencies
         id: install
         run: npm ci --ignore-scripts --prefix mobile
+      - name: Dependency security and Capacitor compatibility
+        run: |
+          npm audit --omit=dev --audit-level=low --prefix mobile
+          npm audit --audit-level=low --prefix mobile
+          npm run test:toolchain --prefix mobile
       - name: Web typecheck and production build
         run: |
           npm run check --prefix mobile
@@ -50,6 +55,9 @@ jobs:
       - name: ARM64 delivery binding and rejection tests
         if: always() && steps.install.outcome == 'success'
         run: npm run test:delivery --prefix mobile
+      - name: Packaged WebView policy rejection tests
+        if: always() && steps.install.outcome == 'success'
+        run: python3 -m unittest discover -s mobile/test -p test_android_web_security.py -v
       - name: Rust safety and real SSH integration
         id: native
         if: always() && steps.install.outcome == 'success'
@@ -76,7 +84,7 @@ jobs:
         run: test "$(uname -m)" = aarch64
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24.19.0
           cache: npm
           cache-dependency-path: mobile/package-lock.json
       - uses: actions/setup-java@v4
@@ -119,7 +127,7 @@ jobs:
           printf 'ANDROID_HOME=%s/tabby-android-sdk\nANDROID_SDK_ROOT=%s/tabby-android-sdk\nANDROID_USER_HOME=%s/tabby-android-user\nANDROID_AVD_HOME=%s/tabby-android-avd\nGRADLE_USER_HOME=%s/tabby-android-gradle\n' "$RUNNER_TEMP" "$RUNNER_TEMP" "$RUNNER_TEMP" "$RUNNER_TEMP" "$RUNNER_TEMP" >> "$GITHUB_ENV"
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24.19.0
           cache: npm
           cache-dependency-path: mobile/package-lock.json
       - uses: actions/setup-java@v4
