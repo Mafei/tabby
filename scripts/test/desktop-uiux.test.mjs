@@ -13,13 +13,14 @@ import ts from 'typescript'
 import * as sass from 'sass'
 import pug from 'pug'
 import postcss from 'postcss'
-import { Subject } from 'rxjs'
+import * as rxjs from 'rxjs'
+const { Subject } = rxjs
 
 const read = file => fs.readFileSync(file, 'utf8')
 const coreRequire = createRequire(path.resolve('tabby-core/package.json'))
 const decorator = () => () => {}
 const angular = { Injectable: () => value => value, Component: () => value => value,
-    Input: decorator, HostBinding: decorator, HostListener: decorator, Inject: decorator, Optional: decorator }
+    Input: decorator, ViewChild: decorator, HostBinding: decorator, HostListener: decorator, Inject: decorator, Optional: decorator }
 function compile (source, modules = {}, globals = {}) {
     const module = { exports: {} }
     const output = ts.transpileModule(source, { compilerOptions: {
@@ -199,6 +200,66 @@ test('real root focus handlers preserve selection while tab sizing follows densi
     instance.config.store.appearance.flexTabs = true; assert.equal(instance.targetTabSize, '*')
     instance.config.store.appearance.flexTabs = false; instance.config.store.appearance.tabsLocation = 'left'
     assert.equal(instance.targetTabSize, '*')
+})
+
+const Base = compile(read('tabby-core/src/components/base.component.ts'), { rxjs }).BaseComponent
+const BaseTab = compile(read('tabby-core/src/components/baseTab.component.ts'), {
+    rxjs, '@angular/core': angular, './base.component': { BaseComponent: Base },
+    '../services/config.service': { ConfigService: class {} },
+}).BaseTabComponent
+const split = compile(read('tabby-core/src/components/splitTab.component.ts'), {
+    rxjs, '@angular/core': angular, './baseTab.component': { BaseTabComponent: BaseTab },
+    '../api/tabRecovery': { TabRecoveryProvider: class {} },
+    '../services/tabs.service': {}, '../services/hotkeys.service': {}, '../services/tabRecovery.service': {},
+})
+
+test('real nested split tree hides the focus marker for one visible pane and follows addition, removal and maximization', () => {
+    const container = Object.create(split.SplitTabComponent.prototype)
+    container.root = new split.SplitContainer()
+    const first = {}, second = {}, third = {}
+    container.focusedTab = first
+    container.maximizedTab = null
+    assert.equal(container.hasSplitPanes, false)
+    container.root.children = [first]; container.root.ratios = [1]
+    assert.equal(container.hasSplitPanes, false)
+    const nested = new split.SplitContainer()
+    nested.children = [first, second]; nested.ratios = [.5, .5]
+    container.root.children = [nested]; container.root.ratios = [1]
+    assert.equal(container.hasSplitPanes, true, 'nested panes count even when the root has only one child container')
+    nested.children.push(third); nested.ratios = [1 / 3, 1 / 3, 1 / 3]
+    assert.equal(container.hasSplitPanes, true)
+    container.maximizedTab = first
+    assert.equal(container.hasSplitPanes, false, 'maximization leaves one visible pane')
+    container.maximizedTab = null
+    assert.equal(container.hasSplitPanes, true)
+    nested.children.pop(); nested.ratios = [.5, .5]
+    assert.equal(container.hasSplitPanes, true)
+    nested.children.pop(); nested.ratios = [1]
+    container.root.normalize()
+    assert.equal(container.hasSplitPanes, false)
+    assert.equal(container.getFocusedTab(), first, 'marker visibility never changes keyboard focus')
+})
+
+test('real activity subjects and app selection preserve existing clearing semantics, independent of keyboard focus', () => {
+    const injector = { get: () => ({}) }
+    const tabs = [new BaseTab(injector), new BaseTab(injector)]
+    const activity = [[], []]
+    tabs.forEach((tab, index) => tab.activity$.subscribe(value => activity[index].push(value)))
+    const source = ts.createSourceFile('app.ts', read('tabby-core/src/services/app.service.ts'), ts.ScriptTarget.Latest, true)
+    const method = source.statements.find(n => ts.isClassDeclaration(n) && n.name.text === 'AppService').members.find(n => n.name?.text === 'selectTab')
+    const callbacks = []
+    const Selection = compile(`export class Selection { ${method.getText(source)} }`, {}, { setImmediate: callback => callbacks.push(callback) }).Selection
+    const app = new Selection()
+    Object.assign(app, { tabs, _activeTab: tabs[0], activeTabChange: new Subject(), _mruTabs: [], hostWindow: { setTitle () {} } })
+    tabs[1].displayActivity(); tabs[1].displayActivity()
+    assert.deepEqual(activity[1], [false, true], 'repeated output keeps one notification')
+    app.selectTab(tabs[1]); callbacks.shift()()
+    assert(tabs[1].hasFocus)
+    assert(tabs[1].hasActivity, 'selection hides the indicator via active CSS without rewriting existing activity state')
+    app.selectTab(tabs[0]); callbacks.shift()()
+    assert.deepEqual(activity[1], [false, true, false], 'the original app clears activity when leaving the selected tab')
+    assert(!tabs[1].hasActivity)
+    tabs.forEach(tab => tab.ngOnDestroy())
 })
 
 test('actual Sass, Pug and Angular encapsulation compile; geometry and state selectors stay platform-neutral', async () => {

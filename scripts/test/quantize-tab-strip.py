@@ -31,6 +31,8 @@ def rgb(text):
 
 
 measurements = []
+activity_measurements = []
+pane_measurements = []
 for state in report['states']:
     source = Image.open(root / (state['label'] + '.png')).convert('RGB')
     reduced = Image.new('RGB', source.size)
@@ -62,7 +64,26 @@ for state in report['states']:
                              'activeVsInactive': contrast(active, inactive),
                              'activeTextContrast': contrast(active, quantize(rgb(state['active']['fg']))),
                              'inactiveTextContrast': contrast(inactive, quantize(rgb(state['inactive']['fg'])))})
+    if '-activity-' in state['label']:
+        dot = state.get('activityDot')
+        if dot and dot['display'] != 'none':
+            x, y = math.floor(dot['x'] + dot['width'] / 2), math.floor(dot['y'] + dot['height'] / 2)
+            assert dot['width'] == dot['height'] == 6 and dot['borderRadius'] == '50%'
+            assert source.getpixel((x, y)) == rgb(dot['bg']), (state['label'], 'actual dot center')
+            ratio = contrast(reduced.getpixel((x, y)), quantize(rgb(state['activityTab']['bg'])))
+            assert ratio >= 3, (state['label'], 'RGB565 dot contrast', ratio)
+            activity_measurements.append({'state': state['label'], 'actualScreenshotPixels': True, 'dotContrast': ratio})
+        marker = state['paneMarker']
+        if marker['content'] != 'none':
+            point = (math.floor(marker['x'] + 16), math.floor(marker['y'] + 1))
+            assert source.getpixel(point) == rgb(marker['bg']), (state['label'], 'actual pane marker')
+            assert contrast(reduced.getpixel(point), quantize(rgb(state['terminal']['bg']))) >= 3
+            pane_measurements.append({'state': state['label'], 'visible': True, 'actualScreenshotPixels': True})
+        elif any(state['label'].endswith(suffix) for suffix in ('-single-pane', '-maximized', '-split-removed')):
+            pane_measurements.append({'state': state['label'], 'visible': False, 'computedPseudoContent': 'none'})
 assert len(measurements) == 6
+assert len(activity_measurements) == 18, 'Three activity states on each platform in both modes'
+assert len(pane_measurements) == 66, 'Eleven pane/activity states on each platform in both modes'
 for mode in ('dark', 'light'):
     sheet = Image.new('RGB', (1920, 1020), 'white')
     draw = ImageDraw.Draw(sheet)
@@ -71,6 +92,7 @@ for mode in ('dark', 'light'):
             draw.text((col * 960 + 10, row * 510 + 8), f'{mode} {version}: {"normal browser PNG" if not suffix else "SIMULATED RGB565"}', fill='black')
             sheet.paste(Image.open(root / f'{mode}-{version}-top{suffix}.png'), (col * 960, row * 510 + 30))
     sheet.save(root / f'{mode}-before-after-comparison.png')
-report['rgb565Simulation'] = {'realXrdp': False, 'method': 'truncate to R5/G6/B5, then bit replication to RGB888; no RDP codec/dither simulation', 'measurements': measurements}
+report['rgb565Simulation'] = {'realXrdp': False, 'method': 'truncate to R5/G6/B5, then bit replication to RGB888; no RDP codec/dither simulation', 'measurements': measurements,
+                            'activityDots': activity_measurements, 'paneMarkers': pane_measurements}
 (root / 'report.json').write_text(json.dumps(report, indent=2) + '\n')
 print('PASS RGB565 actual screenshot pixels: three platform classes, dark/light surfaces, markers and text; before/after comparison PNGs saved')

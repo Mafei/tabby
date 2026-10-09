@@ -1,5 +1,5 @@
 import { Observable, Subject, takeWhile } from 'rxjs'
-import { Component, Injectable, ViewChild, ViewContainerRef, EmbeddedViewRef, AfterViewInit, OnDestroy, Injector } from '@angular/core'
+import { Component, Injectable, ViewChild, ViewContainerRef, EmbeddedViewRef, AfterViewInit, OnDestroy, Injector, HostBinding } from '@angular/core'
 import { BaseTabComponent, BaseTabProcess, GetRecoveryTokenOptions } from './baseTab.component'
 import { TabRecoveryProvider, RecoveryToken } from '../api/tabRecovery'
 import { TabsService, NewTabParameters } from '../services/tabs.service'
@@ -408,6 +408,11 @@ export class SplitTabComponent extends BaseTabComponent implements AfterViewInit
     /** @returns Flat list of all sub-tabs */
     getAllTabs (): BaseTabComponent[] {
         return this.root.getAllTabs()
+    }
+
+    /** @hidden */
+    @HostBinding('class.has-split-panes') get hasSplitPanes (): boolean {
+        return this.getAllTabs().length > 1 && !this.getMaximizedTab()
     }
 
     getFocusedTab (): BaseTabComponent|null {

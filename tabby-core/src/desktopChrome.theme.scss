@@ -91,6 +91,15 @@
                 }
 
                 .activity-indicator {
+                    width: 6px;
+                    height: 6px;
+                    border-radius: 50%;
+                    left: 4px;
+                    right: auto;
+                    top: 50%;
+                    bottom: auto;
+                    transform: translateY(-50%);
+                    pointer-events: none;
                     background: currentColor;
                     opacity: 1;
                 }
@@ -230,15 +239,16 @@
             color: var(--tabby-chrome-text);
         }
 
-        &.focused:not(.minimized)::after {
-            content: '';
-            position: absolute;
-            top: 0;
-            left: 12px;
-            width: 32px;
-            height: 2px;
-            background: var(--tabby-selected-marker);
-        }
+    }
+
+    split-tab.has-split-panes > split-tab-pane-label.focused:not(.minimized)::after {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: 12px;
+        width: 32px;
+        height: 2px;
+        background: var(--tabby-selected-marker);
     }
 
 }
