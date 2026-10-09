@@ -1,30 +1,32 @@
-# Tabby Linux UI/UX v1 — 部分交付 / design review candidate
+# Tabby Linux UI/UX v1.1：非活动标签底色
 
-**原创设计示意，非产品截图；设计待评审，尚未实施新的 UI 功能。**
+**原创设计示意，非产品截图。整体配色已获认可，本次仅按反馈增加非活动标签的实色底色；产品 UI 未实施。**
 
-本次先交付已经成功上传的设计稿和说明。推荐「轻量标签工作台」：低饱和蓝灰、局部选中与焦点标记，保留终端 ANSI 配色和用户终端字体。
+## 查看设计
 
-## 可查看的设计文件
+- [深色主界面 PNG](png/Tabby-Linux-UIUX-v1-dark-workspace.png) · [浅色主界面 PNG](png/Tabby-Linux-UIUX-v1-light-workspace.png)
+- [十种状态对照](png/Tabby-Linux-UIUX-v1-state-matrix.png)
+- [深色窗口失焦](png/Tabby-Linux-UIUX-v1-dark-workspace-window-blur.png) · [浅色窗口失焦](png/Tabby-Linux-UIUX-v1-light-workspace-window-blur.png)
+- [12 页评审 PDF](proposal.pdf)
+- [前后变化说明与旧版链接](REVISION.zh-CN.md)
+- [完整规格与参考资料](SPEC.zh-CN.md)
+- [颜色与尺寸令牌](tokens.json) · [对比度记录](contrast-audit.json) · [导出设计验证](design-validation.json)
+- [可编辑 SVG](svg/) · [所有 PNG 及 RGB565 比较](png/) · [实际交付文件清单](manifest.json)
 
-- [深色主界面 PNG](png/Tabby-Linux-UIUX-v1-dark-workspace.png)
-- [浅色主界面 PNG](png/Tabby-Linux-UIUX-v1-light-workspace.png)
-- [深浅十种状态对照](png/Tabby-Linux-UIUX-v1-state-matrix.png)
-- [深色会话入口](png/Tabby-Linux-UIUX-v1-dark-launcher.png) · [浅色会话入口](png/Tabby-Linux-UIUX-v1-light-launcher.png)
-- [深色恢复暂停](png/Tabby-Linux-UIUX-v1-dark-recovery.png) · [浅色恢复暂停](png/Tabby-Linux-UIUX-v1-light-recovery.png)
-- [深色 RGB565 设计量化比较](png/Tabby-Linux-UIUX-v1-dark-workspace-RGB565-simulation.png) · [浅色 RGB565 设计量化比较](png/Tabby-Linux-UIUX-v1-light-workspace-RGB565-simulation.png)
-- [完整目标规格与参考资料](SPEC.zh-CN.md) · [对比度计算记录](contrast-audit.json)
-- [设计生成源](generate_design.py) · [本地打包生成源](package_design.py)
+## 本次调整
 
-## 部分交付范围
+非活动底色为深色 `#0D1320`、浅色 `#CAD8E9`，不使用透明度或模糊。原活动底色、强调色、主界面颜色、尺寸及终端 ANSI 均保留。活动标签继续使用 2px 标记与 600 字重；非活动为 400 字重且没有选中标记。浅色非活动文字使用已有主文字角色，保证新底色上的对比度。悬停、非活动键盘焦点和窗口失焦分别展示；焦点不改变当前会话。
 
-此提交包含 7 张原创设计 PNG、2 张明确标记的 RGB565 比较、规格、对比度记录及两个生成源。规格说明的是完整设计目标包；其中尚未出现在此分支的文件仍属待交付内容。
+## 完整交付与验证
 
-**待补：10 页评审 PDF、7 个可编辑 SVG、tokens.json、manifest.json。** 本页不提供这些未交付文件的链接，也不将其视为已上传完成。
+本目录已包含 9 张原创 PNG、2 张 RGB565 比较、9 个 SVG、12 页 PDF、规格、令牌、记录、生成源及清单。原来部分交付中缺失的 PDF/SVG/令牌/清单已补齐。
 
-## 验证与限制
+46 组原色/RGB565 配色检查通过。40 个导出的标签状态组及主界面实际像素经过检查；深浅主界面终端正文像素与旧版一致。关键文字至少 4.5:1，标记至少 3:1，非活动/栏底至少 1.25:1，活动/非活动至少 1.35:1，悬停/非活动至少 1.15:1；状态同时具备形状、字重、焦点环或操作提示。
 
-原 PNG 已实际解码并检查：主要画板 1440×1000，状态表 1440×1236。RGB565 仅逐像素截断并复制颜色位数，未缩放或裁剪，不代表真实 xrdp。30 组颜色同时通过 RGB888/RGB565 数学门槛；不代表完整产品 GUI、可访问性或真实远程桌面测试。
+原配色和此前固定提交 `2d5ac0975fc7001473c96a08759389a385093009` 保持可查看。产品参考基线为 PR 3 的 `d83bf1b4904e439533d074aa6f7d3b48ebde5776`。此次仅更新此文档目录，不改应用源码、工作流或 PR 3。
 
-所有主机、命令输出、时间和状态均为虚构样例。Linux 产品参考基线为 `d83bf1b4904e439533d074aa6f7d3b48ebde5776`（PR 3）。本候选仅新增此文档目录；产品源代码、工作流和 PR 3 保持不变。
+所有主机、输出和状态都是虚构样例。RGB565 为设计量化模拟，不是真实 xrdp；完整 Tabby GUI、DPI、可访问性、第三方主题及连接恢复仍需实现后的验证。
 
-正常离线生成使用 Inkscape、Noto Sans CJK SC / DejaVu Sans Mono，以及 Pillow / ReportLab。生成脚本输出的 PDF/SVG 等属于本地生成物，不等于已经完成远端交付。真实 Linux/xrdp、窗口失焦、DPI、主题兼容及恢复交互留待设计评审后的实现验证。
+## 生成源
+
+`generate_design.py` 生成 SVG、令牌和配色记录；普通 Inkscape 离线导出 PNG。`package_design.py` 使用本目录的 `SPEC.zh-CN.md`、Pillow 和 ReportLab 生成本地量化比较及 PDF/ZIP，字体为 Noto Sans CJK SC / DejaVu Sans Mono。交付的 `proposal.pdf` 是生成 PDF 的字节相同副本，使用英文文件名便于链接。生成源与本目录清单不会连接真实 SSH、读取真实凭据或改变产品配置。

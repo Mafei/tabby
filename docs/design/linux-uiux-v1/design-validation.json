@@ -1,0 +1,89 @@
+{
+  "kind": "exported_design_validation_not_product_runtime",
+  "revision": "1.1",
+  "previousDesignHead": "2d5ac0975fc7001473c96a08759389a385093009",
+  "originalPaletteRolesUnchanged": true,
+  "metricsUnchanged": true,
+  "terminalBodyPixelsUnchangedInDarkAndLight": true,
+  "RGB888RGB565PairsPassed": 46,
+  "tabGroupsVerified": 40,
+  "statesVerified": [
+    "active",
+    "blur",
+    "hover",
+    "inactive",
+    "inactivefocus"
+  ],
+  "SVG": [
+    {
+      "SVG": "Tabby-Linux-UIUX-v1-dark-launcher.svg",
+      "parsed": true,
+      "noOpacityOrFilter": true
+    },
+    {
+      "SVG": "Tabby-Linux-UIUX-v1-dark-recovery.svg",
+      "parsed": true,
+      "noOpacityOrFilter": true
+    },
+    {
+      "SVG": "Tabby-Linux-UIUX-v1-dark-workspace-window-blur.svg",
+      "parsed": true,
+      "noOpacityOrFilter": true
+    },
+    {
+      "SVG": "Tabby-Linux-UIUX-v1-dark-workspace.svg",
+      "parsed": true,
+      "noOpacityOrFilter": true
+    },
+    {
+      "SVG": "Tabby-Linux-UIUX-v1-light-launcher.svg",
+      "parsed": true,
+      "noOpacityOrFilter": true
+    },
+    {
+      "SVG": "Tabby-Linux-UIUX-v1-light-recovery.svg",
+      "parsed": true,
+      "noOpacityOrFilter": true
+    },
+    {
+      "SVG": "Tabby-Linux-UIUX-v1-light-workspace-window-blur.svg",
+      "parsed": true,
+      "noOpacityOrFilter": true
+    },
+    {
+      "SVG": "Tabby-Linux-UIUX-v1-light-workspace.svg",
+      "parsed": true,
+      "noOpacityOrFilter": true
+    },
+    {
+      "SVG": "Tabby-Linux-UIUX-v1-state-matrix.svg",
+      "parsed": true,
+      "noOpacityOrFilter": true
+    }
+  ],
+  "PNGPixelChecks": [
+    {
+      "PNG": "Tabby-Linux-UIUX-v1-dark-workspace.png",
+      "actualPixelColorsMatchRoles": true,
+      "opaque": true
+    },
+    {
+      "PNG": "Tabby-Linux-UIUX-v1-dark-workspace-window-blur.png",
+      "actualPixelColorsMatchRoles": true,
+      "opaque": true
+    },
+    {
+      "PNG": "Tabby-Linux-UIUX-v1-light-workspace.png",
+      "actualPixelColorsMatchRoles": true,
+      "opaque": true
+    },
+    {
+      "PNG": "Tabby-Linux-UIUX-v1-light-workspace-window-blur.png",
+      "actualPixelColorsMatchRoles": true,
+      "opaque": true
+    }
+  ],
+  "realXrdp": false,
+  "GUIProduct": false,
+  "userRevisionReviewPending": true
+}

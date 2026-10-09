@@ -9,6 +9,10 @@ THEMES = {
     'dark': {'chrome':'#242B36','title':'#1C232D','active':'#303B4A','hover':'#2D3542','text':'#EEF2F7','secondary':'#AAB5C4','index':'#95A3B5','accent':'#86B9FF','onAccent':'#162334','unfocused':'#8EA1B8','divider':'#647B94','subtle':'#303A48','terminal':'#171717','terminalText':'#CACACA','success':'#83CBA8','warning':'#F0C479','danger':'#FFA3A3','warningBg':'#352D20','paper':'#111820','paperText':'#EEF2F7'},
     'light': {'chrome':'#EEF1F5','title':'#E3E8EE','active':'#FFFFFF','hover':'#E2E8F0','text':'#1F2937','secondary':'#536174','index':'#5D6C80','accent':'#245E9C','onAccent':'#FFFFFF','unfocused':'#52667F','divider':'#7D8B9C','subtle':'#CCD4DF','terminal':'#FFFFFF','terminalText':'#4D4D4C','success':'#276749','warning':'#7A4B00','danger':'#A32132','warningBg':'#FFF2D7','paper':'#F7F9FC','paperText':'#1F2937'},
 }
+for name, theme in THEMES.items():
+    theme['inactive'] = '#0D1320' if name == 'dark' else '#CAD8E9'
+    theme['inactiveText'] = theme['secondary'] if name == 'dark' else theme['text']
+    theme['inactiveIndex'] = theme['index'] if name == 'dark' else theme['text']
 METRICS = {'grid':4,'tabStripHeight':44,'tabHeight':36,'tabWidthPreferred':220,'tabWidthMinimum':144,'tabGap':4,'tabPaddingX':12,'tabRadius':6,'selectedMarkerHeight':2,'controlTarget':32,'compactControlTarget':28,'iconSize':16,'paneHeaderHeight':28,'statusHeight':24,'terminalPadding':16,'splitLine':1,'splitHitArea':10,'focusRing':2,'UIBody':[13,20],'UIActiveWeight':600,'UISecondary':[12,18],'terminalDemo':[16,24],'userTerminalFontPreserved':True}
 
 
@@ -30,6 +34,7 @@ def contrast(a,b):
 
 
 PAIRS = [('text','chrome',4.5),('secondary','chrome',4.5),('index','chrome',4.5),('text','active',4.5),('secondary','active',4.5),('secondary','hover',4.5),('accent','active',3),('accent','chrome',3),('unfocused','active',3),('divider','chrome',3),('divider','terminal',3),('success','chrome',4.5),('warning','warningBg',4.5),('danger','chrome',4.5),('onAccent','accent',4.5)]
+PAIRS += [('inactiveText','inactive',4.5),('inactiveIndex','inactive',4.5),('inactiveText','hover',4.5),('inactiveIndex','hover',4.5),('inactive','chrome',1.25),('active','inactive',1.35),('hover','inactive',1.15),('accent','inactive',3)]
 results=[]
 for name,theme in THEMES.items():
     for a,b,minimum in PAIRS:
@@ -37,7 +42,7 @@ for name,theme in THEMES.items():
         reduced=contrast(quantize(rgb(theme[a])),quantize(rgb(theme[b])))
         assert normal>=minimum and reduced>=minimum,(name,a,b,normal,reduced)
         results.append({'theme':name,'foreground':a,'background':b,'minimum':minimum,'RGB888':normal,'RGB565':reduced})
-tokens={'kind':'design_proposal_not_product','version':1,'sourceBaseline':BASE_SHA,'themes':THEMES,'metricsCSSPx':METRICS,'terminalANSI':'preserve current per-profile scheme; no new ANSI palette','semantics':{'selected':'inset shape + 2px marker + weight600','unfocused':'same selected shape + solid neutral marker; no whole-window alpha','paneFocus':'short 2px marker in pane header; terminal glyphs stay undimmed','status':'icon + label; never hue alone'}}
+tokens={'kind':'design_proposal_not_product','version':'1.1','sourceBaseline':BASE_SHA,'previousDesignHead':'2d5ac0975fc7001473c96a08759389a385093009','userApprovedChange':'Preserve overall palette; give inactive tabs a distinguishable opaque background','themes':THEMES,'metricsCSSPx':METRICS,'terminalANSI':'preserve current per-profile scheme; no new ANSI palette','semantics':{'selected':'inset shape + 2px marker + weight600','inactive':'opaque filled shape, no selected marker, weight400; existing text role used where needed','hover':'opaque existing hover fill + visible close action; no selected marker','keyboardFocus':'2px outer ring; inactive focused tab remains unselected','unfocused':'same selected and inactive fills + solid neutral selected marker; no whole-window alpha','paneFocus':'short 2px marker in pane header; terminal glyphs stay undimmed','status':'icon + label; never hue alone'}}
 (ROOT/'tokens.json').write_text(json.dumps(tokens,ensure_ascii=False,indent=2)+'\n')
 (ROOT/'contrast-audit.json').write_text(json.dumps({'kind':'design_token_math_only','realXrdp':False,'runtimeProduct':False,'method':'RGB565 bit truncation then replication','pairs':results,'minimumTextRGB565':min(r['RGB565'] for r in results if r['minimum']==4.5),'minimumMarkerRGB565':min(r['RGB565'] for r in results if r['minimum']==3)},indent=2)+'\n')
 
@@ -85,27 +90,30 @@ class Board:
         self.text(1368,44,tag,12,self.t['secondary'],anchor='end')
     def footer(self,caption):
         self.text(72,self.height-64,caption,14,self.t['secondary'])
-        self.text(72,self.height-32,'设计方案 v1 · 非产品截图 · 所有主机、命令与状态均为样例',12,self.t['secondary'])
+        self.text(72,self.height-32,'设计方案 v1.1 · 非活动标签底色调整 · 非产品截图 · 所有数据均为样例',12,self.t['secondary'])
         self.text(self.width-72,self.height-32,'BASE  d83bf1b  /  '+self.theme.upper(),12,self.t['secondary'],anchor='end')
     def save(self,name):
         header=f'<svg xmlns="http://www.w3.org/2000/svg" width="{self.width}" height="{self.height}" viewBox="0 0 {self.width} {self.height}"><title>Tabby Linux design proposal — not a product screenshot</title><desc>Original proposed interface, fictional data, source baseline {BASE_SHA}. Not pixel-accurate product evidence.</desc>'
         (ROOT/'svg'/f'{name}.svg').write_text(header+'\n'+'\n'.join(self.p)+'\n</svg>\n')
 
 
-def tab(b,x,y,label,index,state='inactive',width=220):
+def tab(b,x,y,label,index,state='inactive',width=220,window_focused=True):
     t=b.t
-    if state in ('active','focus','blur'):b.rect(x,y,width,36,t['active'],6)
-    elif state=='hover':b.rect(x,y,width,36,t['hover'],6)
+    selected=state in ('active','focus','blur')
+    theme=next(name for name,value in THEMES.items() if value is t)
+    b.p.append(f'<g data-tab-state="{state}" data-tab-selected="{str(selected).lower()}" data-window-focused="{str(window_focused).lower()}" data-theme="{theme}">')
+    b.rect(x,y,width,36,t['active'] if selected else t['hover'] if state=='hover' else t['inactive'],6)
     marker=t['unfocused'] if state=='blur' else t['accent']
-    if state in ('active','focus','blur'):b.rect(x+12,y+34,width-24,2,marker,1)
-    if state=='focus':b.rect(x-2,y-2,width+4,40,'none',8,t['accent'],2)
-    b.text(x+12,y+23,str(index),12,t['index'])
-    b.icon(x+31,y+10,'terminal',t['text'] if state in ('active','focus','blur') else t['secondary'])
-    b.text(x+54,y+23,label,13,t['text'] if state in ('active','focus','blur') else t['secondary'],600 if state in ('active','focus','blur') else 400)
-    if state in ('active','focus','hover','blur'):b.icon(x+width-26,y+10,'close')
+    if selected:b.rect(x+12,y+34,width-24,2,marker,1)
+    if state in ('focus','inactivefocus'):b.rect(x-2,y-2,width+4,40,'none',8,t['accent'],2)
+    b.text(x+12,y+23,str(index),12,t['index'] if selected else t['inactiveIndex'])
+    b.icon(x+31,y+10,'terminal',t['text'] if selected else t['inactiveText'])
+    b.text(x+54,y+23,label,13,t['text'] if selected else t['inactiveText'],600 if selected else 400)
+    if selected or state in ('hover','inactivefocus'):b.icon(x+width-26,y+10,'close',t['secondary'] if selected else t['inactiveText'])
+    b.p.append('</g>')
 
 
-def shell(b,split=True,recovery=False):
+def shell(b,split=True,recovery=False,window_focused=True):
     t=b.t;x=72;y=174;w=1296;h=696
     b.rect(x,y,w,h,t['terminal'],8,t['subtle'])
     # Window decorations are illustrative and belong to the Linux window manager.
@@ -115,9 +123,9 @@ def shell(b,split=True,recovery=False):
     b.rect(x+w-58,y+10,10,10,'none',1,t['secondary'],1.2);b.icon(x+w-29,y+7,'close')
     ty=y+30;b.rect(x,ty,w,44,t['chrome'])
     b.icon(x+16,ty+14,'tree')
-    tab(b,x+48,ty+4,'SSH · 示例开发机',1,'active')
-    tab(b,x+272,ty+4,'本地终端',2)
-    tab(b,x+496,ty+4,'构建输出',3)
+    tab(b,x+48,ty+4,'SSH · 示例开发机',1,'active' if window_focused else 'blur',window_focused=window_focused)
+    tab(b,x+272,ty+4,'本地终端',2,window_focused=window_focused)
+    tab(b,x+496,ty+4,'构建输出',3,window_focused=window_focused)
     b.circle(x+692,ty+21,2.5,t['secondary'])
     for dx,name in [(w-192,'plus'),(w-162,'chevron'),(w-126,'search'),(w-90,'split'),(w-54,'menu')]:b.icon(x+dx,ty+14,name)
     py=ty+44;footerY=y+h-24;paneHeight=footerY-py;left=776 if split else w
@@ -125,7 +133,7 @@ def shell(b,split=True,recovery=False):
         b.rect(px,py,pw,28,t['chrome'])
         b.text(px+16,py+19,label,12,t['text'] if focused else t['secondary'],500)
         b.text(px+pw-16,py+19,role,12,t['secondary'],anchor='end')
-        if focused:b.rect(px+16,py+26,24,2,t['accent'],1)
+        if focused:b.rect(px+16,py+26,24,2,t['accent'] if window_focused else t['unfocused'],1)
     if split:b.line(x+left+.5,py,x+left+.5,footerY,t['divider'],1)
     bodyY=py+28
     if recovery:
@@ -156,7 +164,7 @@ def shell(b,split=True,recovery=False):
 for mode in ('dark','light'):
     b=Board(mode);b.heading('轻量标签工作台','当前会话优先，工具后退；终端内容保持原有配色。','01 / 日常工作 · '+('暗色' if mode=='dark' else '浅色'))
     shell(b)
-    b.footer('重点：活动标签局部强调 · 单条分屏分隔线 · 当前输入位置可辨 · 工具栏保持一行')
+    b.footer('调整：非活动标签增加实色底色 · 活动标签保留 2px 标记与 600 字重 · 终端配色保持')
     b.save(f'Tabby-Linux-UIUX-v1-{mode}-workspace')
     b=Board(mode);b.heading('快速打开会话','复用现有配置、命令选择器与快捷键，不把工具塞满主界面。','02 / 会话入口 · '+('暗色' if mode=='dark' else '浅色'))
     shell(b)
@@ -180,15 +188,22 @@ for mode in ('dark','light'):
     shell(b,split=False,recovery=True)
     b.footer('选择方式进入共享 / 只读 / 显式接管；自动恢复不踢掉其他客户端，也不重建消失的会话。')
     b.save(f'Tabby-Linux-UIUX-v1-{mode}-recovery')
+    b=Board(mode);b.heading('窗口失焦：标签仍有位置','保留已认可的配色；非活动底色不消失，选中项采用实色中性标记。','05 / 失焦验证 · '+('暗色' if mode=='dark' else '浅色'))
+    shell(b,window_focused=False)
+    b.footer('失焦不降低透明度；非活动实色底色保留，当前标签仍由形状、字重和标记辨认。')
+    b.save(f'Tabby-Linux-UIUX-v1-{mode}-workspace-window-blur')
 
 b=Board('light',1440,1236);b.heading('状态对照与配色角色','变化集中在必要标记；未选中不等于不可读，窗口失焦不抹掉当前位置。','04 / 两套主题状态表')
 b.text(332,187,'暗色',16,weight=600);b.text(888,187,'浅色',16,weight=600)
-rows=[('活动标签','选中形状 + 2px 标记 + 600 字重','active'),('非活动标签','实色标签；无重复边框','inactive'),('鼠标悬停','显露操作；不冒充选中','hover'),('键盘焦点','2px 外围焦点环；与选中分开','focus'),('窗口失焦','保留选中形状；标记变为实色中性','blur'),('有新输出','小圆点 + 可读提示','activity'),('只读会话','锁形图标 +「只读」标签','readonly'),('正在重连','重试图标 + 倒计时 + 取消','retry'),('恢复暂停','暂停图标 + 选择访问方式','paused'),('错误 / 身份丢失','错误图标 + 明确原因 + 查看详情','error')]
+rows=[('活动标签','原底色 + 2px 标记 + 600 字重','active'),('非活动标签','新增实色底色；无选中标记','inactive'),('鼠标悬停','独立实色底色 + 关闭操作','hover'),('键盘焦点','非活动焦点环不改变选中项','focus'),('窗口失焦','选中与非活动底色都保留','blur'),('有新输出','小圆点 + 可读提示','activity'),('只读会话','锁形图标 +「只读」标签','readonly'),('正在重连','重试图标 + 倒计时 + 取消','retry'),('恢复暂停','暂停图标 + 选择访问方式','paused'),('错误 / 身份丢失','错误图标 + 明确原因 + 查看详情','error')]
 for i,(label,note,state) in enumerate(rows):
     y=214+i*80;b.text(72,y+23,label,15,weight=500);b.text(72,y+47,note,11,b.t['secondary'])
     for mode,x in [('dark',304),('light',860)]:
         old=b.t;b.t=THEMES[mode];t=b.t;b.rect(x,y,508,60,t['chrome'],8)
-        if state in ('active','inactive','hover','focus','blur'):tab(b,x+12,y+12,'SSH · 示例开发机',1,state,320)
+        if state in ('active','inactive','hover'):tab(b,x+12,y+12,'SSH · 示例开发机',1,state,320)
+        elif state in ('focus','blur'):
+            tab(b,x+12,y+12,'SSH · 示例开发机',1,'active' if state=='focus' else 'blur',220,window_focused=state!='blur')
+            tab(b,x+248,y+12,'本地终端',2,'inactivefocus' if state=='focus' else 'inactive',220,window_focused=state!='blur')
         elif state=='activity':tab(b,x+12,y+12,'构建输出',3,'inactive',320);b.circle(x+305,y+29,3,t['secondary']);b.text(x+349,y+35,'有新输出',12,t['secondary'])
         elif state=='readonly':b.icon(x+20,y+22,'lock');b.text(x+48,y+35,'只读 · tmux work',13,t['text']);b.text(x+330,y+35,'输入禁用',12,t['secondary'])
         elif state=='retry':b.icon(x+20,y+22,'retry');b.text(x+48,y+35,'正在重连 · 2 秒后再试',13,t['text']);b.text(x+455,y+35,'取消',13,t['accent'],anchor='end')
@@ -197,8 +212,8 @@ for i,(label,note,state) in enumerate(rows):
         b.t=old
 for mode,x in [('dark',304),('light',860)]:
     t=THEMES[mode]
-    for i,key in enumerate(['chrome','active','accent','secondary','divider','terminal']):
+    for i,key in enumerate(['chrome','inactive','active','hover','accent','secondary']):
         px=x+i*83;b.rect(px,1055,70,28,t[key],4);b.text(px,1102,key,10,b.t['secondary']);b.text(px,1123,t[key],10,b.t['secondary'],mono=True)
-b.footer('关键标签 ≥ 4.5:1；选中、焦点和分屏标记 ≥ 3:1。两项均检查原色与 RGB565；弱底色只作辅助。')
+b.footer('文字 ≥ 4.5:1，关键标记 ≥ 3:1；非活动/栏底 ≥ 1.25，活动/非活动 ≥ 1.35；均检查 RGB565。')
 b.save('Tabby-Linux-UIUX-v1-state-matrix')
-print('Generated 7 original SVG design boards; 30 color pairs pass normal/RGB565 token gates. Product source unchanged.')
+print('Generated 9 original SVG design boards; 46 color pairs pass normal/RGB565 token gates. Product source unchanged.')
