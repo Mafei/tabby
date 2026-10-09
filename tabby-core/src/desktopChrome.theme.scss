@@ -87,6 +87,10 @@
                     height: 2px;
                     left: 12px;
                     right: 12px;
+                    top: auto;
+                    // Keep a clear gap above the existing 3px profile strip.
+                    bottom: 4px;
+                    pointer-events: none;
                     background: var(--tabby-selected-marker);
                 }
 

@@ -231,8 +231,13 @@ try {
             const state = await evaluate(`(() => {
                 const describe=selector=>{const n=document.querySelector(selector);if(!n)return null;const s=getComputedStyle(n),r=n.getBoundingClientRect();return {bg:s.backgroundColor,fg:s.color,opacity:s.opacity,outline:s.outlineWidth,borderTop:s.borderTopWidth,borderBottom:s.borderBottomWidth,borderLeft:s.borderLeftWidth,borderRight:s.borderRightWidth,borderRadius:s.borderRadius,pointerEvents:s.pointerEvents,weight:s.fontWeight,visibility:s.visibility,display:s.display,height:r.height,x:r.x,y:r.y,width:r.width}};
                 const pseudo=(selector)=>{const n=document.querySelector(selector);if(!n)return null;const s=getComputedStyle(n,'::after'),r=n.getBoundingClientRect();return {bg:s.backgroundColor,width:s.width,height:s.height,content:s.content,x:r.x+parseFloat(s.left||0),y:r.y+parseFloat(s.top||0)}};
-                return {pane:describe('split-tab > .child:not(.focused)'),spanner:describe('split-tab-spanner'),splitLine:pseudo('split-tab-spanner'),paneMarker:pseudo('split-tab-pane-label'),focused:document.hasFocus(),strip:describe('.tab-bar'),spacer:describe('.btn-space'),active:describe('tab-header.active'),inactive:describe('tab-header:nth-child(2)'),index:describe('tab-header .index'),marker:describe('tab-header.active .current-tab-indicator'),inactiveMarker:describe('tab-header:nth-child(2) .current-tab-indicator'),inactiveIndex:describe('tab-header:nth-child(2) .index'),terminal:describe('tab-body'),buttons:describe('tab-header .buttons'),button:describe('tab-header button'),activityTab:describe('tab-header:nth-child(3)'),activityDot:describe('tab-header:nth-child(3) .activity-indicator'),profileColor:describe('tab-header:nth-child(3) .colorbar'),progress:describe('tab-header:nth-child(3) .progressbar')};
+                return {pane:describe('split-tab > .child:not(.focused)'),spanner:describe('split-tab-spanner'),splitLine:pseudo('split-tab-spanner'),paneMarker:pseudo('split-tab-pane-label'),focused:document.hasFocus(),strip:describe('.tab-bar'),spacer:describe('.btn-space'),active:describe('tab-header.active'),activeName:describe('tab-header.active .name'),inactive:describe('tab-header:nth-child(2)'),index:describe('tab-header .index'),marker:describe('tab-header.active .current-tab-indicator'),inactiveMarker:describe('tab-header:nth-child(2) .current-tab-indicator'),inactiveIndex:describe('tab-header:nth-child(2) .index'),terminal:describe('tab-body'),buttons:describe('tab-header .buttons'),button:describe('tab-header button'),activityTab:describe('tab-header:nth-child(3)'),activityDot:describe('tab-header:nth-child(3) .activity-indicator'),profileColor:describe('tab-header:nth-child(3) .colorbar'),progress:describe('tab-header:nth-child(3) .progressbar')};
             })()`)
+            if (!label.includes('-before-')) {
+                assert(state.marker.y >= state.active.y + state.active.height - 8, `${label}: selected line is at the bottom`)
+                assert(state.marker.y >= state.activeName.y + state.activeName.height, `${label}: selected line does not cover the title`)
+                assert.equal(state.marker.pointerEvents, 'none', `${label}: selected line does not intercept input`)
+            }
             const screenshot = await cdp.request('Page.captureScreenshot', { format: 'png' })
             fs.writeFileSync(path.join(output, `${label}.png`), Buffer.from(screenshot.data, 'base64'))
             report.states.push({ label, ...state }); return state
@@ -327,6 +332,10 @@ try {
                 const selected = await snapshot(`${label}-selected`)
                 assert.equal(selected.activityDot.display, 'none'); assert.equal(selected.marker.height, 2)
                 assert.equal(selected.profileColor.bg, decorated.profileColor.bg); assert.equal(selected.progress.height, 3)
+                assert.equal(selected.active.outline, '2px', 'selection retains the keyboard focus outline')
+                assert(selected.marker.y + selected.marker.height <= selected.profileColor.y - 1, 'selected line has a visible gap above the profile strip')
+                assert.notEqual(selected.marker.bg, selected.profileColor.bg, 'neutral selection and profile color remain distinct')
+                assert(selected.marker.y > selected.progress.y + selected.progress.height, 'selected line does not cover top progress')
                 await evaluate(`selectFixtureTab(0)`)
                 assert.equal((await snapshot(`${label}-cleared`)).activityDot, null)
                 await evaluate(`setPaneCount(1)`)
