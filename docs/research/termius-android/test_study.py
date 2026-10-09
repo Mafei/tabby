@@ -112,6 +112,14 @@ class StudyGuards(unittest.TestCase):
                     study.install(directory)
                 download.assert_not_called()
 
+    def test_startup_diagnostic_is_bounded_and_omits_authentication_details(self):
+        data = ('line\n' * 200 + '/temporary/emulator boot\nBearer sensitive\njwt sensitive\n').encode()
+        result = study.bounded_startup_log(data, '/temporary')
+        self.assertEqual(len(result.splitlines()), 160)
+        self.assertNotIn('sensitive', result)
+        self.assertNotIn('/temporary', result)
+        self.assertIn('[RUNNER_TEMP]/emulator boot', result)
+
 
 if __name__ == '__main__':
     unittest.main()

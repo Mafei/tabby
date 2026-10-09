@@ -46,6 +46,10 @@ data is never imported. A UI-tree privacy check rejects account-like text,
 password fields and nonempty editable fields before storing a screenshot.
 Screenshots receive pixel review after retrieval. No app logs, credential
 inputs, account data, AVD snapshot or Termius APK are published.
+The disposable emulator's startup diagnostic is limited to the last 160 lines
+and 128 KiB, with authentication-related lines omitted. It collects no Android
+logcat or application logs. This diagnostic does not relax the existing startup
+deadline, real native focus checks or product acceptance requirements.
 
 When official installation is possible within authorized boundaries, further
 research should record Termius version/installer/ABI and observe Hosts, session

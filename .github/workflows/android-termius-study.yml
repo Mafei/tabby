@@ -49,13 +49,16 @@ jobs:
         id: boot
         if: steps.sdk.outcome == 'success'
         run: |
+          trap 'python3 docs/research/termius-android/study.py diagnose --output study-artifacts' EXIT
           node mobile/scripts/prepare-android-emulator.mjs --check-capacity
           test -c /dev/kvm
           study_runner_uid="$(id -u)"
           sudo setfacl -m "u:${study_runner_uid}:rw" /dev/kvm
           mkdir -p "$ANDROID_USER_HOME" "$ANDROID_AVD_HOME"
           printf 'no\n' | "$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager" create avd --force --name termius-study-api36 --package 'system-images;android-36;google_apis_playstore;x86_64' --device pixel_7
-          "$ANDROID_HOME/emulator/emulator" -avd termius-study-api36 -no-window -no-audio -no-snapshot -no-boot-anim -gpu software -accel on -memory 4096 -cores 4 -port 5554 > "$RUNNER_TEMP/termius-study-emulator.log" 2>&1 &
+          test -f "$ANDROID_AVD_HOME/termius-study-api36.avd/config.ini"
+          "$ANDROID_HOME/emulator/emulator" -no-window -no-audio -version
+          "$ANDROID_HOME/emulator/emulator" -avd termius-study-api36 -no-window -no-audio -no-snapshot -no-boot-anim -gpu software -accel on -memory 4096 -cores 4 -port 5554 -verbose > "$RUNNER_TEMP/termius-study-emulator.log" 2>&1 &
           "$ANDROID_HOME/platform-tools/adb" start-server
           node mobile/scripts/prepare-android-emulator.mjs --serial emulator-5554 --api 36
       - name: Observe official install entry and stop at login, terms or permissions

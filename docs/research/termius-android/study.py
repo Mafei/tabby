@@ -230,6 +230,38 @@ def privacy_check(xml):
     return texts
 
 
+def bounded_startup_log(data, temporary):
+    # Only this fresh emulator's bounded startup tail; never logcat/app data.
+    text = data[-128 * 1024:].decode('utf-8', errors='replace')
+    lines = text.splitlines()[-160:]
+    return '\n'.join('[emulator authentication detail omitted]' if re.search(
+        r'jwt|jwks|token|authorization|bearer|secret', line, re.I) else
+        line.replace(str(temporary), '[RUNNER_TEMP]') for line in lines) + '\n'
+
+
+def diagnose(output):
+    temporary = Path(os.environ['RUNNER_TEMP']).resolve()
+    log = temporary / 'termius-study-emulator.log'
+    if log.is_file():
+        with log.open('rb') as source:
+            source.seek(max(0, log.stat().st_size - 128 * 1024))
+            text = bounded_startup_log(source.read(128 * 1024), temporary)
+        (output / 'emulator-startup.txt').write_text(text)
+        print(text)
+    adb = Path(os.environ['ANDROID_HOME']) / 'platform-tools/adb'
+    state = 'UNAVAILABLE'
+    try:
+        value = run([str(adb), '-s', 'emulator-5554', 'get-state'], timeout=5)
+        state = value if value in ['device', 'offline', 'bootloader'] else 'UNKNOWN'
+    except subprocess.SubprocessError:
+        pass
+    report = {'createdUTC': utc(), 'sourceSHA': run(['git', 'rev-parse', 'HEAD']),
+              'serial': 'emulator-5554', 'adbState': state,
+              'startupLogPresent': log.is_file(), 'appLogsCollected': False}
+    write_json(output / 'startup-diagnostic.json', report)
+    print(json.dumps(report, indent=2))
+
+
 def observe(output, ready):
     adb = str(Path(os.environ['ANDROID_HOME']) / 'platform-tools/adb')
     def command(*args, binary=False):
@@ -299,7 +331,7 @@ def observe(output, ready):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('phase', choices=['preflight', 'install', 'observe'])
+    parser.add_argument('phase', choices=['preflight', 'install', 'diagnose', 'observe'])
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--boot-ready', choices=['true', 'false'], default='false')
     args = parser.parse_args()
@@ -308,6 +340,8 @@ def main():
         preflight(args.output)
     elif args.phase == 'install':
         install(args.output)
+    elif args.phase == 'diagnose':
+        diagnose(args.output)
     else:
         observe(args.output, args.boot_ready == 'true')
 
