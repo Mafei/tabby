@@ -1,0 +1,244 @@
+// Loaded only by NewTheme and enabled only while it is the selected theme.
+.tabby-desktop-theme app-root {
+    --tabs-height: calc(44px * var(--spaciness));
+    --side-tab-width: calc(220px * var(--spaciness));
+    --tabby-tab-width: calc(220px * var(--spaciness));
+    --tabby-tab-height: calc(36px * var(--spaciness));
+    --tabby-side-tabs-inset: calc(4px * var(--spaciness));
+    --tabby-selected-marker: var(--tabby-tab-marker);
+    font-size: 13px;
+    line-height: 20px;
+
+    title-bar {
+        background: var(--tabby-chrome-title-bg);
+        color: var(--tabby-chrome-text);
+
+        .title { color: inherit; }
+    }
+
+    .main.content > .tab-bar {
+        box-sizing: border-box;
+        background: var(--tabby-tab-strip-bg);
+        border: 0;
+        align-items: center;
+
+        > .tabs {
+            box-sizing: border-box;
+            padding: calc(4px * var(--spaciness));
+            gap: calc(4px * var(--spaciness));
+            align-items: center;
+            overflow-x: auto;
+            scrollbar-width: none;
+
+            &::-webkit-scrollbar { display: none; }
+
+            tab-header {
+                flex: 0 1 var(--tabby-tab-width);
+                width: var(--tabby-tab-width);
+                min-width: calc(144px * var(--spaciness));
+                height: calc(36px * var(--spaciness));
+                padding: 0 calc(12px * var(--spaciness));
+                border: 0;
+                border-radius: 6px;
+                background: var(--tabby-tab-inactive-bg);
+                color: var(--tabby-tab-fg);
+                font-size: 13px;
+                line-height: 20px;
+                font-weight: 400;
+
+                &.flex-width { flex-basis: auto; width: auto; }
+
+                .index {
+                    width: 20px;
+                    margin-top: 0;
+                    color: var(--tabby-tab-index);
+                    opacity: 1;
+                    font-size: 12px;
+                    line-height: 18px;
+                    font-weight: 400;
+                }
+
+                .name {
+                    margin-top: 0;
+                    -webkit-mask-image: none;
+                }
+
+                .pin-indicator { opacity: 1; }
+
+                &:hover:not(.active) {
+                    background: var(--tabby-tab-hover-bg);
+                    color: var(--tabby-tab-hover-fg);
+                }
+
+                &.active {
+                    background: var(--tabby-tab-active-bg);
+                    color: var(--tabby-tab-active-fg);
+
+                    .name { font-weight: 600; }
+                    .index { color: var(--tabby-tab-active-index); }
+                }
+
+                &:focus-visible {
+                    outline: 2px solid var(--tabby-tab-focus);
+                    outline-offset: 0;
+                }
+
+                .current-tab-indicator {
+                    height: 2px;
+                    left: 12px;
+                    right: 12px;
+                    background: var(--tabby-selected-marker);
+                }
+
+                .activity-indicator {
+                    background: currentColor;
+                    opacity: 1;
+                }
+
+                .buttons {
+                    top: 0;
+                    right: 4px;
+                    opacity: 1;
+                    visibility: hidden;
+                    pointer-events: none;
+
+                    button {
+                        width: calc(28px * var(--spaciness));
+                        height: calc(28px * var(--spaciness));
+                        border-radius: 4px;
+                        color: inherit;
+                        transition: none;
+
+                        svg { width: 16px; height: 16px; }
+
+                        &:hover, &:active {
+                            background: var(--tabby-tab-hover-bg) !important;
+                            color: var(--tabby-tab-hover-fg);
+                        }
+
+                        &:focus-visible {
+                            outline: 2px solid var(--tabby-tab-focus);
+                            outline-offset: -2px;
+                        }
+                    }
+                }
+
+                &.active, &:hover, &:focus-within {
+                    .buttons {
+                        visibility: visible;
+                        pointer-events: auto;
+                    }
+
+                    .name {
+                        padding-right: calc(var(--tabby-tab-actions, 2) * 28px * var(--spaciness));
+                    }
+                }
+            }
+        }
+
+        > .btn-group {
+            gap: calc(4px * var(--spaciness));
+            padding: calc(4px * var(--spaciness));
+            align-items: center;
+            > .d-flex { flex: none; }
+        }
+
+        .btn-tab-bar {
+            min-width: calc(32px * var(--spaciness));
+            height: calc(32px * var(--spaciness));
+            padding: 0 8px;
+            line-height: 20px;
+            border-radius: 4px;
+            color: var(--tabby-chrome-secondary);
+
+            svg, path { fill: currentColor; fill-opacity: 1; }
+            svg { width: 16px; height: 16px; }
+
+            &:hover, &:active { background: var(--tabby-tab-hover-bg) !important; }
+            &:focus-visible {
+                outline: 2px solid var(--tabby-tab-focus);
+                outline-offset: -2px;
+            }
+        }
+
+        // Windows has its own 138px overlay spacer; macOS its existing left
+        // inset, and Linux actual window-control buttons. Keep these intact.
+        > .btn-space.persistent { min-width: 8px; }
+        window-controls { color: var(--tabby-chrome-text); }
+    }
+
+    .main.content.tabs-on-left > .tab-bar.tab-bar,
+    .main.content.tabs-on-right > .tab-bar.tab-bar {
+        background: var(--tabby-tab-strip-bg);
+        align-items: stretch;
+
+        > .tabs {
+            width: 100%;
+            overflow-x: hidden;
+            padding-top: var(--tabby-side-tabs-inset);
+
+            tab-header {
+                width: 100% !important;
+                flex: 0 0 calc(36px * var(--spaciness));
+                min-width: 0;
+            }
+        }
+
+        > .btn-group { justify-content: center; }
+    }
+
+    &.platform-darwin .main.content.tabs-on-right > .tab-bar > .tabs {
+        // Preserve the existing native-control space above right-side tabs.
+        padding-top: calc(36px + 4px * var(--spaciness)) !important;
+    }
+
+    &:not(.window-focused) {
+        --tabby-selected-marker: var(--tabby-tab-unfocused-marker);
+    }
+
+    // Preserve terminal glyph opacity. Focus is shown by a local marker,
+    // not by dimming the entire terminal or adding a new persistent header.
+    split-tab > .child { opacity: 1; }
+    split-tab > .child.minimized { visibility: hidden; pointer-events: none; }
+    split-tab > .child.maximized {
+        box-shadow: none;
+        backdrop-filter: none;
+        border-radius: 0;
+    }
+
+    split-tab-spanner {
+        background: transparent;
+
+        &::after {
+            content: '';
+            position: absolute;
+            pointer-events: none;
+            background: var(--tabby-chrome-divider);
+        }
+
+        &.h::after { left: 5px; top: 0; bottom: 0; width: 1px; }
+        &.v::after { top: 5px; left: 0; right: 0; height: 1px; }
+        &:hover, &.active {
+            background: transparent;
+            &::after { background: var(--tabby-tab-focus); }
+        }
+    }
+
+    split-tab-pane-label {
+        .custom-name {
+            background: var(--tabby-tab-strip-bg);
+            color: var(--tabby-chrome-text);
+        }
+
+        &.focused:not(.minimized)::after {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 12px;
+            width: 32px;
+            height: 2px;
+            background: var(--tabby-selected-marker);
+        }
+    }
+
+}

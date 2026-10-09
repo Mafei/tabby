@@ -25,8 +25,8 @@ profile-icon(
 ) {{tab.customTitle || tab.title}}
 
 .buttons
-    button(*ngIf='!config.store.terminal.hideTabOptionsButton',(click)='onContextMenu($event)') !{require('../icons/tab-options.svg')}
+    button(*ngIf='!config.store.terminal.hideTabOptionsButton', [attr.aria-label]='"Tab options"|translate', (click)='$event.stopPropagation(); onContextMenu($event)') !{require('../icons/tab-options.svg')}
 
-    button(*ngIf='!config.store.terminal.hideCloseButton && !tab.effectivelyPinned',(click)='app.closeTab(tab, true)') &times;
+    button(*ngIf='!config.store.terminal.hideCloseButton && !tab.effectivelyPinned', [attr.aria-label]='"Close tab"|translate', (click)='$event.stopPropagation(); app.closeTab(tab, true)') &times;
 
 ng-content

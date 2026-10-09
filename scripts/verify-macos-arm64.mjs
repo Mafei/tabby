@@ -122,6 +122,7 @@ try {
             result.gatekeeper = { exitCode: assessment.status, signal: assessment.signal, output: (assessment.stdout ?? '') + (assessment.stderr ?? ''), error: assessment.error?.message }
             console.info('Gatekeeper policy assessment (separate from signature integrity):', JSON.stringify(result.gatekeeper))
             result.startup = await smokeMacStartup(app, scratch, extension)
+            result.lightStartup = await smokeMacStartup(app, scratch, `${extension}-light`, 'light')
             if (extension === 'zip') {
                 // Regression: corrupt the actual verified framework's fuse page in
                 // this temporary extracted copy. Strict validation must reject it.

@@ -58,7 +58,7 @@ $tab-border-radius: 4px;
         flex-direction: column;
 
         tab-header {
-            flex: 0 0 var(--tabs-height);
+            flex: 0 0 var(--tabby-tab-height, var(--tabs-height));
         }
     }
 
@@ -78,7 +78,7 @@ $tab-border-radius: 4px;
 
 .content.tabs-on-left > .tab-bar.tab-bar-no-controls-overlay, .content.tabs-titlebar-enabled {
     .tabs {
-        padding-top: 0 !important;
+        padding-top: var(--tabby-side-tabs-inset, 0) !important;
     }
 }
 

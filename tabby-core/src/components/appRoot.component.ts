@@ -70,6 +70,7 @@ export class AppRootComponent {
     @HostBinding('class.platform-darwin') platformClassMacOS = process.platform === 'darwin'
     @HostBinding('class.platform-linux') platformClassLinux = process.platform === 'linux'
     @HostBinding('class.no-tabs') noTabs = true
+    @HostBinding('class.window-focused') windowFocused = document.hasFocus()
     @ViewChildren(TabBodyComponent) tabBodies: TabBodyComponent[]
     @ViewChild('activeTransfersDropdown') activeTransfersDropdown: NgbDropdown
     unsortedTabs: BaseTabComponent[] = []
@@ -239,6 +240,16 @@ export class AppRootComponent {
         return false
     }
 
+    @HostListener('window:focus')
+    onWindowFocus (): void {
+        this.windowFocused = true
+    }
+
+    @HostListener('window:blur')
+    onWindowBlur (): void {
+        this.windowFocused = false
+    }
+
     hasVerticalTabs () {
         return this.config.store.appearance.tabsLocation === 'left' || this.config.store.appearance.tabsLocation === 'right'
     }
@@ -247,7 +258,7 @@ export class AppRootComponent {
         if (this.hasVerticalTabs()) {
             return '*'
         }
-        return this.config.store.appearance.flexTabs ? '*' : '200px'
+        return this.config.store.appearance.flexTabs ? '*' : 'var(--tabby-tab-width, 200px)'
     }
 
     onTabsReordered (event: CdkDragDrop<BaseTabComponent[]>) {

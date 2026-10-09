@@ -32,6 +32,11 @@ export class SplitTabPaneLabelComponent extends SelfPositioningComponent {
     @Input() geometry: SplitPaneGeometry|null
     @HostBinding('class.active') isActive = false
     @HostBinding('class.positioned') isPositioned = false
+
+    @HostBinding('class.focused') get isFocused (): boolean {
+        return this.parent.getFocusedTab() === this.tab
+    }
+
     @HostBinding('class.minimized') get isMinimized (): boolean {
         return !!this.parent.getMaximizedTab() && this.parent.getMaximizedTab() !== this.tab
     }
