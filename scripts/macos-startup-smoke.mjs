@@ -105,24 +105,30 @@ export async function smokeMacStartup (app, scratch, label, mode = 'dark') {
         assert(!native.exceptionDetails, `Native startup smoke failed: ${JSON.stringify(native.exceptionDetails)}`)
         assert.equal(native.result.value.ptyOutput, 'TABBY_CI_PTY_READY')
         assert(!exited, 'App exited during native smoke')
-        // Click the actual Angular toolbar control. Native menu accelerators
-        // can consume CDP-injected Cmd-T before it reaches the renderer.
+        // Invoke the actual Angular toolbar control in the live application.
+        // Verify its hit target before clicking; native CI input injection is
+        // recorded separately from this control/renderer startup verification.
         // These are fresh local terminals; no remote hosts or saved profiles.
         await cdp.request('Page.bringToFront')
         for (let attempt = 0; attempt < 3; attempt++) {
             const count = await cdp.request('Runtime.evaluate', { expression: "document.querySelectorAll('tab-header').length", returnByValue: true })
             if (count.result.value >= 3) { break }
-            const button = await cdp.request('Runtime.evaluate', { expression: `(() => {
+            const button = await cdp.request('Runtime.evaluate', { expression: `(async () => {
+                await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
                 const node = document.querySelector('.tab-bar button[aria-label="New terminal"]');
                 if (!node) return null;
                 const rect = node.getBoundingClientRect();
-                return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2, width: rect.width, height: rect.height };
-            })()`, returnByValue: true })
+                const hit = document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2);
+                const hittable = hit?.closest('button') === node;
+                const enabled = !node.disabled && getComputedStyle(node).pointerEvents !== 'none';
+                if (hittable && enabled && rect.width > 0 && rect.height > 0) node.click();
+                return { hittable, enabled, width: rect.width, height: rect.height };
+            })()`, awaitPromise: true, returnByValue: true })
+            assert(!button.exceptionDetails, 'Actual toolbar control evaluation failed')
             const bounds = button.result.value
             assert(bounds?.width > 0 && bounds?.height > 0, 'Actual New terminal toolbar control must be visible')
-            for (const type of ['mousePressed', 'mouseReleased']) {
-                await cdp.request('Input.dispatchMouseEvent', { type, x: bounds.x, y: bounds.y, button: 'left', clickCount: 1 })
-            }
+            assert(bounds.hittable && bounds.enabled, 'Actual New terminal control must be the enabled topmost button at its center')
+            console.info('Fresh-profile toolbar control:', JSON.stringify({ label, mode, ...bounds }))
             let changed = false
             const deadline = Date.now() + 10000
             while (Date.now() < deadline) {
@@ -147,7 +153,7 @@ export async function smokeMacStartup (app, scratch, label, mode = 'dark') {
         const screenshot = await cdp.request('Page.captureScreenshot', { format: 'png' })
         const screenshotFile = `macos-arm64-smoke-${label}.png`
         fs.writeFileSync(path.resolve('dist', screenshotFile), Buffer.from(screenshot.data, 'base64'))
-        return { passed: true, rendererBootstrapped: true, angularVersion: ready.angular, mode, desktopChrome: rendered, tabCreation: 'actual Angular toolbar via CDP mouse input', native: native.result.value, durationMs: Date.now() - start, screenshot: screenshotFile, credentialStorageAccessed: false, gatekeeperLaunchTest: false, SSHGUIAcceptance: false }
+        return { passed: true, rendererBootstrapped: true, angularVersion: ready.angular, mode, desktopChrome: rendered, tabCreation: 'actual Angular toolbar DOM click with visible/enabled/topmost hit-target checks', nativePointerInputVerified: false, native: native.result.value, durationMs: Date.now() - start, screenshot: screenshotFile, credentialStorageAccessed: false, gatekeeperLaunchTest: false, SSHGUIAcceptance: false }
     } catch (error) {
         if (cdp) {
             try {
