@@ -1,0 +1,80 @@
+name: Isolated API36 Termius official-channel study
+on:
+  pull_request:
+    branches: [candidate/android-mobile-key-enrollment-20261008]
+    types: [opened, synchronize, reopened]
+    paths: [docs/research/termius-android/**, .github/workflows/android-termius-study.yml]
+permissions:
+  contents: read
+concurrency:
+  group: termius-study-${{ github.head_ref }}
+  cancel-in-progress: true
+jobs:
+  study:
+    if: github.repository == 'Mafei/tabby' && github.event.pull_request.head.repo.full_name == 'Mafei/tabby' && github.head_ref == 'candidate/android-termius-runtime-study-20261009'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      # Existing explicit approval covers only this exact Android SDK agreement.
+      TABBY_ANDROID_SDK_LICENSE_APPROVED_SHA256: 1f8729233617b193fd619213792ae16a41b95d2bbbf525dfe66998252ba68b16
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha }}
+      - name: Disposable tool and evidence directories
+        run: |
+          printf 'ANDROID_HOME=%s/termius-study-sdk\nANDROID_SDK_ROOT=%s/termius-study-sdk\nANDROID_USER_HOME=%s/termius-study-user\nANDROID_AVD_HOME=%s/termius-study-avd\n' "$RUNNER_TEMP" "$RUNNER_TEMP" "$RUNNER_TEMP" "$RUNNER_TEMP" >> "$GITHUB_ENV"
+          mkdir -p study-artifacts
+          git rev-parse HEAD > study-artifacts/source-sha.txt
+      - name: Validate research consent and privacy guards
+        run: python3 -m unittest discover -s docs/research/termius-android -p 'test_*.py' -v
+      - name: Verify official Play image, ABI, approved agreements and install channel
+        id: preflight
+        run: python3 docs/research/termius-android/study.py preflight --output study-artifacts
+      - uses: actions/setup-java@v4
+        if: steps.preflight.outputs.can_install == 'true'
+        with:
+          distribution: temurin
+          java-version: 21
+      - uses: actions/setup-node@v4
+        if: steps.preflight.outputs.can_install == 'true'
+        with:
+          node-version: 24.19.0
+      - name: Install verified official SDK and Play image without accepting new terms
+        id: sdk
+        if: steps.preflight.outputs.can_install == 'true'
+        run: python3 docs/research/termius-android/study.py install --output study-artifacts
+      - name: Start only one disposable API36 emulator using existing KVM path
+        id: boot
+        if: steps.sdk.outcome == 'success'
+        run: |
+          trap 'python3 docs/research/termius-android/study.py diagnose --output study-artifacts' EXIT
+          node mobile/scripts/prepare-android-emulator.mjs --check-capacity
+          test -c /dev/kvm
+          study_runner_uid="$(id -u)"
+          sudo setfacl -m "u:${study_runner_uid}:rw" /dev/kvm
+          mkdir -p "$ANDROID_USER_HOME" "$ANDROID_AVD_HOME"
+          printf 'no\n' | "$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager" create avd --force --name termius-study-api36 --package 'system-images;android-36;google_apis_playstore;x86_64' --device pixel_7
+          test -f "$ANDROID_AVD_HOME/termius-study-api36.avd/config.ini"
+          "$ANDROID_HOME/emulator/emulator" -no-window -no-audio -version
+          "$ANDROID_HOME/emulator/emulator" -avd termius-study-api36 -no-window -no-audio -no-snapshot -no-boot-anim -gpu software -accel on -memory 4096 -cores 4 -port 5554 -verbose > "$RUNNER_TEMP/termius-study-emulator.log" 2>&1 &
+          "$ANDROID_HOME/platform-tools/adb" start-server
+          node mobile/scripts/prepare-android-emulator.mjs --serial emulator-5554 --api 36
+      - name: Observe official install entry and stop at login, terms or permissions
+        if: always() && steps.sdk.outcome == 'success'
+        run: python3 docs/research/termius-android/study.py observe --output study-artifacts --boot-ready '${{ steps.boot.outcome == 'success' }}'
+      - name: Stop only the disposable emulator
+        if: always()
+        run: |
+          if [ -x "$ANDROID_HOME/platform-tools/adb" ]; then
+            "$ANDROID_HOME/platform-tools/adb" -s emulator-5554 emu kill || true
+          fi
+      - name: Upload bounded public research evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Termius-API36-Official-Study-${{ github.event.pull_request.head.sha }}
+          path: study-artifacts/
+          if-no-files-found: error
+          retention-days: 14
