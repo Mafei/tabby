@@ -1,0 +1,108 @@
+name: macOS adhoc test package and distribution assessment
+on:
+  push:
+    branches: [candidate/macos-adhoc-library-validation]
+  pull_request:
+    branches: [candidate/desktop-uiux-v1.1]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: macos-adhoc-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+env:
+  CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+  CSC_LINK: ''
+  CSC_KEY_PASSWORD: ''
+  CSC_NAME: ''
+  APPLE_ID: ''
+  APPLE_APP_SPECIFIC_PASSWORD: ''
+  APPSTORE_USERNAME: ''
+  APPSTORE_PASSWORD: ''
+  APPLE_TEAM_ID: ''
+  KEYGEN_TOKEN: ''
+  TABBY_ARTIFACT_ONLY: '1'
+  ARCH: arm64
+  TABBY_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+jobs:
+  test-package:
+    if: github.repository == 'Mafei/tabby' && github.event.repository.visibility == 'public'
+    runs-on: macos-15
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Verify exact source and native Apple Silicon toolchain
+        run: |
+          test "$(git rev-parse HEAD)" = "$TABBY_SOURCE_SHA"
+          test "$(uname -m)" = arm64
+          test "$(node -p process.arch)" = arm64
+          test "$(rustc -vV | sed -n 's/^host: //p')" = aarch64-apple-darwin
+          xcrun --find clang
+          xcrun --find swiftc
+      - name: Install and build
+        run: |
+          npm install -g yarn@1.22.22
+          yarn --frozen-lockfile --network-timeout 1000000
+          python3 scripts/fonts/fetch-fonts.py
+          yarn test:macos-artifact
+          yarn build
+          node scripts/prepackage-plugins.mjs
+      - name: Package adhoc archives without publishing
+        id: package
+        run: node scripts/build-macos.mjs
+      - name: Verify archives, actual host policy, normal launch and native module loading
+        id: verify
+        run: node scripts/verify-macos-arm64.mjs
+      - name: Record exact source and archive hashes
+        if: always() && steps.package.outcome == 'success'
+        run: node scripts/write-desktop-artifact-receipt.mjs
+      - name: Upload test package and honest verification reports
+        if: always() && steps.package.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: tabby-macos-arm64-adhoc-${{ github.event.pull_request.head.sha || github.sha }}
+          path: |
+            dist/*.dmg
+            dist/*.zip
+            dist/macos-arm64-*.json
+            dist/macos-arm64-smoke-*.png
+            dist/macos-arm64-smoke-*.log
+            dist/desktop-artifact-receipt.json
+            dist/desktop-artifacts.sha256
+            build/mac/TEST-BUILD.md
+          if-no-files-found: error
+          retention-days: 14
+  automatic-gatekeeper-trust:
+    # This separate gate intentionally fails on an untrusted adhoc package.
+    # Manual user approval is this candidate's acceptance goal; automatic trust
+    # is NOT claimed and the negative result must remain visible in Actions.
+    needs: test-package
+    if: github.repository == 'Mafei/tabby' && github.event.repository.visibility == 'public'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: tabby-macos-arm64-adhoc-${{ github.event.pull_request.head.sha || github.sha }}
+          path: assessment
+      - name: Require accepted automatic distribution assessment
+        run: |
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          files = list(Path('assessment').rglob('macos-arm64-verification.json'))
+          assert len(files) == 1, 'Exact-source verification report missing'
+          report = json.loads(files[0].read_text())
+          assert report['sourceSHA'] == os.environ['TABBY_SOURCE_SHA']
+          gate = report['gates']['automaticGatekeeperTrust']
+          print(json.dumps(gate, indent=2))
+          assert gate['passed'], 'Gatekeeper rejected the adhoc test package; manual user approval remains required and unverified on CI'
+          PY

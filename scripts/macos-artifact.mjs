@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
 import { execFileSync, spawnSync } from 'node:child_process'
+import { artifactHosts, isArtifactHost, assertArtifactSignaturePolicy } from './macos-signing-policy.mjs'
 
 export function isMachO (file) {
     const descriptor = fs.openSync(file, 'r')
@@ -62,7 +63,14 @@ export function verifyMacSignature (file) {
     const output = result.stderr + result.stdout
     assert.match(output, /Signature=adhoc/, `Expected ad-hoc signature: ${file}`)
     assert.match(output, /TeamIdentifier=not set/, `Unexpected signing team: ${file}`)
-    return { valid: true, kind: 'adhoc', teamIdentifier: null, cdHash: /CDHash=(\S+)/.exec(output)?.[1], flags: /flags=(.+)/.exec(output)?.[1] }
+    const entitlements = runMacTool('/usr/bin/codesign', ['--display', '--entitlements', '-', file])
+    const parsed = JSON.parse(execFileSync('/usr/bin/plutil', ['-convert', 'json', '-o', '-', '-'], {
+        input: entitlements, encoding: 'utf8', timeout: 30000,
+    }))
+    const signature = { valid: true, kind: 'adhoc', teamIdentifier: null,
+        cdHash: /CDHash=(\S+)/.exec(output)?.[1], flags: /flags=(.+)/.exec(output)?.[1], entitlements: parsed }
+    assert.match(signature.flags ?? '', /runtime/, `Hardened Runtime missing: ${file}`)
+    return signature
 }
 
 function sign (file, entitlements) {
@@ -83,22 +91,29 @@ export function signMacNativeSources (roots, entitlements) {
     console.info(`Ad-hoc signed ${count} source native components before ASAR creation`)
 }
 
-export function signMacArtifactApp (app, entitlements) {
+export function signMacArtifactApp (app, entitlements, hostEntitlements) {
     assert.equal(process.platform, 'darwin')
     const resources = path.join(app, 'Contents/Resources') + path.sep
     const code = collectMacCode(app)
     for (const item of code) {
         // These were signed before packing. Changing unpacked native code now
         // would invalidate the ASAR's per-file integrity metadata.
-        if (!item.file.startsWith(resources)) { sign(item.file, entitlements) }
-        verifyMacSignature(item.file)
+        if (!item.file.startsWith(resources)) { sign(item.file, isArtifactHost(app, item.file) ? hostEntitlements : entitlements) }
+        assertArtifactSignaturePolicy(verifyMacSignature(item.file), isArtifactHost(app, item.file))
     }
     verifyMacSignature(app)
     console.info(`Ad-hoc signed and strictly verified complete app: ${code.length} native/bundle components`)
 }
 
 export function verifyMacArtifactApp (app) {
-    return collectMacCode(app).map(item => ({ path: path.relative(app, item.file) || '.', bundle: item.bundle, signature: verifyMacSignature(item.file) }))
+    const result = collectMacCode(app).map(item => {
+        const signature = verifyMacSignature(item.file)
+        const host = isArtifactHost(app, item.file)
+        assertArtifactSignaturePolicy(signature, host)
+        return { path: path.relative(app, item.file) || '.', bundle: item.bundle, processHost: host, signature }
+    })
+    assert.deepEqual(result.filter(item => item.processHost).map(item => item.path).sort(), [...artifactHosts].sort(), 'All and only the five process hosts must receive the approved exception')
+    return result
 }
 
 export function readSafetyFuses (app) {

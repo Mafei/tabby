@@ -8,6 +8,9 @@ import path from 'node:path'
 import { extractFile, listPackage, statFile } from '@electron/asar'
 import { verifyMacSignature, verifyMacArtifactApp, readSafetyFuses } from './macos-artifact.mjs'
 import { smokeMacStartup } from './macos-startup-smoke.mjs'
+import { normalMacLaunch } from './macos-normal-launch.mjs'
+import { probeLibraryValidation } from './macos-library-validation-probe.mjs'
+import { gatekeeperResult } from './macos-signing-policy.mjs'
 
 // Inspect the delivered archives, including native code stored in app.asar or
 // app.asar.unpacked. Foreign-platform prebuilds bundled by vendors are dormant;
@@ -20,7 +23,9 @@ assert.match(process.env.TABBY_SOURCE_SHA ?? '', /^[a-f0-9]{40}$/)
 const dist = path.resolve('dist')
 const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'tabby-arm64-'))
 const digest = data => createHash('sha256').update(data).digest('hex')
-const report = { sourceSHA: process.env.TABBY_SOURCE_SHA, runnerArch: process.arch, signing: 'adhoc', developerID: false, notarized: false, gatekeeperTrusted: false, archives: [] }
+const report = { sourceSHA: process.env.TABBY_SOURCE_SHA, runnerArch: process.arch, signing: 'adhoc', developerID: false,
+    notarized: false, gatekeeperTrusted: false, testPackageChecksPassed: false,
+    downloadedManualApprovalVerified: false, archives: [], gates: {} }
 const exec = (command, args) => execFileSync(command, args, { encoding: 'utf8' }).trim()
 
 function verifyBinary (data, relativePath, temporaryFile, thin = false, signatureFile = temporaryFile) {
@@ -97,6 +102,9 @@ function findApp (directory) {
 }
 
 try {
+    report.libraryValidationProbe = probeLibraryValidation(scratch)
+    report.gates.hostNegativeEnforcement = { passed: report.libraryValidationProbe.hostEnforcesNegative,
+        status: report.libraryValidationProbe.hostEnforcesNegative ? 'enforced' : 'not-demonstrated-on-this-runner' }
     for (const extension of ['zip', 'dmg']) {
         const archives = fs.readdirSync(dist).filter(name => name.endsWith(`.${extension}`))
         assert.equal(archives.length, 1, `Expected one macOS ${extension} output`)
@@ -119,8 +127,11 @@ try {
                 binaries: verifyApp(app), code: verifyMacArtifactApp(app), fuses: readSafetyFuses(app) }
             report.archives.push(result)
             const assessment = spawnSync('/usr/sbin/spctl', ['--assess', '--type', 'execute', '--verbose=4', app], { encoding: 'utf8', timeout: 30000 })
-            result.gatekeeper = { exitCode: assessment.status, signal: assessment.signal, output: (assessment.stdout ?? '') + (assessment.stderr ?? ''), error: assessment.error?.message }
+            result.gatekeeper = gatekeeperResult({ exitCode: assessment.status, signal: assessment.signal, output: (assessment.stdout ?? '') + (assessment.stderr ?? ''), error: assessment.error?.message })
             console.info('Gatekeeper policy assessment (separate from signature integrity):', JSON.stringify(result.gatekeeper))
+            result.normalLaunch = normalMacLaunch(app, scratch, extension)
+            // Separate instrumented checks exercise actual native modules and PTY.
+            // They are additional evidence, not the no-debugging launch above.
             result.startup = await smokeMacStartup(app, scratch, extension)
             result.lightStartup = await smokeMacStartup(app, scratch, `${extension}-light`, 'light')
             if (extension === 'zip') {
@@ -153,8 +164,17 @@ try {
     const zipBinaries = report.archives[0].binaries
     assert.deepEqual(report.archives[1].binaries, zipBinaries, 'DMG and ZIP must contain the same verified binaries')
     assert.deepEqual(report.archives[1].code, report.archives[0].code, 'DMG and ZIP must contain the same complete signed code')
-    report.passed = true
-    console.info(`Verified both archives: ${zipBinaries.length} ARM-compatible binaries each; ${report.archives[0].code.length} signed code/bundle components; both startup smokes passed; source ${report.sourceSHA}`)
+    report.gates.archiveIntegrity = { passed: true }
+    report.gates.signaturePolicy = { passed: true, hostProcesses: 5, libraryValidationExceptionScope: 'main app and four Helpers only', hardenedRuntime: true }
+    report.gates.libraryLoading = { passed: true }
+    report.gates.normalLaunch = { passed: report.archives.every(item => item.normalLaunch.passed), applicationArguments: [] }
+    report.gates.instrumentedNativeAndUI = { passed: true, debuggingEnabled: true }
+    report.gates.automaticGatekeeperTrust = { passed: report.archives.every(item => item.gatekeeper.passed), assessments: report.archives.map(item => item.gatekeeper.status) }
+    report.gatekeeperTrusted = report.gates.automaticGatekeeperTrust.passed
+    report.gates.downloadedManualApproval = { passed: false, status: 'requires-user-device-acceptance' }
+    report.testPackageChecksPassed = true
+    console.info(`Test-package checks passed: ${zipBinaries.length} ARM-compatible binaries, ${report.archives[0].code.length} signed components per archive, normal LaunchServices startup and separate instrumented smokes; source ${report.sourceSHA}`)
+    console.info('Distribution gates (not included in test-package checks):', JSON.stringify({ automaticGatekeeperTrust: report.gates.automaticGatekeeperTrust, downloadedManualApproval: report.gates.downloadedManualApproval }))
 } finally {
     fs.writeFileSync(path.join(dist, 'macos-arm64-verification.json'), JSON.stringify(report, null, 2) + '\n')
     fs.rmSync(scratch, { recursive: true, force: true })

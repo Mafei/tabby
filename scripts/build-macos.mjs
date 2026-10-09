@@ -4,6 +4,10 @@ import { build as builder } from 'electron-builder'
 import * as vars from './vars.mjs'
 import path from 'node:path'
 import { signMacNativeSources, signMacArtifactApp } from './macos-artifact.mjs'
+import { isMacArtifactMode } from './macos-signing-policy.mjs'
+
+const artifactOnly = isMacArtifactMode(process.env)
+if (artifactOnly) { process.env.CSC_IDENTITY_AUTO_DISCOVERY = 'false' }
 
 const isTag = (process.env.GITHUB_REF || '').startsWith('refs/tags/')
 
@@ -30,8 +34,8 @@ const options = {
         },
         forceCodeSigning: !!process.env.CSC_LINK,
         mac: {
-            identity: !process.env.CI || process.env.CSC_LINK ? undefined : null,
-            notarize: !!process.env.APPLE_TEAM_ID,
+            identity: artifactOnly ? null : (!process.env.CI || process.env.CSC_LINK ? undefined : null),
+            notarize: artifactOnly ? false : !!process.env.APPLE_TEAM_ID,
         },
         npmRebuild: process.env.ARCH !== 'arm64',
         publish: process.env.KEYGEN_TOKEN ? [
@@ -46,15 +50,16 @@ const options = {
 }
 
 try {
-    if (process.env.TABBY_ARTIFACT_ONLY) {
+    if (artifactOnly) {
         const entitlements = path.resolve('build/mac/entitlements.plist')
+        const hostEntitlements = path.resolve('build/mac/entitlements.adhoc-host.plist')
         signMacNativeSources(['app/node_modules', 'builtin-plugins', 'extras'].map(root => path.resolve(root)), entitlements)
         // The directory build completes all bundle edits, including fuse changes.
         // PR builds skip electron-builder's normal signer, so sign explicitly
         // before creating archives. prepackaged prevents any later bundle edits.
         await builder({ ...options, mac: ['dir'] })
         const app = path.resolve(`dist/mac${process.env.ARCH === 'arm64' ? '-arm64' : ''}/Tabby.app`)
-        signMacArtifactApp(app, entitlements)
+        signMacArtifactApp(app, entitlements, hostEntitlements)
         await builder({ ...options, prepackaged: app })
     } else {
         await builder(options)
