@@ -21,8 +21,11 @@ The existing SDK agreement SHA256
 `1f8729233617b193fd619213792ae16a41b95d2bbbf525dfe66998252ba68b16`
 is reused only after the exact published agreement text matches. The installer
 has no `--licenses`, automatic agreement reply or alternative download route.
-An added/changed agreement is saved as public license evidence and blocks SDK
-installation. SDK metadata/archives use Google's official repository and the
+An added/changed agreement on a requested stable package is saved as public
+license evidence and blocks SDK installation. The published catalogs also
+contain unrelated preview packages; these are not selected or accepted, and
+the report limits selected-package/permission evidence to channel-0 records.
+SDK metadata/archives use Google's official repository and the
 existing pinned command-line-tools checksum.
 
 The official [Termius installation documentation](https://docs.termius.com/getting-started/download-termius)

@@ -58,7 +58,9 @@ def download(url, maximum=8 * 1024 * 1024):
 
 
 def packages(root, names):
-    return [p for p in SDK.children(root, 'remotePackage') if p.get('path') in names]
+    return [p for p in SDK.children(root, 'remotePackage') if p.get('path') in names
+            and len(SDK.children(p, 'channelRef')) == 1
+            and SDK.children(p, 'channelRef')[0].get('ref') == 'channel-0']
 
 
 def license_evidence(root, selected, output):
@@ -122,6 +124,7 @@ def preflight(output):
               'package': PACKAGE, 'requestedRuntimeAPI': 36, 'requestedABI': 'x86_64',
               'metadataURLs': [SDK.REPOSITORY_URL, CATALOG], 'canInstall': False,
               'sdkInstalled': False, 'termiusInstalled': False, 'termiusRan': False,
+              'evidenceScope': 'requested channel-0 records only; catalog previews not selected or accepted',
               'officialChannel': official_channel(), 'licenseEvidence': []}
     try:
         if os.environ.get('TABBY_ANDROID_SDK_LICENSE_APPROVED_SHA256') != SDK.LICENSE_SHA256:
@@ -169,7 +172,7 @@ def preflight(output):
             target.write('Termius has not been installed or run. No account, consent or permission automation.\n')
             if not report['canInstall']:
                 target.write('\nBlocker: `' + report['blocker'] + '`\n')
-    print(json.dumps({k: report[k] for k in ['status', 'canInstall', 'package', 'licenseEvidence']}, indent=2))
+    print(json.dumps(report, indent=2))
     return report
 
 

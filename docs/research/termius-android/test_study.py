@@ -38,9 +38,9 @@ def catalog(image=False, agreement='android-sdk-license', abi='x86_64'):
 
 
 class StudyGuards(unittest.TestCase):
-    def preflight(self, directory, image):
+    def preflight(self, directory, image, repository=None):
         def downloaded(url):
-            return catalog() if url == study.SDK.REPOSITORY_URL else image
+            return (repository or catalog()) if url == study.SDK.REPOSITORY_URL else image
         with patch.object(study.SDK, 'LICENSE_SHA256', DIGEST), \
              patch.dict(study.os.environ, {'TABBY_ANDROID_SDK_LICENSE_APPROVED_SHA256': DIGEST}, clear=True), \
              patch.object(study, 'run', return_value='synthetic-sha'), \
@@ -72,6 +72,21 @@ class StudyGuards(unittest.TestCase):
             r = self.preflight(Path(temporary), catalog(image=True, abi='arm64-v8a'))
             self.assertFalse(r['canInstall'])
             self.assertEqual(r['blocker'], 'SDK_IMAGE_METADATA_INVALID')
+
+    def test_unselected_preview_agreement_is_not_selected_or_accepted(self):
+        root = ET.fromstring(catalog())
+        ET.SubElement(root, 'license', id='android-sdk-preview-license').text = 'unapproved preview'
+        preview = ET.SubElement(root, 'remotePackage', path='emulator')
+        ET.SubElement(preview, 'channelRef', ref='channel-1')
+        ET.SubElement(preview, 'uses-license', ref='android-sdk-preview-license')
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            r = self.preflight(directory, catalog(image=True), ET.tostring(root))
+            self.assertTrue(r['canInstall'])
+            self.assertTrue(all(x['alreadyApproved'] for x in r['licenseEvidence']))
+            self.assertTrue(all(x['agreements'] == ['android-sdk-license'] for x in r['selectedPackages']))
+            self.assertFalse((directory / 'license-android-sdk-preview-license.txt').exists())
+            self.assertFalse(r['sdkInstalled'])
 
     def test_http_denial_stops_without_alternate_download_or_sdk_install(self):
         with tempfile.TemporaryDirectory() as temporary, \
