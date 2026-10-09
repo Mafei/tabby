@@ -1,7 +1,7 @@
 name: Linux portable Rocky 8 baseline and font renderer
 on:
   push:
-    branches: [feature/linux-portable-rocky8-fonts, candidate/desktop-uiux-v1.1]
+    branches: [feature/linux-portable-rocky8-fonts, candidate/desktop-uiux-v1.1, candidate/desktop-activity-dot-split-focus]
   pull_request:
     branches: [master, feature/ssh-tmux-recovery]
   workflow_dispatch:
@@ -23,7 +23,7 @@ env:
   APPLE_TEAM_ID: ''
 jobs:
   tab-strip-contrast:
-    if: github.repository == 'Mafei/tabby' && github.event.repository.visibility == 'public' && ((github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == 'Mafei/tabby' && (github.event.pull_request.head.ref == 'feature/linux-portable-rocky8-fonts' || github.event.pull_request.head.ref == 'candidate/desktop-uiux-v1.1')) || (github.event_name != 'pull_request' && (github.ref == 'refs/heads/feature/linux-portable-rocky8-fonts' || github.ref == 'refs/heads/candidate/desktop-uiux-v1.1')))
+    if: github.repository == 'Mafei/tabby' && github.event.repository.visibility == 'public' && ((github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == 'Mafei/tabby' && (github.event.pull_request.head.ref == 'feature/linux-portable-rocky8-fonts' || github.event.pull_request.head.ref == 'candidate/desktop-uiux-v1.1' || github.event.pull_request.head.ref == 'candidate/desktop-activity-dot-split-focus')) || (github.event_name != 'pull_request' && (github.ref == 'refs/heads/feature/linux-portable-rocky8-fonts' || github.ref == 'refs/heads/candidate/desktop-uiux-v1.1' || github.ref == 'refs/heads/candidate/desktop-activity-dot-split-focus')))
     runs-on: ubuntu-22.04
     timeout-minutes: 15
     steps:
@@ -59,7 +59,7 @@ jobs:
           if-no-files-found: error
           retention-days: 14
   rocky-baseline:
-    if: github.repository == 'Mafei/tabby' && github.event.repository.visibility == 'public' && ((github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == 'Mafei/tabby' && (github.event.pull_request.head.ref == 'feature/linux-portable-rocky8-fonts' || github.event.pull_request.head.ref == 'candidate/desktop-uiux-v1.1')) || (github.event_name != 'pull_request' && (github.ref == 'refs/heads/feature/linux-portable-rocky8-fonts' || github.ref == 'refs/heads/candidate/desktop-uiux-v1.1')))
+    if: github.repository == 'Mafei/tabby' && github.event.repository.visibility == 'public' && ((github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == 'Mafei/tabby' && (github.event.pull_request.head.ref == 'feature/linux-portable-rocky8-fonts' || github.event.pull_request.head.ref == 'candidate/desktop-uiux-v1.1' || github.event.pull_request.head.ref == 'candidate/desktop-activity-dot-split-focus')) || (github.event_name != 'pull_request' && (github.ref == 'refs/heads/feature/linux-portable-rocky8-fonts' || github.ref == 'refs/heads/candidate/desktop-uiux-v1.1' || github.ref == 'refs/heads/candidate/desktop-activity-dot-split-focus')))
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     container:
@@ -141,7 +141,7 @@ jobs:
           retention-days: 14
   sandbox-font-renderer:
     needs: rocky-baseline
-    if: github.repository == 'Mafei/tabby' && github.event.repository.visibility == 'public' && ((github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == 'Mafei/tabby' && (github.event.pull_request.head.ref == 'feature/linux-portable-rocky8-fonts' || github.event.pull_request.head.ref == 'candidate/desktop-uiux-v1.1')) || (github.event_name != 'pull_request' && (github.ref == 'refs/heads/feature/linux-portable-rocky8-fonts' || github.ref == 'refs/heads/candidate/desktop-uiux-v1.1')))
+    if: github.repository == 'Mafei/tabby' && github.event.repository.visibility == 'public' && ((github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == 'Mafei/tabby' && (github.event.pull_request.head.ref == 'feature/linux-portable-rocky8-fonts' || github.event.pull_request.head.ref == 'candidate/desktop-uiux-v1.1' || github.event.pull_request.head.ref == 'candidate/desktop-activity-dot-split-focus')) || (github.event_name != 'pull_request' && (github.ref == 'refs/heads/feature/linux-portable-rocky8-fonts' || github.ref == 'refs/heads/candidate/desktop-uiux-v1.1' || github.ref == 'refs/heads/candidate/desktop-activity-dot-split-focus')))
     runs-on: ubuntu-22.04
     timeout-minutes: 20
     steps:

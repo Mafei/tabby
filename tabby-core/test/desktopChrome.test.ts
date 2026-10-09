@@ -56,4 +56,13 @@ for (const mode of ['dark', 'light'] as const) {
             }
         }
     })
+
+    test(`${mode}: neutral activity dots remain distinct on idle and hover surfaces in RGB565`, () => {
+        const colors = desktopChromeColors(mode)
+        for (const transform of [(x: number[]) => x, rgb565]) {
+            for (const [foreground, background] of [['tab-fg', 'tab-inactive-bg'], ['tab-hover-fg', 'tab-hover-bg']]) {
+                assert(contrast(transform(rgb(colors[`--tabby-${foreground}`])), transform(rgb(colors[`--tabby-${background}`]))) >= 3)
+            }
+        }
+    })
 }

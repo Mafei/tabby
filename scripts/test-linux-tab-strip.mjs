@@ -114,7 +114,7 @@ body { margin:0 } pre { margin:0; padding:20px; font:16px/1.6 monospace }
 </style><app-root _nghost-root class="platform-linux"><div _ngcontent-root class="main content tabs-on-top">
 <div _ngcontent-root class="tab-bar"><div _ngcontent-root class="inset background"></div><div _ngcontent-root class="tabs"></div><div _ngcontent-root class="btn-space background"></div>
 <button _ngcontent-root class="btn btn-secondary btn-tab-bar" aria-label="New tab">+</button><window-controls _ngcontent-root _nghost-controls><button _ngcontent-controls aria-label="Minimize">−</button><button _ngcontent-controls aria-label="Maximize">□</button><button _ngcontent-controls aria-label="Close window">×</button></window-controls><div _ngcontent-root class="window-controls-spacer"></div></div>
-<div _ngcontent-root class="content"><tab-body _ngcontent-root class="content-tab content-tab-active"><split-tab _nghost-split style="height:100%"><div class="child focused" style="left:0;top:0;width:50%;height:100%"><pre></pre></div><div class="child" style="left:50%;top:0;width:50%;height:100%"><pre></pre></div><split-tab-spanner _nghost-spanner class="h" style="left:50%;top:0;height:100%"></split-tab-spanner><split-tab-pane-label _nghost-pane class="positioned focused" style="left:0;top:0;width:50%;height:100%"></split-tab-pane-label></split-tab></tab-body></div></div></app-root>
+<div _ngcontent-root class="content"><tab-body _ngcontent-root class="content-tab content-tab-active"><split-tab _nghost-split class="has-split-panes" style="height:100%"><div class="child focused" style="left:0;top:0;width:50%;height:100%"><pre></pre></div><div class="child" style="left:50%;top:0;width:50%;height:100%"><pre></pre></div><split-tab-spanner _nghost-spanner class="h" style="left:50%;top:0;height:100%"></split-tab-spanner><split-tab-pane-label _nghost-pane class="positioned focused" style="left:0;top:0;width:50%;height:100%"></split-tab-pane-label></split-tab></tab-body></div></div></app-root>
 <script>
 const css=${JSON.stringify(css)}, data=${JSON.stringify(datasets)}, schemes=${JSON.stringify(terminalSchemes)}, header=${JSON.stringify(header)};
 const tabs=document.querySelector('.tabs');
@@ -127,6 +127,35 @@ for(let i=0;i<3;i++){
  tab.querySelectorAll('button').forEach((n,j)=>n.setAttribute('aria-label',j?'Close tab':'Tab options'));
  tab.querySelectorAll('*').forEach(n=>n.setAttribute('_ngcontent-header',''));tabs.append(tab);
 }
+const headerTemplate=document.createElement('template');headerTemplate.innerHTML=header;
+window.setTabState=(index,values)=>{
+ const tab=tabs.children[index];
+ for(const [key,selector] of [['activity','.activity-indicator'],['progress','.progressbar'],['color','.colorbar']]){
+  if(!(key in values))continue;
+  let node=tab.querySelector(selector);const visible=key==='activity'?values[key]:values[key]!=null;
+  if(!visible){node?.remove();continue;}
+  if(!node){node=headerTemplate.content.querySelector(selector).cloneNode(true);node.setAttribute('_ngcontent-header','');tab.prepend(node);}
+  if(key==='progress')node.style.width=values[key]+'%';if(key==='color')node.style.backgroundColor=values[key];
+ }
+};
+// Match the existing AppService presentation lifecycle; the real method and
+// activity subjects are executed independently in desktop-uiux.test.mjs.
+window.selectFixtureTab=index=>{
+ const previous=[...tabs.children].find(n=>n.classList.contains('active'));
+ if(previous&&previous!==tabs.children[index])previous.querySelector('.activity-indicator')?.remove();
+ [...tabs.children].forEach((n,i)=>n.classList.toggle('active',i===index));
+};
+window.setPaneCount=(count,maximized=false)=>{
+ const split=document.querySelector('split-tab');const template=split.querySelector('.child').cloneNode(true);
+ split.querySelectorAll('.child,split-tab-pane-label,split-tab-spanner').forEach(n=>n.remove());
+ split.classList.toggle('has-split-panes',count>1&&!maximized);
+ for(let i=0;i<count;i++){
+  const child=template.cloneNode(true);child.className='child'+(i===0?' focused':'')+(maximized?(i===0?' maximized':' minimized'):'');
+  child.style.cssText=maximized&&i===0?'left:5%;top:5%;width:90%;height:90%':'left:'+i*100/count+'%;top:0;width:'+100/count+'%;height:100%';split.append(child);
+  const label=document.createElement('split-tab-pane-label');label.setAttribute('_nghost-pane','');label.className='positioned'+(i===0?' focused':'')+(maximized&&i>0?' minimized':'');label.style.cssText=child.style.cssText;split.append(label);
+  if(i>0&&!maximized){const spanner=document.createElement('split-tab-spanner');spanner.setAttribute('_nghost-spanner','');spanner.className='h';spanner.style.cssText='left:'+i*100/count+'%;top:0;height:100%';split.append(spanner);}
+ }
+};
 window.setFixture=(version='after',mode='dark',position='top',vibrant=false,platform='linux',override=false,focused=true)=>{
  document.documentElement.style.cssText='';Object.entries(data[version+'-'+mode+'-'+vibrant]).forEach(([k,v])=>document.documentElement.style.setProperty(k,v));
  document.querySelector('#theme').textContent=css[version];
@@ -200,10 +229,15 @@ try {
         await evaluate(`Promise.all([document.fonts.load('400 13px \"Source Sans Pro\"'),document.fonts.load('600 13px \"Source Sans Pro\"')])`)
         const snapshot = async label => {
             const state = await evaluate(`(() => {
-                const describe=selector=>{const n=document.querySelector(selector),s=getComputedStyle(n),r=n.getBoundingClientRect();return {bg:s.backgroundColor,fg:s.color,opacity:s.opacity,outline:s.outlineWidth,borderTop:s.borderTopWidth,borderBottom:s.borderBottomWidth,borderLeft:s.borderLeftWidth,borderRight:s.borderRightWidth,weight:s.fontWeight,visibility:s.visibility,display:s.display,height:r.height,x:r.x,y:r.y,width:r.width}};
-                const pseudo=(selector)=>{const s=getComputedStyle(document.querySelector(selector),'::after');return {bg:s.backgroundColor,width:s.width,height:s.height,content:s.content}};
-                return {pane:describe('split-tab > .child:not(.focused)'),spanner:describe('split-tab-spanner'),splitLine:pseudo('split-tab-spanner'),paneMarker:pseudo('split-tab-pane-label'),focused:document.hasFocus(),strip:describe('.tab-bar'),spacer:describe('.btn-space'),active:describe('tab-header.active'),inactive:describe('tab-header:nth-child(2)'),index:describe('tab-header .index'),marker:describe('.current-tab-indicator'),inactiveMarker:describe('tab-header:nth-child(2) .current-tab-indicator'),inactiveIndex:describe('tab-header:nth-child(2) .index'),terminal:describe('tab-body'),buttons:describe('tab-header .buttons'),button:describe('tab-header button')};
+                const describe=selector=>{const n=document.querySelector(selector);if(!n)return null;const s=getComputedStyle(n),r=n.getBoundingClientRect();return {bg:s.backgroundColor,fg:s.color,opacity:s.opacity,outline:s.outlineWidth,borderTop:s.borderTopWidth,borderBottom:s.borderBottomWidth,borderLeft:s.borderLeftWidth,borderRight:s.borderRightWidth,borderRadius:s.borderRadius,pointerEvents:s.pointerEvents,weight:s.fontWeight,visibility:s.visibility,display:s.display,height:r.height,x:r.x,y:r.y,width:r.width}};
+                const pseudo=(selector)=>{const n=document.querySelector(selector);if(!n)return null;const s=getComputedStyle(n,'::after'),r=n.getBoundingClientRect();return {bg:s.backgroundColor,width:s.width,height:s.height,content:s.content,x:r.x+parseFloat(s.left||0),y:r.y+parseFloat(s.top||0)}};
+                return {pane:describe('split-tab > .child:not(.focused)'),spanner:describe('split-tab-spanner'),splitLine:pseudo('split-tab-spanner'),paneMarker:pseudo('split-tab-pane-label'),focused:document.hasFocus(),strip:describe('.tab-bar'),spacer:describe('.btn-space'),active:describe('tab-header.active'),activeName:describe('tab-header.active .name'),inactive:describe('tab-header:nth-child(2)'),index:describe('tab-header .index'),marker:describe('tab-header.active .current-tab-indicator'),inactiveMarker:describe('tab-header:nth-child(2) .current-tab-indicator'),inactiveIndex:describe('tab-header:nth-child(2) .index'),terminal:describe('tab-body'),buttons:describe('tab-header .buttons'),button:describe('tab-header button'),activityTab:describe('tab-header:nth-child(3)'),activityDot:describe('tab-header:nth-child(3) .activity-indicator'),profileColor:describe('tab-header:nth-child(3) .colorbar'),progress:describe('tab-header:nth-child(3) .progressbar')};
             })()`)
+            if (!label.includes('-before-')) {
+                assert(state.marker.y >= state.active.y + state.active.height - 8, `${label}: selected line is at the bottom`)
+                assert(state.marker.y >= state.activeName.y + state.activeName.height, `${label}: selected line does not cover the title`)
+                assert.equal(state.marker.pointerEvents, 'none', `${label}: selected line does not intercept input`)
+            }
             const screenshot = await cdp.request('Page.captureScreenshot', { format: 'png' })
             fs.writeFileSync(path.join(output, `${label}.png`), Buffer.from(screenshot.data, 'base64'))
             report.states.push({ label, ...state }); return state
@@ -268,6 +302,54 @@ try {
             assert.equal(blur.marker.bg, expectedRGB(datasets[`after-${mode}-false`]['--tabby-tab-unfocused-marker']))
             assert.equal(blur.active.bg, expectedRGB(datasets[`after-${mode}-false`]['--tabby-tab-active-bg']))
             assert.equal(blur.inactive.bg, expectedRGB(datasets[`after-${mode}-false`]['--tabby-tab-inactive-bg']))
+            for (const platform of ['linux', 'darwin', 'win32']) {
+                const label = `${mode}-activity-${platform}`
+                await cdp.request('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 950, y: 470 })
+                await evaluate(`setFixture('after',${JSON.stringify(mode)},'top',false,${JSON.stringify(platform)});selectFixtureTab(0);setPaneCount(2);setTabState(2,{activity:false,progress:null,color:null})`)
+                assert.equal((await snapshot(`${label}-idle`)).activityDot, null)
+                await evaluate(`setTabState(2,{activity:true,progress:48,color:'#9f52ff'})`)
+                const decorated = await snapshot(`${label}-decorated`)
+                assert.equal(decorated.activityDot.width, 6); assert.equal(decorated.activityDot.height, 6)
+                assert.equal(decorated.activityDot.borderRadius, '50%'); assert.equal(decorated.activityDot.pointerEvents, 'none')
+                assert.equal(decorated.activityDot.bg, decorated.activityTab.fg)
+                assert.equal(decorated.profileColor.bg, 'rgb(159, 82, 255)'); assert.equal(decorated.profileColor.height, 3)
+                assert.equal(decorated.progress.height, 3)
+                assert(Math.abs(decorated.progress.width - decorated.activityTab.width * .48) < .02)
+                assert.equal(decorated.activityDot.y + 3, decorated.activityTab.y + decorated.activityTab.height / 2)
+                assert(decorated.activityDot.y > decorated.progress.y + decorated.progress.height)
+                assert(decorated.activityDot.y + 6 < decorated.profileColor.y, 'activity dot does not overlap progress or profile color')
+                const point = { x: decorated.activityTab.x + 20, y: decorated.activityTab.y + 18 }
+                await cdp.request('Input.dispatchMouseEvent', { type: 'mouseMoved', ...point })
+                const activityHover = await snapshot(`${label}-hover`)
+                assert.equal(activityHover.activityDot.width, 6); assert.equal(activityHover.activityTab.bg, expectedRGB(datasets[`after-${mode}-false`]['--tabby-tab-hover-bg']))
+                await cdp.request('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 950, y: 470 })
+                await cdp.request('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9 })
+                await cdp.request('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9 })
+                await evaluate(`document.querySelector('tab-header:nth-child(3)').focus()`)
+                const activityFocus = await snapshot(`${label}-keyboard-focus`)
+                assert.equal(activityFocus.activityTab.outline, '2px'); assert.equal(activityFocus.activityDot.width, 6)
+                await evaluate(`selectFixtureTab(2)`)
+                const selected = await snapshot(`${label}-selected`)
+                assert.equal(selected.activityDot.display, 'none'); assert.equal(selected.marker.height, 2)
+                assert.equal(selected.profileColor.bg, decorated.profileColor.bg); assert.equal(selected.progress.height, 3)
+                assert.equal(selected.active.outline, '2px', 'selection retains the keyboard focus outline')
+                assert(selected.marker.y + selected.marker.height <= selected.profileColor.y - 1, 'selected line has a visible gap above the profile strip')
+                assert.notEqual(selected.marker.bg, selected.profileColor.bg, 'neutral selection and profile color remain distinct')
+                assert(selected.marker.y > selected.progress.y + selected.progress.height, 'selected line does not cover top progress')
+                await evaluate(`selectFixtureTab(0)`)
+                assert.equal((await snapshot(`${label}-cleared`)).activityDot, null)
+                await evaluate(`setPaneCount(1)`)
+                assert.equal((await snapshot(`${label}-single-pane`)).paneMarker.content, 'none')
+                await evaluate(`setPaneCount(2)`)
+                assert.equal((await snapshot(`${label}-split-added`)).paneMarker.height, '2px')
+                await evaluate(`setPaneCount(2,true)`)
+                assert.equal((await snapshot(`${label}-maximized`)).paneMarker.content, 'none')
+                await evaluate(`setPaneCount(2)`)
+                assert.equal((await snapshot(`${label}-restored`)).paneMarker.height, '2px')
+                await evaluate(`setPaneCount(1)`)
+                assert.equal((await snapshot(`${label}-split-removed`)).paneMarker.content, 'none')
+                await evaluate(`setPaneCount(2);setTabState(2,{activity:true,progress:null,color:null})`)
+            }
         }
         for (const scale of [1, 1.25, 1.5, 2]) {
             for (const count of [2, 8, 20]) {
