@@ -221,7 +221,7 @@ try {
                 assert.equal(state.index.opacity, '1'); assert.equal(state.marker.height, 2)
                 assert.equal(state.inactive.bg, expectedRGB(vars['--tabby-tab-inactive-bg']))
                 assert.equal(state.inactiveMarker.display, 'none')
-                assert.equal(state.active.height, 36)
+                assert.equal(state.active.height, 36, `${mode} ${position}: actual tab height`)
                 assert.equal(state.pane.opacity, '1');assert.equal(state.spanner.width, 10);assert.equal(state.splitLine.width, '1px');assert.equal(state.paneMarker.height, '2px')
                 assert.equal(state.terminal.bg, expectedRGB(terminalSchemes[mode].background))
                 assert.equal(state.strip[{ top: 'borderBottom', bottom: 'borderTop', left: 'borderRight', right: 'borderLeft' }[position]], '0px')

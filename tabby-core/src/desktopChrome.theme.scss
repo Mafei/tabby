@@ -3,6 +3,8 @@
     --tabs-height: calc(44px * var(--spaciness));
     --side-tab-width: calc(220px * var(--spaciness));
     --tabby-tab-width: calc(220px * var(--spaciness));
+    --tabby-tab-height: calc(36px * var(--spaciness));
+    --tabby-side-tabs-inset: calc(4px * var(--spaciness));
     --tabby-selected-marker: var(--tabby-tab-marker);
     font-size: 13px;
     line-height: 20px;
@@ -173,6 +175,7 @@
         > .tabs {
             width: 100%;
             overflow-x: hidden;
+            padding-top: var(--tabby-side-tabs-inset);
 
             tab-header {
                 width: 100% !important;
@@ -182,6 +185,11 @@
         }
 
         > .btn-group { justify-content: center; }
+    }
+
+    &.platform-darwin .main.content.tabs-on-right > .tab-bar > .tabs {
+        // Preserve the existing native-control space above right-side tabs.
+        padding-top: calc(36px + 4px * var(--spaciness)) !important;
     }
 
     &:not(.window-focused) {

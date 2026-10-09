@@ -208,7 +208,7 @@ test('actual Sass, Pug and Angular encapsulation compile; geometry and state sel
     const parsed = postcss.parse(css)
     const chrome = parsed.nodes.filter(n => n.type === 'rule' && n.selector.includes('.tabby-desktop-theme'))
     assert(chrome.length > 30)
-    assert(chrome.every(n => !/platform-(linux|darwin|win32)/.test(n.selector)), 'all platforms use the same visual rules')
+    assert(chrome.filter(n => !n.selector.includes('platform-darwin')).every(n => !/platform-(linux|win32)/.test(n.selector)), 'visual roles are shared; only native-control space differs')
     assert(chrome.some(n => n.selector.endsWith('app-root:not(.window-focused)') && n.nodes.some(p => p.prop === '--tabby-selected-marker' && p.value.includes('unfocused'))))
     assert(chrome.some(n => n.selector.endsWith('split-tab > .child') && n.nodes.some(p => p.prop === 'opacity' && p.value === '1')))
     const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'tabby-style-compile-'))
