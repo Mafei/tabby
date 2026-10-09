@@ -17,7 +17,9 @@ export function probeLibraryValidation (scratch) {
     runMacTool('/usr/bin/xcrun', ['clang', '-dynamiclib', path.join(directory, 'library.c'), '-o', library])
     const sign = (file, profile) => runMacTool('/usr/bin/codesign', ['--force', '--sign', '-', '--timestamp=none', '--options', 'runtime', '--entitlements', path.resolve(profile), file])
     sign(library, 'build/mac/entitlements.plist')
-    const report = { systemVersion: runMacTool('/usr/bin/sw_vers', ['-productVersion']), cases: [] }
+    const librarySignature = verifyMacSignature(library)
+    assertArtifactSignaturePolicy(librarySignature, false)
+    const report = { systemVersion: runMacTool('/usr/bin/sw_vers', ['-productVersion']), librarySignature, cases: [] }
     for (const [label, profile] of [['old-policy', 'build/mac/entitlements.plist'], ['repaired-policy', 'build/mac/entitlements.adhoc-host.plist']]) {
         const executable = path.join(directory, label)
         runMacTool('/usr/bin/xcrun', ['clang', path.join(directory, 'host.c'), '-o', executable])

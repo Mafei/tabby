@@ -4,35 +4,37 @@ import path from 'node:path'
 import { execFileSync, spawnSync } from 'node:child_process'
 import { artifactHosts, isArtifactHost, assertArtifactSignaturePolicy } from './macos-signing-policy.mjs'
 
-export function isMachO (file) {
+export function machOType (file) {
     const descriptor = fs.openSync(file, 'r')
     const header = Buffer.alloc(32)
     try {
         const bytes = fs.readSync(descriptor, header, 0, header.length, 0)
-        if (bytes < 16) { return false }
+        if (bytes < 16) { return null }
         const runtimeImage = buffer => {
             const magic = buffer.readUInt32BE(0)
             // MH_OBJECT / static archives are build inputs, not signable code.
-            if ([0xfeedface, 0xfeedfacf].includes(magic)) { return [2, 6, 8].includes(buffer.readUInt32BE(12)) }
-            if ([0xcefaedfe, 0xcffaedfe].includes(magic)) { return [2, 6, 8].includes(buffer.readUInt32LE(12)) }
-            return false
+            if ([0xfeedface, 0xfeedfacf].includes(magic)) { const type = buffer.readUInt32BE(12); return [2, 6, 8].includes(type) ? type : null }
+            if ([0xcefaedfe, 0xcffaedfe].includes(magic)) { const type = buffer.readUInt32LE(12); return [2, 6, 8].includes(type) ? type : null }
+            return null
         }
         const magic = header.readUInt32BE(0)
-        if (runtimeImage(header)) { return true }
+        if (runtimeImage(header)) { return runtimeImage(header) }
         const big = [0xcafebabe, 0xcafebabf].includes(magic)
         const little = [0xbebafeca, 0xbfbafeca].includes(magic)
-        if (!big && !little) { return false }
+        if (!big && !little) { return null }
         const count = big ? header.readUInt32BE(4) : header.readUInt32LE(4)
-        if (count < 1 || count > 32) { return false }
+        if (count < 1 || count > 32) { return null }
         const fat64 = [0xcafebabf, 0xbfbafeca].includes(magic)
         const offset = fat64 ? Number(big ? header.readBigUInt64BE(16) : header.readBigUInt64LE(16)) : (big ? header.readUInt32BE(16) : header.readUInt32LE(16))
-        if (!Number.isSafeInteger(offset) || offset < 8 || offset + 16 > fs.fstatSync(descriptor).size) { return false }
+        if (!Number.isSafeInteger(offset) || offset < 8 || offset + 16 > fs.fstatSync(descriptor).size) { return null }
         const slice = Buffer.alloc(16)
-        return fs.readSync(descriptor, slice, 0, 16, offset) === 16 && runtimeImage(slice)
+        return fs.readSync(descriptor, slice, 0, 16, offset) === 16 ? runtimeImage(slice) : null
     } finally {
         fs.closeSync(descriptor)
     }
 }
+
+export function isMachO (file) { return machOType(file) !== null }
 
 // Do not traverse framework Current aliases or dependency symlinks. Sign actual
 // files first, then their enclosing bundles, so each outer seal records final code.
@@ -63,14 +65,18 @@ export function verifyMacSignature (file) {
     const output = result.stderr + result.stdout
     assert.match(output, /Signature=adhoc/, `Expected ad-hoc signature: ${file}`)
     assert.match(output, /TeamIdentifier=not set/, `Unexpected signing team: ${file}`)
-    // The colon requests the XML payload without its embedded-blob header;
-    // macOS 15's codesign treats a bare '-' as an output filename here.
-    const entitlements = runMacTool('/usr/bin/codesign', ['--display', '--entitlements', ':-', file])
-    const parsed = JSON.parse(execFileSync('/usr/bin/plutil', ['-convert', 'json', '-o', '-', '-'], {
+    // macOS 15 deliberately omits library entitlements unless forcefully
+    // requested. Empty output is valid for libraries; process hosts are checked
+    // separately and must carry the approved profile. Do not force library keys.
+    const entitlements = runMacTool('/usr/bin/codesign', ['--display', '--entitlements', '-', '--xml', file])
+    const parsed = entitlements ? JSON.parse(execFileSync('/usr/bin/plutil', ['-convert', 'json', '-o', '-', '-'], {
         input: entitlements, encoding: 'utf8', timeout: 30000,
-    }))
+    })) : {}
+    const executable = /^Executable=(.+)$/m.exec(output)?.[1]
+    assert(executable, `Signature executable metadata missing: ${file}`)
     const signature = { valid: true, kind: 'adhoc', teamIdentifier: null,
-        cdHash: /CDHash=(\S+)/.exec(output)?.[1], flags: /flags=(.+)/.exec(output)?.[1], entitlements: parsed }
+        cdHash: /CDHash=(\S+)/.exec(output)?.[1], flags: /flags=(.+)/.exec(output)?.[1],
+        machOType: machOType(executable), entitlements: parsed }
     assert.match(signature.flags ?? '', /runtime/, `Hardened Runtime missing: ${file}`)
     return signature
 }

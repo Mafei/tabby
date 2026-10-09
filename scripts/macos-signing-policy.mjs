@@ -41,8 +41,16 @@ export function assertArtifactSignaturePolicy (signature, host) {
     assert.equal(signature.teamIdentifier, null, 'Test artifacts must not mix signing teams')
     const flags = /^0x([a-f0-9]+)/i.exec(signature.flags ?? '')
     assert(flags && (parseInt(flags[1], 16) & 0x10000), 'Hardened Runtime must remain enabled')
-    assert.deepEqual(signature.entitlements, host ? { ...baseEntitlements, [libraryValidationException]: true } : baseEntitlements,
-        host ? 'Adhoc process hosts require exactly the approved library validation exception' : 'Libraries and other code must retain the base entitlements')
+    assert([2, 6, 8].includes(signature.machOType), 'Expected a signable Mach-O image')
+    if (host) {
+        assert.equal(signature.machOType, 2, 'Approved process host must be an executable')
+        assert.deepEqual(signature.entitlements, { ...baseEntitlements, [libraryValidationException]: true },
+            'Adhoc process hosts require exactly the approved library validation exception')
+    } else if (signature.machOType === 2 || Object.keys(signature.entitlements).length) {
+        assert.deepEqual(signature.entitlements, baseEntitlements, 'Other executables and any library entitlements must retain the base entitlements')
+    } else {
+        assert.deepEqual(signature.entitlements, {}, 'Libraries may omit entitlements under the macOS 15 default')
+    }
 }
 
 export function gatekeeperResult (assessment) {

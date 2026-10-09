@@ -8,9 +8,10 @@ still required, even when CI launch checks pass.
 
 The main Tabby process and four Electron Helpers receive the library validation
 exception required for adhoc Electron/native libraries. Hardened Runtime, the
-other entitlements, native-code/ASAR integrity and Electron security fuses remain
-enabled. The formal signing profile is separate. No local re-signing or package
-repair should be needed.
+existing process entitlements, native-code/ASAR integrity and Electron security
+fuses remain enabled. Libraries retain the previous signing arguments; macOS 15
+normally omits their entitlements. The formal signing profile is separate. No
+local re-signing or package repair should be needed.
 
 ## Open the test package
 

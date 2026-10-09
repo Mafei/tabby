@@ -47,6 +47,18 @@ jobs:
           test "$(rustc -vV | sed -n 's/^host: //p')" = aarch64-apple-darwin
           xcrun --find clang
           xcrun --find swiftc
+      - name: Native signing regression and normal-launch helper compilation
+        run: |
+          xcrun swiftc scripts/macos-normal-launch.swift -o "$RUNNER_TEMP/tabby-normal-launch"
+          node --input-type=module <<'JS'
+          import fs from 'node:fs'
+          import os from 'node:os'
+          import path from 'node:path'
+          import { probeLibraryValidation } from './scripts/macos-library-validation-probe.mjs'
+          fs.mkdirSync('dist', { recursive: true })
+          const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'tabby-native-policy-'))
+          try { probeLibraryValidation(scratch) } finally { fs.rmSync(scratch, { recursive: true, force: true }) }
+          JS
       - name: Install and build
         run: |
           npm install -g yarn@1.22.22
