@@ -63,7 +63,9 @@ export function verifyMacSignature (file) {
     const output = result.stderr + result.stdout
     assert.match(output, /Signature=adhoc/, `Expected ad-hoc signature: ${file}`)
     assert.match(output, /TeamIdentifier=not set/, `Unexpected signing team: ${file}`)
-    const entitlements = runMacTool('/usr/bin/codesign', ['--display', '--entitlements', '-', file])
+    // The colon requests the XML payload without its embedded-blob header;
+    // macOS 15's codesign treats a bare '-' as an output filename here.
+    const entitlements = runMacTool('/usr/bin/codesign', ['--display', '--entitlements', ':-', file])
     const parsed = JSON.parse(execFileSync('/usr/bin/plutil', ['-convert', 'json', '-o', '-', '-'], {
         input: entitlements, encoding: 'utf8', timeout: 30000,
     }))
