@@ -1,0 +1,83 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="1000" viewBox="0 0 1440 1000"><title>Tabby Linux design proposal — not a product screenshot</title><desc>Original proposed interface, fictional data, source baseline d83bf1b4904e439533d074aa6f7d3b48ebde5776. Not pixel-accurate product evidence.</desc>
+<rect x="0" y="0" width="1440" height="1000" rx="0" fill="#111820"/>
+<text x="72" y="44" font-family="Noto Sans CJK SC" font-size="13" font-weight="600" fill="#86B9FF" text-anchor="start">TABBY  /  LINUX</text>
+<text x="72" y="98" font-family="Noto Sans CJK SC" font-size="32" font-weight="600" fill="#EEF2F7" text-anchor="start">恢复状态有位置，也有出口</text>
+<text x="72" y="130" font-family="Noto Sans CJK SC" font-size="15" font-weight="400" fill="#AAB5C4" text-anchor="start">用图标、文案和操作解释当前状态；保留终端输出与原会话身份。</text>
+<text x="1368" y="44" font-family="Noto Sans CJK SC" font-size="12" font-weight="400" fill="#AAB5C4" text-anchor="end">03 / 恢复暂停 · 暗色</text>
+<rect x="72" y="174" width="1296" height="696" rx="8" fill="#171717" stroke="#303A48" stroke-width="1"/>
+<rect x="72" y="174" width="1296" height="30" rx="8" fill="#1C232D"/>
+<rect x="72" y="189" width="1296" height="15" rx="0" fill="#1C232D"/>
+<text x="720.0" y="194" font-family="Noto Sans CJK SC" font-size="12" font-weight="400" fill="#AAB5C4" text-anchor="middle">Tabby</text>
+<path d="M1277 189 L1287 189" fill="none" stroke="#AAB5C4" stroke-width="1.4" stroke-linecap="round"/>
+<rect x="1310" y="184" width="10" height="10" rx="1" fill="none" stroke="#AAB5C4" stroke-width="1.2"/>
+<path d="M1343 185 L1351 193" fill="none" stroke="#AAB5C4" stroke-width="1.5" stroke-linecap="round"/>
+<path d="M1351 185 L1343 193" fill="none" stroke="#AAB5C4" stroke-width="1.5" stroke-linecap="round"/>
+<rect x="72" y="204" width="1296" height="44" rx="0" fill="#242B36"/>
+<rect x="90" y="220" width="12" height="12" rx="2" fill="none" stroke="#AAB5C4" stroke-width="1.5"/>
+<path d="M94 221 L94 231" fill="none" stroke="#AAB5C4" stroke-width="1.5" stroke-linecap="round"/>
+<g data-tab-state="active" data-tab-selected="true" data-window-focused="true" data-theme="dark">
+<rect x="120" y="208" width="220" height="36" rx="6" fill="#303B4A"/>
+<rect x="132" y="242" width="196" height="2" rx="1" fill="#86B9FF"/>
+<text x="132" y="231" font-family="Noto Sans CJK SC" font-size="12" font-weight="400" fill="#95A3B5" text-anchor="start">1</text>
+<path d="M154 222 L157 225" fill="none" stroke="#EEF2F7" stroke-width="1.5" stroke-linecap="round"/>
+<path d="M157 225 L154 228" fill="none" stroke="#EEF2F7" stroke-width="1.5" stroke-linecap="round"/>
+<path d="M159 229 L164 229" fill="none" stroke="#EEF2F7" stroke-width="1.5" stroke-linecap="round"/>
+<text x="174" y="231" font-family="Noto Sans CJK SC" font-size="13" font-weight="600" fill="#EEF2F7" text-anchor="start">SSH · 示例开发机</text>
+<path d="M318 222 L326 230" fill="none" stroke="#AAB5C4" stroke-width="1.5" stroke-linecap="round"/>
+<path d="M326 222 L318 230" fill="none" stroke="#AAB5C4" stroke-width="1.5" stroke-linecap="round"/>
+</g>
+<g data-tab-state="inactive" data-tab-selected="false" data-window-focused="true" data-theme="dark">
+<rect x="344" y="208" width="220" height="36" rx="6" fill="#0D1320"/>
+<text x="356" y="231" font-family="Noto Sans CJK SC" font-size="12" font-weight="400" fill="#95A3B5" text-anchor="start">2</text>
+<path d="M378 222 L381 225" fill="none" stroke="#AAB5C4" stroke-width="1.5" stroke-linecap="round"/>
+<path d="M381 225 L378 228" fill="none" stroke="#AAB5C4" stroke-width="1.5" stroke-linecap="round"/>
+<path d="M383 229 L388 229" fill="none" stroke="#AAB5C4" stroke-width="1.5" stroke-linecap="round"/>
+<text x="398" y="231" font-family="Noto Sans CJK SC" font-size="13" font-weight="400" fill="#AAB5C4" text-anchor="start">本地终端</text>
+</g>
+<g data-tab-state="inactive" data-tab-selected="false" data-window-focused="true" data-theme="dark">
+<rect x="568" y="208" width="220" height="36" rx="6" fill="#0D1320"/>
+<text x="580" y="231" font-family="Noto Sans CJK SC" font-size="12" font-weight="400" fill="#95A3B5" text-anchor="start">3</text>
+<path d="M602 222 L605 225" fill="none" stroke="#AAB5C4" stroke-width="1.5" stroke-linecap="round"/>
+<path d="M605 225 L602 228" fill="none" stroke="#AAB5C4" stroke-width="1.5" stroke-linecap="round"/>
+<path d="M607 229 L612 229" fill="none" stroke="#AAB5C4" stroke-width="1.5" stroke-linecap="round"/>
+<text x="622" y="231" font-family="Noto Sans CJK SC" font-size="13" font-weight="400" fill="#AAB5C4" text-anchor="start">构建输出</text>
+</g>
+<circle cx="764" cy="225" r="2.5" fill="#AAB5C4"/>
+<path d="M1179 226 L1189 226" fill="none" stroke="#AAB5C4" stroke-width="1.6" stroke-linecap="round"/>
+<path d="M1184 221 L1184 231" fill="none" stroke="#AAB5C4" stroke-width="1.6" stroke-linecap="round"/>
+<path d="M1210 224 L1214 228" fill="none" stroke="#AAB5C4" stroke-width="1.5" stroke-linecap="round"/>
+<path d="M1214 228 L1218 224" fill="none" stroke="#AAB5C4" stroke-width="1.5" stroke-linecap="round"/>
+<circle cx="1248.5" cy="224.5" r="4.5" fill="none" stroke="#AAB5C4" stroke-width="1.5"/>
+<path d="M1252 228 L1256 232" fill="none" stroke="#AAB5C4" stroke-width="1.6" stroke-linecap="round"/>
+<rect x="1279.5" y="220" width="13" height="12" rx="2" fill="none" stroke="#AAB5C4" stroke-width="1.5"/>
+<path d="M1286 221 L1286 231" fill="none" stroke="#AAB5C4" stroke-width="1.5" stroke-linecap="round"/>
+<path d="M1316 222 L1328 222" fill="none" stroke="#AAB5C4" stroke-width="1.6" stroke-linecap="round"/>
+<path d="M1316 226 L1328 226" fill="none" stroke="#AAB5C4" stroke-width="1.6" stroke-linecap="round"/>
+<path d="M1316 230 L1328 230" fill="none" stroke="#AAB5C4" stroke-width="1.6" stroke-linecap="round"/>
+<rect x="72" y="248" width="1296" height="28" rx="0" fill="#242B36"/>
+<text x="88" y="267" font-family="Noto Sans CJK SC" font-size="12" font-weight="500" fill="#EEF2F7" text-anchor="start">dev@demo.example.invalid · work</text>
+<text x="1352" y="267" font-family="Noto Sans CJK SC" font-size="12" font-weight="400" fill="#AAB5C4" text-anchor="end">共享</text>
+<rect x="88" y="274" width="24" height="2" rx="1" fill="#86B9FF"/>
+<rect x="72" y="276" width="1296" height="76" rx="0" fill="#352D20"/>
+<path d="M93 294 L93 304" fill="none" stroke="#F0C479" stroke-width="2" stroke-linecap="round"/>
+<path d="M99 294 L99 304" fill="none" stroke="#F0C479" stroke-width="2" stroke-linecap="round"/>
+<text x="116" y="304" font-family="Noto Sans CJK SC" font-size="16" font-weight="600" fill="#F0C479" text-anchor="start">恢复已暂停</text>
+<text x="116" y="331" font-family="Noto Sans CJK SC" font-size="14" font-weight="400" fill="#F0C479" text-anchor="start">work 仍被其他客户端使用。请选择访问方式。</text>
+<rect x="1018" y="296" width="120" height="32" rx="6" fill="#86B9FF"/>
+<text x="1078.0" y="317" font-family="Noto Sans CJK SC" font-size="13" font-weight="500" fill="#162334" text-anchor="middle">选择方式</text>
+<rect x="1150" y="296" width="100" height="32" rx="6" fill="#303B4A" stroke="#647B94" stroke-width="1"/>
+<text x="1200.0" y="317" font-family="Noto Sans CJK SC" font-size="13" font-weight="500" fill="#EEF2F7" text-anchor="middle">重新检查</text>
+<text x="1302" y="318" font-family="Noto Sans CJK SC" font-size="13" font-weight="400" fill="#F0C479" text-anchor="middle">取消</text>
+<text x="88" y="386" font-family="DejaVu Sans Mono" font-size="16" font-weight="400" fill="#CACACA" text-anchor="start">dev@demo:~/workspace$ npm run dev</text>
+<text x="88" y="410" font-family="DejaVu Sans Mono" font-size="16" font-weight="400" fill="#CACACA" text-anchor="start">Application running</text>
+<text x="88" y="434" font-family="DejaVu Sans Mono" font-size="16" font-weight="400" fill="#CACACA" text-anchor="start"></text>
+<text x="88" y="458" font-family="DejaVu Sans Mono" font-size="16" font-weight="400" fill="#CACACA" text-anchor="start">Last output preserved while reconnect is paused.</text>
+<rect x="72" y="846" width="1296" height="24" rx="0" fill="#242B36"/>
+<path d="M91 853 L91 863" fill="none" stroke="#F0C479" stroke-width="2" stroke-linecap="round"/>
+<path d="M97 853 L97 863" fill="none" stroke="#F0C479" stroke-width="2" stroke-linecap="round"/>
+<text x="110" y="863" font-family="Noto Sans CJK SC" font-size="12" font-weight="400" fill="#AAB5C4" text-anchor="start">恢复暂停 · tmux work · server 身份保持</text>
+<text x="1352" y="863" font-family="Noto Sans CJK SC" font-size="12" font-weight="400" fill="#AAB5C4" text-anchor="end">Ctrl+Shift+P 命令    ·    UTF-8</text>
+<text x="72" y="936" font-family="Noto Sans CJK SC" font-size="14" font-weight="400" fill="#AAB5C4" text-anchor="start">选择方式进入共享 / 只读 / 显式接管；自动恢复不踢掉其他客户端，也不重建消失的会话。</text>
+<text x="72" y="968" font-family="Noto Sans CJK SC" font-size="12" font-weight="400" fill="#AAB5C4" text-anchor="start">设计方案 v1.1 · 非活动标签底色调整 · 非产品截图 · 所有数据均为样例</text>
+<text x="1368" y="968" font-family="Noto Sans CJK SC" font-size="12" font-weight="400" fill="#AAB5C4" text-anchor="end">BASE  d83bf1b  /  DARK</text>
+</svg>

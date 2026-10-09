@@ -1,0 +1,224 @@
+{
+  "kind": "original_design_proposal_not_product_screenshot",
+  "version": "1.1",
+  "previousDesignHead": "2d5ac0975fc7001473c96a08759389a385093009",
+  "sourceBaseline": "d83bf1b4904e439533d074aa6f7d3b48ebde5776",
+  "userApprovedScope": "Keep palette; add inactive backgrounds; design delivery only",
+  "productionCodeChanged": false,
+  "originalBoards": 9,
+  "RGB565Simulations": 2,
+  "PDFPages": 12,
+  "designColorPairs": 46,
+  "designValidation": "design-validation.json",
+  "realXrdp": false,
+  "GUIProduct": false,
+  "files": [
+    {
+      "path": "README.md",
+      "bytes": 2920,
+      "SHA256": "e2e48e27af8768c312ed72d103efa3054fb65ebd4b56cab9a18ea9a8593e9de0",
+      "gitBlobSHA": "272edbbe936304565ec5855f4f4a8d6cb6f4d075"
+    },
+    {
+      "path": "REVISION.zh-CN.md",
+      "bytes": 2749,
+      "SHA256": "633c1e27dee7fff12c9ab9fc30a0b325578ed668d2f6b198d2c067d98508fae3",
+      "gitBlobSHA": "de876fc3bf919d446443eeb6a376cf8af0328e64"
+    },
+    {
+      "path": "SPEC.zh-CN.md",
+      "bytes": 19510,
+      "SHA256": "f805b9fe38f3a7b75a4c0b093ba494e3816a2367608dcb66e5800498531a586c",
+      "gitBlobSHA": "f3183c769ecb69787b9a39387e4df321816bb2a6"
+    },
+    {
+      "path": "contrast-audit.json",
+      "bytes": 8982,
+      "SHA256": "415721e026e9d07c5c2ce00c86072373a358ca3a19e66d54c9a8ee27566beffe",
+      "gitBlobSHA": "5e3ca1d88beae6465cd1345506ba58877afbefcf"
+    },
+    {
+      "path": "design-validation.json",
+      "bytes": 2232,
+      "SHA256": "be1d5ef92a681f12c989a0f09be6029eabe4c43682fd78edb920170c8ab5d469",
+      "gitBlobSHA": "f21383fdb5fc4dceaabaf45d2c93e36deb085906"
+    },
+    {
+      "path": "generate_design.py",
+      "bytes": 19721,
+      "SHA256": "bf2c5be44a7d46fe41b0e82b75523bd4ea624ab80aed6d9d0ed02df67c4f4054",
+      "gitBlobSHA": "2dbbfd58524a1651c5e7ddfd8e5e19387cc66cb0"
+    },
+    {
+      "path": "package_design.py",
+      "bytes": 6852,
+      "SHA256": "1fea5c6d58ed4e32547853da594ac13fabaa46f357aa9db2561b32f3c81d569d",
+      "gitBlobSHA": "81e1bc288ab9b61cb40894d4ba0dc016a7f4dfa2"
+    },
+    {
+      "path": "png/Tabby-Linux-UIUX-v1-dark-launcher.png",
+      "bytes": 166410,
+      "SHA256": "da37da125b2ae7786f1d0f80b05dce1f5e9ee92937fc236b1cca3f59dc1888b4",
+      "gitBlobSHA": "d7265be49ce98349919382ae53476ab6ee4a52d5",
+      "width": 1440,
+      "height": 1000,
+      "mode": "RGBA"
+    },
+    {
+      "path": "png/Tabby-Linux-UIUX-v1-dark-recovery.png",
+      "bytes": 116406,
+      "SHA256": "ad2b92af81182f2d299a7b21386717735647adc3ecb68fdddd8bf7c53da1b9c7",
+      "gitBlobSHA": "4af7f4c4bbcf86fedd9fa0bcb0ff37f176824364",
+      "width": 1440,
+      "height": 1000,
+      "mode": "RGBA"
+    },
+    {
+      "path": "png/Tabby-Linux-UIUX-v1-dark-workspace-RGB565-simulation.png",
+      "bytes": 108083,
+      "SHA256": "44316e23322b05410212fc25aa237adde331b6673984b38d91d573d9c37fc090",
+      "gitBlobSHA": "ba470a8e00d4db82fbe62a6587e96c6852aa604f",
+      "width": 1440,
+      "height": 1000,
+      "mode": "RGB"
+    },
+    {
+      "path": "png/Tabby-Linux-UIUX-v1-dark-workspace-window-blur.png",
+      "bytes": 149618,
+      "SHA256": "ff11bd75fd121a7569386620f60d96f05b5225a7678372ea29f702de3d4aa285",
+      "gitBlobSHA": "732d7e6ab7b1bd01261642179d6fa3ac9667c9c2",
+      "width": 1440,
+      "height": 1000,
+      "mode": "RGBA"
+    },
+    {
+      "path": "png/Tabby-Linux-UIUX-v1-dark-workspace.png",
+      "bytes": 144836,
+      "SHA256": "f7664a50160d8d2d2949ed05510351020050dce3e8f614a5ad3914e329ad8df5",
+      "gitBlobSHA": "54fa413a478c1d742299cd1fc7452d499f9a762f",
+      "width": 1440,
+      "height": 1000,
+      "mode": "RGBA"
+    },
+    {
+      "path": "png/Tabby-Linux-UIUX-v1-light-launcher.png",
+      "bytes": 166545,
+      "SHA256": "661e75a1ac58a40cbf72fb840ce2ccb73b0b58d630293bc921242272f7aa3ecb",
+      "gitBlobSHA": "d9d1e72e3009e7fabfd01ca59559fb50ad7c1376",
+      "width": 1440,
+      "height": 1000,
+      "mode": "RGBA"
+    },
+    {
+      "path": "png/Tabby-Linux-UIUX-v1-light-recovery.png",
+      "bytes": 116412,
+      "SHA256": "251476013ead91a0f6d521cdb47b9d095e447df4250a930cf2012c4d61d6b8ee",
+      "gitBlobSHA": "5caf01c383ce0d0ed1ddc421c70f70a28d2df5fc",
+      "width": 1440,
+      "height": 1000,
+      "mode": "RGBA"
+    },
+    {
+      "path": "png/Tabby-Linux-UIUX-v1-light-workspace-RGB565-simulation.png",
+      "bytes": 106692,
+      "SHA256": "1814f19769074b4af30815b4564d88906dd6ea19155643d14da13c4c71f156ef",
+      "gitBlobSHA": "67227e6d879293ff7a0e9f98dbb2c99e669539c2",
+      "width": 1440,
+      "height": 1000,
+      "mode": "RGB"
+    },
+    {
+      "path": "png/Tabby-Linux-UIUX-v1-light-workspace-window-blur.png",
+      "bytes": 150154,
+      "SHA256": "ca8ba9f6d12543e468145720f78a3eeddfc20b3a5bf7a435a3e8b81db5ff13d0",
+      "gitBlobSHA": "7bb7883b86ec72eb34679b9bf13a5751b6e27f5f",
+      "width": 1440,
+      "height": 1000,
+      "mode": "RGBA"
+    },
+    {
+      "path": "png/Tabby-Linux-UIUX-v1-light-workspace.png",
+      "bytes": 145624,
+      "SHA256": "2f611ccf7ecaf500cc6f233148df46e28a2d98e71ef32167f4f5bb784de0e1a1",
+      "gitBlobSHA": "47c4d5b9243ef1609657719ba73c68bbc7e08566",
+      "width": 1440,
+      "height": 1000,
+      "mode": "RGBA"
+    },
+    {
+      "path": "png/Tabby-Linux-UIUX-v1-state-matrix.png",
+      "bytes": 218667,
+      "SHA256": "9dc9f3731676bf85c68f3b045c95c883f1aa2e803f92411d8f4dd3dbb5c357d2",
+      "gitBlobSHA": "71c238cde486a3f94227336a1d7ab8ee1b938f4a",
+      "width": 1440,
+      "height": 1236,
+      "mode": "RGBA"
+    },
+    {
+      "path": "proposal.pdf",
+      "bytes": 1410372,
+      "SHA256": "ba26a1f331f3eae31bbfbdfdf06bbd47a6490c5aa17772d7e893f8614f3c853e",
+      "gitBlobSHA": "828939cd8b619e69b9708278c0f07d0250526158"
+    },
+    {
+      "path": "svg/Tabby-Linux-UIUX-v1-dark-launcher.svg",
+      "bytes": 14339,
+      "SHA256": "4f1add8a12e58147692893437d2e8a1e6872734172ea7d111f46b1c6cd57426d",
+      "gitBlobSHA": "5507522f5816a9e098a8197126b5b15d468aa49e"
+    },
+    {
+      "path": "svg/Tabby-Linux-UIUX-v1-dark-recovery.svg",
+      "bytes": 9295,
+      "SHA256": "ac26be89f542dfc2678e08f97ecb2f28375330f30cd04c06989e96a52f244760",
+      "gitBlobSHA": "a82e15d7c49ed6a5b5f1c11d0c0f9c9a4e47f2ea"
+    },
+    {
+      "path": "svg/Tabby-Linux-UIUX-v1-dark-workspace-window-blur.svg",
+      "bytes": 10811,
+      "SHA256": "5f07d95d64828eb4ddcdf081d31906d81678d16464b5813018b4f52c7cd51be1",
+      "gitBlobSHA": "28124ea27f3942171c0ec4bb22795947b0f36645"
+    },
+    {
+      "path": "svg/Tabby-Linux-UIUX-v1-dark-workspace.svg",
+      "bytes": 10780,
+      "SHA256": "9f24a6b32a78fa3aca2fef2197848de823353bb1e7bbf32868d266215c532162",
+      "gitBlobSHA": "00fd758ce5d405847cdf4c5197b67736320c636f"
+    },
+    {
+      "path": "svg/Tabby-Linux-UIUX-v1-light-launcher.svg",
+      "bytes": 14343,
+      "SHA256": "fedad06da97d472d35c7fbaa28d37394cedd024905c30e543e8ecd39a8fed63c",
+      "gitBlobSHA": "fdffd45b382a508068c7f6605e6583608b6a3de2"
+    },
+    {
+      "path": "svg/Tabby-Linux-UIUX-v1-light-recovery.svg",
+      "bytes": 9299,
+      "SHA256": "66758d5caba781380709980e735675180398bacfa822aa239fcd39d784bd070c",
+      "gitBlobSHA": "ba52fa2006ea4097bbc31bf4dc34175f731cd06b"
+    },
+    {
+      "path": "svg/Tabby-Linux-UIUX-v1-light-workspace-window-blur.svg",
+      "bytes": 10815,
+      "SHA256": "69975b8abea4fcf4ce44f87987130a7a3fe764d3a7e910116bc504fc896a6ac9",
+      "gitBlobSHA": "c642ef4be0b34a07f6415f275a9fcb4ffe808a86"
+    },
+    {
+      "path": "svg/Tabby-Linux-UIUX-v1-light-workspace.svg",
+      "bytes": 10784,
+      "SHA256": "397f796149aef3187d40356f4b5717ee444173cb43f4ab834c627e82a81eb42f",
+      "gitBlobSHA": "abc3cbd296b61413ab089088a1f7ca3389af1b28"
+    },
+    {
+      "path": "svg/Tabby-Linux-UIUX-v1-state-matrix.svg",
+      "bytes": 29584,
+      "SHA256": "3277d3a3ca97ce96ac48a6f07334b8c6c49a34fed7386bf6baf618ce48fbad12",
+      "gitBlobSHA": "53b51442d8b67624c4e3f88766e10f5df934f08d"
+    },
+    {
+      "path": "tokens.json",
+      "bytes": 2998,
+      "SHA256": "3a0e2730661a7f6151ce77e1079bfe507e8b859d1e4ba66f53f1c34ba53cfc2d",
+      "gitBlobSHA": "655bc64ea60c320615ad9c80c9a1a9fa8897e64b"
+    }
+  ]
+}
