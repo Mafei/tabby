@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/explicit-module-boundary-types */
-import { Component, Input, Optional, Inject, HostBinding, HostListener, NgZone } from '@angular/core'
+import { Component, Input, Optional, Inject, HostBinding, HostListener, NgZone, ElementRef } from '@angular/core'
 import { auditTime } from 'rxjs'
 import { TabContextMenuItemProvider } from '../api/tabContextMenuProvider'
 import { BaseTabComponent } from './baseTab.component'
@@ -24,6 +24,21 @@ export class TabHeaderComponent extends BaseComponent {
     @Input() tab: BaseTabComponent
     @Input() progress: number|null
     Platform = Platform
+    @HostBinding('attr.tabindex') tabIndex = 0
+    @HostBinding('attr.role') role = 'tab'
+
+    @HostBinding('attr.aria-selected') get isSelected (): boolean {
+        return this.active
+    }
+
+    @HostBinding('attr.aria-label') get accessibleTitle (): string {
+        return this.tab.customTitle || this.tab.title
+    }
+
+    @HostBinding('style.--tabby-tab-actions') get actionCount (): number {
+        return Number(!this.config.store.terminal.hideTabOptionsButton) +
+            Number(!this.config.store.terminal.hideCloseButton && !this.tab.effectivelyPinned)
+    }
 
     constructor (
         public app: AppService,
@@ -32,6 +47,7 @@ export class TabHeaderComponent extends BaseComponent {
         private hotkeys: HotkeysService,
         private platform: PlatformService,
         private zone: NgZone,
+        private element: ElementRef<HTMLElement>,
         @Optional() @Inject(TabContextMenuItemProvider) protected contextMenuProviders: TabContextMenuItemProvider[],
     ) {
         super()
@@ -53,6 +69,16 @@ export class TabHeaderComponent extends BaseComponent {
                 this.progress = progress
             })
         })
+    }
+
+    ngOnChanges (): void {
+        if (this.active) {
+            requestAnimationFrame(() => {
+                if (this.active && this.element.nativeElement.isConnected) {
+                    this.element.nativeElement.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+                }
+            })
+        }
     }
 
     async buildContextMenu (): Promise<MenuItemOptions[]> {
@@ -113,5 +139,34 @@ export class TabHeaderComponent extends BaseComponent {
     @HostListener('contextmenu', ['$event']) async onContextMenu ($event: MouseEvent) {
         $event.preventDefault()
         this.platform.popupContextMenu(await this.buildContextMenu(), $event)
+    }
+
+    @HostListener('keydown', ['$event']) onKeyDown (event: KeyboardEvent): void {
+        // Terminal input and nested close/menu buttons retain their own keys.
+        if (event.target !== event.currentTarget || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) {
+            return
+        }
+        if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault()
+            event.stopPropagation()
+            this.app.selectTab(this.tab)
+            return
+        }
+        const vertical = ['left', 'right'].includes(this.config.store.appearance.tabsLocation)
+        const keys = vertical ? ['ArrowUp', 'ArrowDown'] : ['ArrowLeft', 'ArrowRight']
+        const root = event.currentTarget as HTMLElement
+        const headers = Array.from(root.parentElement?.querySelectorAll<HTMLElement>('tab-header') ?? [])
+        const index = headers.indexOf(root)
+        let next = index
+        if (keys.includes(event.key)) {
+            next = (index + (event.key === keys[0] ? -1 : 1) + headers.length) % headers.length
+        } else if (event.key === 'Home' || event.key === 'End') {
+            next = event.key === 'Home' ? 0 : headers.length - 1
+        } else {
+            return
+        }
+        event.preventDefault()
+        event.stopPropagation()
+        headers[next]?.focus()
     }
 }

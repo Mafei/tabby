@@ -93,7 +93,7 @@ export default class ElectronModule {
         private hostWindow: ElectronHostWindow,
         touchbar: TouchbarService,
         docking: DockingService,
-        themeService: ThemesService,
+        private themeService: ThemesService,
         app: AppService,
         dockMenu: DockMenuService,
     ) {
@@ -112,13 +112,15 @@ export default class ElectronModule {
             this.registerGlobalHotkey()
         })
 
-        themeService.themeChanged$.subscribe(theme => {
+        this.themeService.themeChanged$.subscribe(theme => {
             if (hostApp.platform === Platform.macOS) {
                 hostWindow.setTrafficLightPosition(
                     theme.macOSWindowButtonsInsetX ?? 14,
                     theme.macOSWindowButtonsInsetY ?? 11,
                 )
             }
+            // Theme variables are applied synchronously after themeChanged$.
+            queueMicrotask(() => this.updateWindowControlsColor())
         })
 
         let lastProgress: number|null = null
@@ -188,12 +190,21 @@ export default class ElectronModule {
     }
 
     private updateWindowControlsColor () {
+        if (!this.config.store) {
+            return
+        }
         // if windows and not using native frame, WCO does not exist, return.
         if (this.hostApp.platform === Platform.Windows && this.config.store.appearance.frame === 'native') {
             return
         }
 
-        this.electron.ipcRenderer.send('window-set-window-controls-color', this.config.store.terminal.colorScheme)
+        const root = document.querySelector('app-root') ?? document.documentElement
+        const desktopColor = document.body.classList.contains('tabby-desktop-theme')
+            ? getComputedStyle(root).getPropertyValue('--tabby-chrome-text').trim()
+            : ''
+        this.electron.ipcRenderer.send('window-set-window-controls-color', {
+            foreground: desktopColor || this.themeService._getActiveColorScheme().foreground,
+        })
     }
 }
 

@@ -6,6 +6,7 @@ import { TerminalColorScheme, Theme } from '../api/theme'
 import { PlatformService, PlatformTheme } from '../api/platform'
 import { NewTheme } from '../theme'
 import { tabStripColors } from '../tabStripColors'
+import { desktopChromeColors } from '../desktopChrome'
 
 @Injectable({ providedIn: 'root' })
 export class ThemesService {
@@ -45,7 +46,12 @@ export class ThemesService {
     }
 
     private applyThemeVariables () {
-        if (!this.findCurrentTheme().followsColorScheme) {
+        const currentTheme = this.findCurrentTheme()
+        // Angular creates separate NewTheme instances for the multi-provider
+        // and the direct injection. Class identity covers both default paths.
+        const desktopTheme = currentTheme instanceof NewTheme
+        document.body.classList.toggle('tabby-desktop-theme', desktopTheme)
+        if (!currentTheme.followsColorScheme) {
             document.documentElement.style.cssText = this.rootElementStyleBackup
         }
 
@@ -78,8 +84,10 @@ export class ThemesService {
         const contrastPairs: string[][] = []
 
         vars['--body-bg'] = background.string()
-        if (this.findCurrentTheme().followsColorScheme) {
-            Object.assign(vars, tabStripColors(Color(theme.background).rgb().array(), Color(theme.foreground).rgb().array(), isDark))
+        if (currentTheme.followsColorScheme) {
+            Object.assign(vars, desktopTheme
+                ? desktopChromeColors(this.getColorSchemeMode())
+                : tabStripColors(Color(theme.background).rgb().array(), Color(theme.foreground).rgb().array(), isDark))
             vars['--bs-body-bg'] = theme.background
             vars['--bs-body-color'] = theme.foreground
             vars['--bs-black'] = theme.colors[0]
@@ -203,7 +211,7 @@ export class ThemesService {
     }
 
     /// @hidden
-    _getActiveColorScheme (): TerminalColorScheme {
+    private getColorSchemeMode (): PlatformTheme {
         let theme: PlatformTheme = 'dark'
         if (this.getConfigStoreOrDefaults().appearance.colorSchemeMode === 'light') {
             theme = 'light'
@@ -211,7 +219,12 @@ export class ThemesService {
             theme = this.platform.getTheme()
         }
 
-        if (theme === 'light') {
+        return theme
+    }
+
+    /// @hidden
+    _getActiveColorScheme (): TerminalColorScheme {
+        if (this.getColorSchemeMode() === 'light') {
             return this.getConfigStoreOrDefaults().terminal.lightColorScheme as TerminalColorScheme
         } else {
             return this.getConfigStoreOrDefaults().terminal.colorScheme as TerminalColorScheme

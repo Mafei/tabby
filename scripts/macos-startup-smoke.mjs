@@ -40,10 +40,11 @@ async function connectCDP (url) {
     }
 }
 
-export async function smokeMacStartup (app, scratch, label) {
+export async function smokeMacStartup (app, scratch, label, mode = 'dark') {
     const profile = path.join(scratch, `profile-${label}`)
     fs.mkdirSync(profile)
-    fs.writeFileSync(path.join(profile, 'config.yaml'), 'enableAnalytics: false\nenableAutomaticUpdates: false\nenableWelcomeTab: false\n')
+    assert(['dark', 'light'].includes(mode))
+    fs.writeFileSync(path.join(profile, 'config.yaml'), `enableAnalytics: false\nenableAutomaticUpdates: false\nenableWelcomeTab: false\nappearance:\n  colorSchemeMode: ${mode}\n`)
     const logPath = path.resolve(`dist/macos-arm64-smoke-${label}.log`)
     const log = fs.openSync(logPath, 'w')
     const port = await getPort()
@@ -104,10 +105,30 @@ export async function smokeMacStartup (app, scratch, label) {
         assert(!native.exceptionDetails, `Native startup smoke failed: ${JSON.stringify(native.exceptionDetails)}`)
         assert.equal(native.result.value.ptyOutput, 'TABBY_CI_PTY_READY')
         assert(!exited, 'App exited during native smoke')
+        // Exercise actual UI handlers through the normal macOS new-tab key.
+        // These are fresh local terminals; no remote hosts or saved profiles.
+        for (let attempt = 0; attempt < 3; attempt++) {
+            const count = await cdp.request('Runtime.evaluate', { expression: "document.querySelectorAll('tab-header').length", returnByValue: true })
+            if (count.result.value >= 3) { break }
+            await cdp.request('Input.dispatchKeyEvent', { type: 'keyDown', key: 't', code: 'KeyT', windowsVirtualKeyCode: 84, modifiers: 4 })
+            await cdp.request('Input.dispatchKeyEvent', { type: 'keyUp', key: 't', code: 'KeyT', windowsVirtualKeyCode: 84, modifiers: 4 })
+            await delay(600)
+        }
+        const chrome = await cdp.request('Runtime.evaluate', { expression: `(() => {
+            const describe = selector => { const node = document.querySelector(selector); if (!node) return null; const style = getComputedStyle(node); return { bg: style.backgroundColor, opacity: style.opacity, height: node.getBoundingClientRect().height } };
+            return { desktopTheme: document.body.classList.contains('tabby-desktop-theme'), tabs: document.querySelectorAll('tab-header').length,
+                active: describe('tab-header.active'), inactive: describe('tab-header:not(.active)'), strip: describe('.tab-bar') };
+        })()`, returnByValue: true })
+        assert(!chrome.exceptionDetails, 'Desktop UI evaluation failed')
+        const rendered = chrome.result.value
+        assert(rendered.desktopTheme && rendered.tabs >= 3, 'Actual standard desktop theme and new local tabs required')
+        assert.equal(rendered.active.bg, mode === 'dark' ? 'rgb(48, 59, 74)' : 'rgb(255, 255, 255)')
+        assert.equal(rendered.inactive.bg, mode === 'dark' ? 'rgb(13, 19, 32)' : 'rgb(202, 216, 233)')
+        assert.equal(rendered.active.height, 36)
         const screenshot = await cdp.request('Page.captureScreenshot', { format: 'png' })
         const screenshotFile = `macos-arm64-smoke-${label}.png`
         fs.writeFileSync(path.resolve('dist', screenshotFile), Buffer.from(screenshot.data, 'base64'))
-        return { passed: true, rendererBootstrapped: true, angularVersion: ready.angular, native: native.result.value, durationMs: Date.now() - start, screenshot: screenshotFile, credentialStorageAccessed: false, gatekeeperLaunchTest: false }
+        return { passed: true, rendererBootstrapped: true, angularVersion: ready.angular, mode, desktopChrome: rendered, native: native.result.value, durationMs: Date.now() - start, screenshot: screenshotFile, credentialStorageAccessed: false, gatekeeperLaunchTest: false, SSHGUIAcceptance: false }
     } finally {
         cdp?.close()
         if (!exited && child.pid) {

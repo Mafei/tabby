@@ -1,0 +1,103 @@
+{
+  "kind": "design_proposal_not_product",
+  "version": "1.1",
+  "sourceBaseline": "d83bf1b4904e439533d074aa6f7d3b48ebde5776",
+  "previousDesignHead": "2d5ac0975fc7001473c96a08759389a385093009",
+  "userApprovedChange": "Preserve overall palette; give inactive tabs a distinguishable opaque background",
+  "themes": {
+    "dark": {
+      "chrome": "#242B36",
+      "title": "#1C232D",
+      "active": "#303B4A",
+      "hover": "#2D3542",
+      "text": "#EEF2F7",
+      "secondary": "#AAB5C4",
+      "index": "#95A3B5",
+      "accent": "#86B9FF",
+      "onAccent": "#162334",
+      "unfocused": "#8EA1B8",
+      "divider": "#647B94",
+      "subtle": "#303A48",
+      "terminal": "#171717",
+      "terminalText": "#CACACA",
+      "success": "#83CBA8",
+      "warning": "#F0C479",
+      "danger": "#FFA3A3",
+      "warningBg": "#352D20",
+      "paper": "#111820",
+      "paperText": "#EEF2F7",
+      "inactive": "#0D1320",
+      "inactiveText": "#AAB5C4",
+      "inactiveIndex": "#95A3B5"
+    },
+    "light": {
+      "chrome": "#EEF1F5",
+      "title": "#E3E8EE",
+      "active": "#FFFFFF",
+      "hover": "#E2E8F0",
+      "text": "#1F2937",
+      "secondary": "#536174",
+      "index": "#5D6C80",
+      "accent": "#245E9C",
+      "onAccent": "#FFFFFF",
+      "unfocused": "#52667F",
+      "divider": "#7D8B9C",
+      "subtle": "#CCD4DF",
+      "terminal": "#FFFFFF",
+      "terminalText": "#4D4D4C",
+      "success": "#276749",
+      "warning": "#7A4B00",
+      "danger": "#A32132",
+      "warningBg": "#FFF2D7",
+      "paper": "#F7F9FC",
+      "paperText": "#1F2937",
+      "inactive": "#CAD8E9",
+      "inactiveText": "#1F2937",
+      "inactiveIndex": "#1F2937"
+    }
+  },
+  "metricsCSSPx": {
+    "grid": 4,
+    "tabStripHeight": 44,
+    "tabHeight": 36,
+    "tabWidthPreferred": 220,
+    "tabWidthMinimum": 144,
+    "tabGap": 4,
+    "tabPaddingX": 12,
+    "tabRadius": 6,
+    "selectedMarkerHeight": 2,
+    "controlTarget": 32,
+    "compactControlTarget": 28,
+    "iconSize": 16,
+    "paneHeaderHeight": 28,
+    "statusHeight": 24,
+    "terminalPadding": 16,
+    "splitLine": 1,
+    "splitHitArea": 10,
+    "focusRing": 2,
+    "UIBody": [
+      13,
+      20
+    ],
+    "UIActiveWeight": 600,
+    "UISecondary": [
+      12,
+      18
+    ],
+    "terminalDemo": [
+      16,
+      24
+    ],
+    "userTerminalFontPreserved": true
+  },
+  "terminalANSI": "preserve current per-profile scheme; no new ANSI palette",
+  "semantics": {
+    "selected": "inset shape + 2px marker + weight600",
+    "inactive": "opaque filled shape, no selected marker, weight400; existing text role used where needed",
+    "hover": "opaque existing hover fill + visible close action; no selected marker",
+    "keyboardFocus": "2px outer ring; inactive focused tab remains unselected",
+    "unfocused": "same selected and inactive fills + solid neutral selected marker; no whole-window alpha",
+    "paneFocus": "short 2px marker in pane header; terminal glyphs stay undimmed",
+    "status": "icon + label; never hue alone"
+  }
+}

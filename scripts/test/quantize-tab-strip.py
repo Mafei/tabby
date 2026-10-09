@@ -36,7 +36,7 @@ for state in report['states']:
     reduced = Image.new('RGB', source.size)
     reduced.putdata([quantize(pixel) for pixel in source.getdata()])
     reduced.save(root / (state['label'] + '-rgb565.png'))
-    if state['label'].endswith('-after-top') and not state['label'].startswith('custom'):
+    if any(state['label'].endswith(suffix) for suffix in ('-after-top', '-after-darwin-top', '-after-win32-top')) and not state['label'].startswith('custom'):
         def sample(part, lower=False):
             box = state[part]
             x = math.floor(box['x'] + box['width'] / 2)
@@ -47,12 +47,14 @@ for state in report['states']:
             return reduced.getpixel((x, y))
         strip = sample('spacer')
         inactive, active = sample('inactive', True), sample('active', True)
-        assert strip == inactive
+        assert contrast(strip, inactive) >= 1.25
         terminal_box = state['terminal']
         terminal = reduced.getpixel((math.floor(terminal_box['x'] + terminal_box['width'] - 10),
                                      math.floor(terminal_box['y'] + terminal_box['height'] - 10)))
-        assert contrast(strip, terminal) >= 1.5
-        assert contrast(active, inactive) >= 1.7
+        assert terminal == quantize(rgb(state['terminal']['bg']))
+        assert contrast(active, inactive) >= 1.35
+        marker = sample('marker')
+        assert contrast(marker, active) >= 3
         assert contrast(active, quantize(rgb(state['active']['fg']))) >= 4.5
         assert contrast(inactive, quantize(rgb(state['inactive']['fg']))) >= 4.5
         measurements.append({'state': state['label'], 'actualScreenshotPixels': True,
@@ -60,7 +62,7 @@ for state in report['states']:
                              'activeVsInactive': contrast(active, inactive),
                              'activeTextContrast': contrast(active, quantize(rgb(state['active']['fg']))),
                              'inactiveTextContrast': contrast(inactive, quantize(rgb(state['inactive']['fg'])))})
-assert len(measurements) == 2
+assert len(measurements) == 6
 for mode in ('dark', 'light'):
     sheet = Image.new('RGB', (1920, 1020), 'white')
     draw = ImageDraw.Draw(sheet)
@@ -71,4 +73,4 @@ for mode in ('dark', 'light'):
     sheet.save(root / f'{mode}-before-after-comparison.png')
 report['rgb565Simulation'] = {'realXrdp': False, 'method': 'truncate to R5/G6/B5, then bit replication to RGB888; no RDP codec/dither simulation', 'measurements': measurements}
 (root / 'report.json').write_text(json.dumps(report, indent=2) + '\n')
-print('PASS RGB565 actual screenshot pixels: dark/light surfaces and text; before/after comparison PNGs saved')
+print('PASS RGB565 actual screenshot pixels: three platform classes, dark/light surfaces, markers and text; before/after comparison PNGs saved')

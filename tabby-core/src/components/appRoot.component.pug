@@ -31,6 +31,8 @@ title-bar(
             && (config.store.appearance.tabsLocation == "top" || config.store.appearance.tabsLocation == "left") \
             && !config.store.showProfileTree')
             .tabs(
+                role='tablist',
+                [attr.aria-orientation]='hasVerticalTabs() ? "vertical" : "horizontal"',
                 cdkDropList,
                 [cdkDropListOrientation]='(config.store.appearance.tabsLocation == "top" || config.store.appearance.tabsLocation == "bottom") ? "horizontal" : "vertical"',
                 (cdkDropListDropped)='onTabsReordered($event)',
@@ -53,6 +55,7 @@ title-bar(
                     *ngFor='let button of leftToolbarButtons'
                 )
                     button.btn.btn-secondary.btn-tab-bar(
+                        [attr.aria-label]='button.label',
                         [ngbTooltip]='button.label',
                         (click)='button.run && button.run()',
                         [fastHtmlBind]='button.icon'
@@ -64,6 +67,7 @@ title-bar(
                     #activeTransfersDropdown='ngbDropdown'
                 )
                     button.btn.btn-secondary.btn-tab-bar(
+                        [attr.aria-label]='"File transfers"|translate',
                         [hidden]='activeTransfers.length == 0',
                         [ngbTooltip]='"File transfers"|translate',
                         ngbDropdownToggle
@@ -85,12 +89,14 @@ title-bar(
                     *ngFor='let button of rightToolbarButtons'
                 )
                     button.btn.btn-secondary.btn-tab-bar(
+                        [attr.aria-label]='button.label',
                         [ngbTooltip]='button.label',
                         (click)='button.run && button.run()',
                         [fastHtmlBind]='button.icon'
                     )
 
                 button.btn.btn-secondary.btn-tab-bar.btn-update(
+                    [attr.aria-label]='"Update available - Click to install"|translate',
                     *ngIf='updatesAvailable',
                     [ngbTooltip]='"Update available - Click to install"|translate',
                     (click)='updater.update()'

@@ -1,7 +1,7 @@
 name: Fork desktop checks and artifacts
 on:
   push:
-    branches: [master, feature/ssh-tmux-recovery, feature/linux-portable-rocky8-fonts]
+    branches: [master, feature/ssh-tmux-recovery, feature/linux-portable-rocky8-fonts, candidate/desktop-uiux-v1.1]
   pull_request:
     branches: [master, feature/ssh-tmux-recovery]
   workflow_dispatch:
@@ -21,7 +21,7 @@ env:
   TABBY_ARTIFACT_ONLY: '1'
 jobs:
   checks:
-    if: github.repository == 'Mafei/tabby'
+    if: github.repository == 'Mafei/tabby' && github.event.repository.visibility == 'public'
     runs-on: ubuntu-24.04
     timeout-minutes: 35
     steps:
@@ -29,6 +29,7 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -48,6 +49,8 @@ jobs:
       - run: yarn test:ssh-integration
         env:
           TABBY_TEST_TMUX: '1'
+      - run: yarn test:ui-chrome
+      - run: yarn test:ui-desktop
       - run: yarn test:unit
         if: always() && steps.install.outcome == 'success'
       - run: yarn test:macos-artifact
@@ -61,7 +64,7 @@ jobs:
       - run: yarn build
         if: always() && steps.typings.outcome == 'success'
   desktop:
-    if: github.repository == 'Mafei/tabby'
+    if: github.repository == 'Mafei/tabby' && github.event.repository.visibility == 'public'
     needs: checks
     timeout-minutes: 60
     strategy:
@@ -85,6 +88,7 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -145,9 +149,15 @@ jobs:
               [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile($zip, $source, $name) | Out-Null
             }
           } finally { $zip.Dispose() }
+      - name: Record exact source and test archive hashes
+        env:
+          TABBY_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: node scripts/write-desktop-artifact-receipt.mjs
       - uses: actions/upload-artifact@v4
+        # Every delivered package has an exact-source/byte-hash receipt.
+        # Packaging scripts keep publish: never and empty signing credentials.
         with:
-          name: tabby-${{ matrix.platform }}-${{ matrix.arch }}-${{ matrix.platform == 'macos' && 'adhoc' || 'unsigned' }}
+          name: tabby-${{ matrix.platform }}-${{ matrix.arch }}-${{ matrix.platform == 'macos' && 'adhoc' || 'unsigned' }}-${{ github.event.pull_request.head.sha || github.sha }}
           path: |
             dist/*.tar.gz
             dist/*.dmg
@@ -156,6 +166,8 @@ jobs:
             dist/macos-arm64-verification.json
             dist/macos-arm64-smoke-*.png
             dist/macos-arm64-smoke-*.log
+            dist/desktop-artifact-receipt.json
+            dist/desktop-artifacts.sha256
           if-no-files-found: error
           retention-days: 14
       - uses: actions/upload-artifact@v4
