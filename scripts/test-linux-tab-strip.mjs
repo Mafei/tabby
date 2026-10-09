@@ -301,7 +301,12 @@ try {
         console.log(`PASS actual tab CSS browser fixture: ${report.states.length} rendered states; default dark/light, geometry, hover, keyboard focus, vibrancy, custom CSS, unchanged terminal/external themes; shared macOS/Windows/Linux chrome; document blur observed: ${report.documentBlurObserved}`)
     } else { report.generatedOnly = true; console.log('Generated actual source fixture; no browser or physical/xrdp verification claimed') }
 } catch (error) {
-    report.passed = false; report.error = String(error); throw error
+    report.passed = false; report.error = String(error)
+    // This browser has only the generated public fixture and a fresh profile.
+    // Keep startup diagnostics visible even if an artifact cannot be downloaded.
+    const browserLog = path.join(output, 'browser.log')
+    if (fs.existsSync(browserLog)) { console.error('Fixture Chrome diagnostics:\n' + fs.readFileSync(browserLog, 'utf8').slice(-8000)) }
+    throw error
 } finally {
     fs.writeFileSync(path.join(output, 'report.json'), JSON.stringify(report, null, 2) + '\n')
     cdp?.close()

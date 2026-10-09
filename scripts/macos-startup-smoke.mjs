@@ -105,14 +105,32 @@ export async function smokeMacStartup (app, scratch, label, mode = 'dark') {
         assert(!native.exceptionDetails, `Native startup smoke failed: ${JSON.stringify(native.exceptionDetails)}`)
         assert.equal(native.result.value.ptyOutput, 'TABBY_CI_PTY_READY')
         assert(!exited, 'App exited during native smoke')
-        // Exercise actual UI handlers through the normal macOS new-tab key.
+        // Click the actual Angular toolbar control. Native menu accelerators
+        // can consume CDP-injected Cmd-T before it reaches the renderer.
         // These are fresh local terminals; no remote hosts or saved profiles.
+        await cdp.request('Page.bringToFront')
         for (let attempt = 0; attempt < 3; attempt++) {
             const count = await cdp.request('Runtime.evaluate', { expression: "document.querySelectorAll('tab-header').length", returnByValue: true })
             if (count.result.value >= 3) { break }
-            await cdp.request('Input.dispatchKeyEvent', { type: 'keyDown', key: 't', code: 'KeyT', windowsVirtualKeyCode: 84, modifiers: 4 })
-            await cdp.request('Input.dispatchKeyEvent', { type: 'keyUp', key: 't', code: 'KeyT', windowsVirtualKeyCode: 84, modifiers: 4 })
-            await delay(600)
+            const button = await cdp.request('Runtime.evaluate', { expression: `(() => {
+                const node = document.querySelector('.tab-bar button[aria-label="New terminal"]');
+                if (!node) return null;
+                const rect = node.getBoundingClientRect();
+                return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2, width: rect.width, height: rect.height };
+            })()`, returnByValue: true })
+            const bounds = button.result.value
+            assert(bounds?.width > 0 && bounds?.height > 0, 'Actual New terminal toolbar control must be visible')
+            for (const type of ['mousePressed', 'mouseReleased']) {
+                await cdp.request('Input.dispatchMouseEvent', { type, x: bounds.x, y: bounds.y, button: 'left', clickCount: 1 })
+            }
+            let changed = false
+            const deadline = Date.now() + 10000
+            while (Date.now() < deadline) {
+                const next = await cdp.request('Runtime.evaluate', { expression: "document.querySelectorAll('tab-header').length", returnByValue: true })
+                if (next.result.value > count.result.value) { changed = true; break }
+                await delay(200)
+            }
+            assert(changed, 'Actual New terminal toolbar click must open a local tab within 10 seconds')
         }
         const chrome = await cdp.request('Runtime.evaluate', { expression: `(() => {
             const describe = selector => { const node = document.querySelector(selector); if (!node) return null; const style = getComputedStyle(node); return { bg: style.backgroundColor, opacity: style.opacity, height: node.getBoundingClientRect().height } };
@@ -121,6 +139,7 @@ export async function smokeMacStartup (app, scratch, label, mode = 'dark') {
         })()`, returnByValue: true })
         assert(!chrome.exceptionDetails, 'Desktop UI evaluation failed')
         const rendered = chrome.result.value
+        console.info('Actual desktop chrome state:', JSON.stringify({ label, mode, ...rendered }))
         assert(rendered.desktopTheme && rendered.tabs >= 3, 'Actual standard desktop theme and new local tabs required')
         assert.equal(rendered.active.bg, mode === 'dark' ? 'rgb(48, 59, 74)' : 'rgb(255, 255, 255)')
         assert.equal(rendered.inactive.bg, mode === 'dark' ? 'rgb(13, 19, 32)' : 'rgb(202, 216, 233)')
@@ -128,7 +147,17 @@ export async function smokeMacStartup (app, scratch, label, mode = 'dark') {
         const screenshot = await cdp.request('Page.captureScreenshot', { format: 'png' })
         const screenshotFile = `macos-arm64-smoke-${label}.png`
         fs.writeFileSync(path.resolve('dist', screenshotFile), Buffer.from(screenshot.data, 'base64'))
-        return { passed: true, rendererBootstrapped: true, angularVersion: ready.angular, mode, desktopChrome: rendered, native: native.result.value, durationMs: Date.now() - start, screenshot: screenshotFile, credentialStorageAccessed: false, gatekeeperLaunchTest: false, SSHGUIAcceptance: false }
+        return { passed: true, rendererBootstrapped: true, angularVersion: ready.angular, mode, desktopChrome: rendered, tabCreation: 'actual Angular toolbar via CDP mouse input', native: native.result.value, durationMs: Date.now() - start, screenshot: screenshotFile, credentialStorageAccessed: false, gatekeeperLaunchTest: false, SSHGUIAcceptance: false }
+    } catch (error) {
+        if (cdp) {
+            try {
+                const state = await cdp.request('Runtime.evaluate', { expression: `({ desktopTheme: document.body.classList.contains('tabby-desktop-theme'), tabs: document.querySelectorAll('tab-header').length, newTerminalControl: !!document.querySelector('.tab-bar button[aria-label="New terminal"]') })`, returnByValue: true })
+                console.error('Fresh-profile desktop smoke diagnostics:', JSON.stringify(state.result?.value))
+                const screenshot = await cdp.request('Page.captureScreenshot', { format: 'png' })
+                fs.writeFileSync(path.resolve('dist', `macos-arm64-smoke-${label}-failed.png`), Buffer.from(screenshot.data, 'base64'))
+            } catch { /* Preserve the original failure if diagnostics also fail. */ }
+        }
+        throw error
     } finally {
         cdp?.close()
         if (!exited && child.pid) {
